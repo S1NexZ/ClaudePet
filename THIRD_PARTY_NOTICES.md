@@ -17,6 +17,9 @@ which keep their own licenses and rights.
 - It is bundled into the application's WSL bridge (`resources/bridge/bridge.cjs`) and is **not** MIT-licensed.
 - Claude Pet uses it to resume sessions (fallback path) and to read plan usage limits (an experimental SDK method).
 
+## GSAP
+- GSAP 3 (GreenSock) — bundled into the renderer for the hover and state animations. It is **not** MIT-licensed: it is used under the GreenSock Standard "no charge" license (https://gsap.com/standard-license), which allows free use, including commercial. Only the core engine is used (no premium plugins).
+
 ## Electron and Chromium
 - Electron 33 — MIT. Chromium and its dependencies — see `LICENSES.chromium.html` and `LICENSE.electron.txt`, installed next to the application.
 

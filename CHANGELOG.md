@@ -4,6 +4,8 @@
 
 ## Unreleased
 
+- Chinese (中文) interface language; compact settings split into five tabs.
+- Hover and state animations are driven by GSAP (interruptible timelines: they turn around mid-way instead of jumping).
 - The status chip rests as a dot and a word next to the pet and slides out on hover.
 - The usage ring is a small, quiet arc by the pet that grows and shows its number on hover.
 - Smoother hover animations (no window resizing during the slide-out, no spring overshoot).

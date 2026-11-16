@@ -78,5 +78,8 @@
   "repository": {
     "type": "git",
     "url": "https://github.com/S1NexZ/ClaudePet.git"
+  },
+  "dependencies": {
+    "gsap": "^3.15.1"
   }
 }

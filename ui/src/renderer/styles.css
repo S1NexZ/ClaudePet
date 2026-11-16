@@ -22,26 +22,19 @@ html, body { width: 100%; height: 100%; background: transparent; overflow: hidde
 body { font-family: "Segoe UI", "Microsoft YaHei UI", system-ui, sans-serif; color: var(--text); }
 #stage { width: 100%; height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: flex-end; gap: 6px; padding-bottom: 8px; }
 #sprite { width: 100%; height: 100%; display: block; -webkit-app-region: drag; transform-origin: 50% 100%; }
-/* a calm pet breathes: a slow, tiny rise and settle */
-#sprite.breathe { animation: breathe 3.6s ease-in-out infinite; }
-@keyframes breathe { 0%, 100% { transform: translateY(0) scale(1, 1); } 50% { transform: translateY(-1.5px) scale(1.012, 1.02); } }
+/* the status chip: motion by GSAP (motion.ts); --bgo is the opacity of its glass pill (::before) */
 #chip {
-  display: flex; align-items: center; gap: 8px; max-width: 400px; padding: 7px 14px;
-  background: var(--glass); border: 1px solid var(--glass-line); border-radius: 18px;
-  font-family: "Source Serif 4", Georgia, "Microsoft YaHei UI", "Times New Roman", serif; font-size: 14px; white-space: nowrap;
+  position: relative; z-index: 2; --bgo: 0;
+  display: flex; align-items: center; gap: 8px; max-width: 400px; padding: 7px 12px;
+  border: 1px solid transparent; border-radius: 18px;
+  font-family: "Source Serif 4", Georgia, "Microsoft YaHei UI", "Times New Roman", serif; font-size: 13.5px; white-space: nowrap;
 }
-#label { transition: font-size .3s, opacity .3s; }
-#detail { max-width: 260px; transition: max-width .38s cubic-bezier(.25, .8, .3, 1), opacity .25s .05s; }
-#chip { position: relative; z-index: 2; transition: transform .38s cubic-bezier(.25, .8, .3, 1), background-color .3s, border-color .3s, padding .3s, gap .3s; }
-#chip.rest { transform: translateY(-47px); background: transparent; border-color: transparent; padding: 4px 8px; gap: 6px; }
-#chip.rest #label { font-size: 12.5px; opacity: .72; }
-#chip.rest #detail { max-width: 0; opacity: 0; transition-delay: 0s; }
+#chip::before { content: ""; position: absolute; inset: 0; z-index: -1; border-radius: inherit; background: var(--glass); border: 1px solid var(--glass-line); opacity: var(--bgo); }
+#chip.attention::before { border-color: color-mix(in srgb, var(--alert) 55%, transparent); }
 #chip.rest #dot { box-shadow: 0 0 6px color-mix(in srgb, var(--teal) 55%, transparent); }
 #chip.rest.attention #dot { box-shadow: 0 0 8px var(--alert); }
-@media (prefers-reduced-motion: reduce) { #chip, #label, #detail { transition: none !important; } }
 #dot { width: 8px; height: 8px; border-radius: 50%; background: var(--teal); flex: none; transition: background .2s; }
 #detail { color: var(--muted); font-size: 12.5px; overflow: hidden; text-overflow: ellipsis; }
-#chip.attention { border-color: color-mix(in srgb, var(--alert) 55%, transparent); }
 #chip.attention #dot { background: var(--alert); box-shadow: 0 0 8px var(--alert); }
 #pill, #dock-pill { display: flex; align-items: center; background: var(--glass); border: 1px solid var(--glass-line); border-radius: 22px; padding: 4px 6px; }
 #pill button, #dock-pill button { all: unset; display: grid; place-items: center; width: 40px; height: 36px; border-radius: 16px; color: var(--text); cursor: pointer; }
@@ -52,14 +45,7 @@ body { font-family: "Segoe UI", "Microsoft YaHei UI", system-ui, sans-serif; col
 [hidden] { display: none !important; }
 /* ---- hover dock: under the pet's feet a dark shadow rests; on hover it grows into the button pill and the icons rise out of it ---- */
 #dock { position: relative; flex: none; height: 46px; margin-top: -6px; display: flex; justify-content: center; align-items: flex-start; }
-#dock-pill { transform-origin: 50% 0; transition: transform .5s cubic-bezier(.25, .8, .3, 1), background-color .3s, border-color .3s, filter .3s; }
-#dock-pill button, #dock-pill .sep { transition: opacity .24s .1s, transform .34s .08s cubic-bezier(.25, .8, .3, 1); }
-#dock-pill button:nth-of-type(2) { transition-delay: .14s; }
-#dock-pill button:nth-of-type(3) { transition-delay: .18s; }
-#dock-pill.rest { transform: translateY(2px) scale(.36, .16); background: rgba(0, 0, 0, .55); border-color: transparent; filter: blur(.8px); pointer-events: none; }
-#dock-pill.rest button, #dock-pill.rest .sep { opacity: 0; transform: translateY(-10px) scale(.5); transition-delay: 0s; transition-duration: .12s; }
-@media (prefers-reduced-motion: reduce) { #dock-pill, #dock-pill button, #dock-pill .sep { transition: none !important; } }
-#compose { display: flex; align-items: center; }
+#dock-pill.rest { pointer-events: none; }
 #compose { width: 384px; gap: 2px; }
 #input {
   flex: 1; min-width: 0; padding: 0 8px; height: 36px; color: var(--text); font: 14px "Segoe UI", "Microsoft YaHei UI", system-ui, sans-serif;
@@ -143,15 +129,10 @@ body { font-family: "Segoe UI", "Microsoft YaHei UI", system-ui, sans-serif; col
 /* ---- subscription limits: ring next to the pet + compact panel ---- */
 #sprite-wrap { position: relative; width: calc(115px * var(--ps, 1)); height: calc(125px * var(--ps, 1)); flex: none; }
 #usage-ring {
-  all: unset; position: absolute; right: 4px; top: 16px; width: 26px; height: 26px; transform: scale(.62); transform-origin: 50% 50%; display: grid; place-items: center;
-  border-radius: 50%; background: transparent; cursor: pointer; opacity: .6; transition: opacity .3s, background-color .2s, transform .35s cubic-bezier(.25, .8, .3, 1); -webkit-app-region: no-drag; --ring: var(--teal);
+  all: unset; position: absolute; right: 4px; top: 16px; width: 26px; height: 26px; display: grid; place-items: center;
+  border-radius: 50%; background: transparent; cursor: pointer; transition: background-color .2s; -webkit-app-region: no-drag; --ring: var(--teal);
 }
-#usage-ring:hover, #usage-ring[aria-expanded="true"], #stage.peek #usage-ring, #usage-ring[data-level="high"], #usage-ring[data-level="full"] { opacity: 1; }
-#usage-ring:hover, #usage-ring[aria-expanded="true"], #stage.peek #usage-ring, #usage-ring[data-level="high"], #usage-ring[data-level="full"] { transform: scale(1); }
 #usage-ring:hover { background: var(--glass); }
-#usage-ring-text { transition: opacity .25s; }
-#usage-ring:not(:hover):not([aria-expanded="true"]):not([data-level="high"]):not([data-level="full"]) #usage-ring-text { opacity: 0; }
-#stage.peek #usage-ring #usage-ring-text { opacity: 1 !important; }
 #usage-ring:focus-visible { outline: 2px solid var(--teal); }
 #usage-ring svg { position: absolute; inset: 0; transform: rotate(-90deg); }
 #usage-ring circle { fill: none; stroke-width: 2.6; }

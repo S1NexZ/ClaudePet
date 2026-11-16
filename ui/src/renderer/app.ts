@@ -13,6 +13,7 @@ import { createSettingsPanel } from './settingsPanel.js';
 import { createModelsTab, type ModelsHost } from './modelsTab.js';
 import { clampScale } from '../petScale.js';
 import { localizeHtml } from './htmlText.js';
+import { createMotion } from './motion.js';
 import { removeLightFringe } from '../sprite/fringe.js';
 import { dominantHue, type Appearance } from '../appearance.js';
 import type { AppCommand, BridgeMessage, ChatItem, Session, Snapshot, UsageInfo, PermissionPolicy } from '../../../shared/src/types.js';
@@ -503,9 +504,13 @@ async function main() {
 
   // ---- frame loop ----
   let lastKey = '', lastText = '', lastNotified = '';
+  let ringHover = false;
   // Smooth motion: frames cross-fade into each other (a state change fades a little longer and gets a soft "pop"),
   // and a calm pet breathes. All of it is skipped when the OS asks for reduced motion.
   const reduceMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false;
+  const motion = createMotion({ sprite, dockPill, chip: $('chip'), ring: usageRing }, reduceMotion);
+  usageRing.addEventListener('mouseenter', () => { ringHover = true; });
+  usageRing.addEventListener('mouseleave', () => { ringHover = false; });
   const FRAME_FADE_MS = 100, STATE_FADE_MS = 190;
   let curRow = -1, curCol = -1, prevRow = -1, prevCol = -1, fadeStart = 0, fadeMs = 0, fading = false, lastAtlasV = -1, lastSizeV = -1, drawnFade = 1;
   const smooth = (p: number) => p * p * (3 - 2 * p);
@@ -513,11 +518,6 @@ async function main() {
     ctx.globalAlpha = alpha;
     ctx.drawImage(atlas, c * cw, r * ch, cw, ch, 0, 0, sprite.width, sprite.height);
     ctx.globalAlpha = 1;
-  };
-  const pop = () => {
-    if (reduceMotion || !sprite.animate) return;
-    sprite.animate([{ transform: 'scale(1,1)' }, { transform: 'scale(1.045,0.955)', offset: 0.35 }, { transform: 'scale(0.985,1.02)', offset: 0.7 }, { transform: 'scale(1,1)' }],
-      { duration: 340, easing: 'ease-out' });
   };
   const tick = (t: number) => {
     const snap = eff();
@@ -528,14 +528,16 @@ async function main() {
     const awake = peek || settingsPanel.isOpen() || usageOpen || dockPill.matches(':focus-within');
     dockPill.classList.toggle('rest', !awake);
     $('chip').classList.toggle('rest', !awake);
-    $('stage').classList.toggle('peek', awake);
+    motion.setAwake(awake);
+    const lvl = usageRing.getAttribute('data-level');
+    motion.setRing(awake || ringHover || lvl === 'high' || lvl === 'full');
     const { row, col } = anim.frame(t);
     if (row !== curRow || col !== curCol) {
       const rowChanged = curRow >= 0 && row !== curRow;
       prevRow = curRow; prevCol = curCol; curRow = row; curCol = col;
       fading = prevRow >= 0 && !reduceMotion && !(movedAt && rowChanged); // dragging flips rows constantly: no fade there
       fadeStart = t; fadeMs = rowChanged ? STATE_FADE_MS : FRAME_FADE_MS;
-      if (rowChanged && !movedAt) pop();
+      if (rowChanged && !movedAt) motion.pop();
     }
     const p = fading ? Math.min(1, (t - fadeStart) / fadeMs) : 1;
     if (p >= 1) fading = false;
@@ -544,7 +546,7 @@ async function main() {
       ctx.clearRect(0, 0, sprite.width, sprite.height);
       if (p < 1 && prevRow >= 0) { draw(prevRow, prevCol, 1); draw(curRow, curCol, smooth(p)); } else draw(curRow, curCol, 1);
     }
-    sprite.classList.toggle('breathe', !reduceMotion && !movedAt && (v.state === 'idle' || v.state === 'sleeping'));
+    motion.setBreathing(!movedAt && (v.state === 'idle' || v.state === 'sleeping'));
     const text = `${v.label}|${v.detail}|${v.attention}`;
     if (text !== lastText) {
       lastText = text;
