@@ -4,6 +4,8 @@
 
 ## Unreleased
 
+- The window no longer resizes at all (a constant transparent, click-through stage): no more stale "second pet" frame when a panel opens. Settings have a fixed height so switching tabs does not jump.
+- Usage ring number is centered.
 - The usage ring lives in the status chip: a small arc next to the status dot that settles at the end of the row when the chip unfolds.
 - The window has a constant width and the UI hangs from its bottom edge, so opening or closing panels never moves or shakes the pet.
 - Panels (settings, chat, sessions, limits, notices) slide out of the pet and fold back with GSAP; they open upwards so the pet never moves.

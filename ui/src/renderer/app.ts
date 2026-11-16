@@ -306,16 +306,6 @@ async function main() {
     const key = rectsKey(rects);
     if (key !== rectsSent) { rectsSent = key; host.rects(rects); }
   };
-  // size the window to the visible content (pet + chip + panels + pill); main keeps the pet's spot fixed
-  let sizeSent = '';
-  const fitWindow = () => {
-    const kids = Array.from($('stage').children).filter((e) => !(e as HTMLElement).hidden) as HTMLElement[];
-    // the width never changes (the window is a transparent, click-through strip): only the height follows the content
-    const w = 424;
-    const h = kids.reduce((a, e) => a + e.offsetHeight, 0) + 6 * (kids.length - 1) + 16;
-    const key = `${w}x${h}`;
-    if (key !== sizeSent) { sizeSent = key; host.resize(w, h); }
-  };
   // the pet runs the way the window is being dragged (the OS moves it; main reports each step)
   let movedAt = 0;
   host.onMoving((dx) => { movedAt = performance.now(); anim.setDrag(dx > 0 ? 'right' : 'left'); });
@@ -577,7 +567,6 @@ async function main() {
     renderPanel(snap);
     renderChatMenu();
     renderChat(chatS);
-    fitWindow();
     reportRects();
     reportHover();
     requestAnimationFrame(tick);

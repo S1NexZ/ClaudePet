@@ -11,7 +11,7 @@ import { installModelFromZip, installModelFromDir, removeModel, scanPetFolder, M
 import { loadSettings, saveSettings } from './settings.js';
 import { wslBridgeArgs, splitLines } from './bridgeLaunch.js';
 import { overAny, type Rect } from './hitTest.js';
-import { placeWindow, restoreAnchor, type Anchor } from './placement.js';
+import { placeStage, restoreAnchor, type Anchor } from './placement.js';
 import { terminalCommand } from './terminal.js';
 import { toWslPath } from '../../daemon/src/paths.js';
 import { cleanAppearance } from './appearance.js';
@@ -20,7 +20,8 @@ import { PERMISSION_POLICIES, type PermissionPolicy } from '../../shared/src/typ
 import { L, setLang, getLang, resolveLang, LANG_PREFS, type LangPref } from '../../shared/src/i18n.js';
 
 /** Initial size; the renderer then sizes the window to its content (see pet:resize). */
-const W0 = 240, H0 = 240, MAX_W = 424, MAX_H = 860;
+/** the window never resizes: a transparent, click-through stage of this size, the pet stands at its bottom */
+const STAGE_W = 424, STAGE_H = 780;
 // Packaged: everything ships under resources/. Dev: bridge is built into <repo>/build, bundled pet models live in <repo>/models.
 const res = (...p: string[]) => (app.isPackaged ? join(process.resourcesPath, ...p) : join(__dirname, '../..', ...(p[0] === 'models' ? p : ['build', ...p])));
 const bridgePath = process.env.CLAUDE_PET_BRIDGE ?? res('bridge', 'bridge.cjs');
@@ -65,7 +66,7 @@ if (primary) app.whenReady().then(async () => {
   const pet = await loadPet(process.env.CLAUDE_PET_SPRITE ?? chosen!.dir);
   const initialAnchor = startAnchor();
   const win = new BrowserWindow({
-    ...placeWindow(initialAnchor, W0, H0, screen.getDisplayNearestPoint({ x: Math.round(initialAnchor.cx), y: Math.round(initialAnchor.bottom - 1) }).workArea), frame: false, transparent: true, resizable: false,
+    ...(() => { const wa = screen.getDisplayNearestPoint({ x: Math.round(initialAnchor.cx), y: Math.round(initialAnchor.bottom - 1) }).workArea; return placeStage(initialAnchor, STAGE_W, Math.min(STAGE_H, wa.height), wa); })(), frame: false, transparent: true, resizable: false,
     alwaysOnTop: true, skipTaskbar: true, hasShadow: false, show: false, maximizable: false, minimizable: false, fullscreenable: false,
     webPreferences: { preload: join(__dirname, 'preload.cjs'), contextIsolation: true, sandbox: true },
   });
@@ -338,26 +339,15 @@ if (primary) app.whenReady().then(async () => {
   // While it moves, the renderer is told the direction so the pet can run that way.
   let lastX = win.getBounds().x, moveSteps = 0, ownMoveUntil = 0;
   let dragging = false, dragIdle: NodeJS.Timeout | null = null;
-  let pendingSize: { w: number; h: number } | null = null;
   const anchorOf = (): Anchor => { const b = win.getBounds(); return { cx: b.x + b.width / 2, bottom: b.y + b.height }; };
   let anchor: Anchor = initialAnchor; // where the pet stands; only the user's drags change it
-  const applySize = (width: number, height: number) => {
-    const b = win.getBounds();
-    if (b.width === width && b.height === height) return;
-    const wa = screen.getDisplayNearestPoint({ x: Math.round(anchor.cx), y: Math.round(anchor.bottom - 1) }).workArea;
-    ownMoveUntil = Date.now() + 150;
-    win.setBounds(placeWindow(anchor, width, height, wa));
-    lastX = win.getBounds().x;
-    if (process.env.CLAUDE_PET_DEBUG) log(`resized bounds=${JSON.stringify(win.getBounds())}`);
-  };
-  // the drag is over: remember where the pet stands and apply the resize that was held back meanwhile
+  // the drag is over: remember where the pet stands
   const endDrag = () => {
     if (dragIdle) { clearTimeout(dragIdle); dragIdle = null; }
     const wasDragging = dragging;
     dragging = false;
     anchor = anchorOf();
     if (wasDragging) try { writeFileSync(userFile('window.json'), JSON.stringify(anchor)); } catch { /* non-fatal */ }
-    if (pendingSize) { const p = pendingSize; pendingSize = null; applySize(p.w, p.h); }
   };
   win.on('move', () => {
     const x = win.getBounds().x, dx = x - lastX;
@@ -379,14 +369,8 @@ if (primary) app.whenReady().then(async () => {
     endDrag();
     if (process.env.CLAUDE_PET_DEBUG) log(`anchor=${JSON.stringify(anchor)}`);
   });
-  // the window hugs its content; it grows upwards from where the pet stands and stays on screen.
-  // While the user drags, the OS owns the window position: a resize waits until the drop.
-  ipcMain.on('pet:resize', (_e, w: number, h: number) => {
-    const width = Math.min(MAX_W, Math.max(120, Math.ceil(Number(w) || 0)));
-    const height = Math.min(MAX_H, Math.max(120, Math.ceil(Number(h) || 0)));
-    if (dragging) { pendingSize = { w: width, h: height }; return; }
-    applySize(width, height);
-  });
+  // the window has a constant size (see STAGE_W/STAGE_H); older renderers may still ask to resize: ignored
+  ipcMain.on('pet:resize', () => { /* no-op */ });
   // right-click on a drag region would open Windows' system menu: show ours instead
   win.on('system-context-menu', (e) => { e.preventDefault(); trayMenu().popup({ window: win }); });
   ipcMain.on('pet:notify', (_e, title: string, body: string) => {

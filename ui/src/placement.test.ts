@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { placeWindow, restoreAnchor } from './placement.js';
+import { placeWindow, placeStage, restoreAnchor } from './placement.js';
 
 const wa = { x: 0, y: 0, width: 1600, height: 900 };
 
@@ -27,5 +27,15 @@ describe('restoreAnchor', () => {
   it('garbage gives null', () => {
     expect(restoreAnchor('{nope')).toBeNull();
     expect(restoreAnchor('{"cx":"a","bottom":1}')).toBeNull();
+  });
+});
+
+describe('placeStage', () => {
+  const wa = { x: 0, y: 0, width: 1920, height: 1040 };
+  it('puts the stage bottom centre on the anchor and lets the top stick out of the screen', () => {
+    expect(placeStage({ cx: 800, bottom: 700 }, 424, 780, wa)).toEqual({ x: 588, y: -80, width: 424, height: 780 });
+  });
+  it('keeps the pet on screen: the anchor is pulled inside the work area', () => {
+    expect(placeStage({ cx: 5, bottom: 2000 }, 424, 780, wa)).toEqual({ x: -152, y: 260, width: 424, height: 780 });
   });
 });
