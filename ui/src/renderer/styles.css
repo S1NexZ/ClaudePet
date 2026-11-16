@@ -285,3 +285,4 @@ body { font-family: "Segoe UI", "Microsoft YaHei UI", system-ui, sans-serif; col
 .row.group .chev { flex: none; width: 7px; height: 7px; border-right: 1.6px solid currentColor; border-bottom: 1.6px solid currentColor; transform: translateY(-2px) rotate(45deg); transition: transform .2s ease; margin-right: 4px; }
 .row.group.open .chev { transform: translateY(1px) rotate(-135deg); }
 .row.group:hover { color: var(--text); }
+.c-code { display: block; margin: 4px 0 6px; padding: 6px 8px; border-radius: 8px; background: var(--hover); font: 11px/1.4 ui-monospace, Consolas, monospace; overflow-wrap: anywhere; user-select: text; }

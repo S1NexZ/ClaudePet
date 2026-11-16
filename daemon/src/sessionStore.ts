@@ -89,6 +89,13 @@ export class SessionStore {
     if (s && source) s.source = source;
   }
 
+  /** the session runs under a pseudoterminal wrapper: the pet can type into it */
+  setPty(id: string, pty: string): boolean {
+    const s = this.sessions.get(id);
+    if (!s || s.pty === pty) return false;
+    s.pty = pty; return true;
+  }
+
   clearPty(id: string): void {
     const s = this.sessions.get(id);
     if (s) delete s.pty;

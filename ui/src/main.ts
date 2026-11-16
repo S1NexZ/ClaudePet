@@ -338,7 +338,7 @@ if (primary) app.whenReady().then(async () => {
   const connectionsState = async () => {
     const hosts = await Promise.all([...wslHosts.values()].map(hostRowState));
     return {
-      answerPermissions: settings.answerPermissions, helper: !!helperPath,
+      answerPermissions: settings.answerPermissions, helper: !!helperPath, helperPath,
       windows: { ...winHost.state(settings.answerPermissions), port: winHost.port, up: winUp },
       wsl: hosts.find((x) => x.id === 'wsl')!,
       others: hosts.filter((x) => x.id !== 'wsl'),

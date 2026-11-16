@@ -10,6 +10,8 @@ export interface HookServerOpts {
   token: string;
   onEvent(e: HookPayload): void;
   mailbox: Mailbox;
+  /** a waiter said which pseudoterminal pipe its claude runs on (`pet-helper pty`); only well-formed pipe names of ours are passed on */
+  onPty?(sessionId: string, pipe: string): void;
   /** answers a PermissionRequest hook; null = no opinion (Claude Code then shows its normal dialog). Absent = never answer. */
   onPermission?(e: HookPayload): Promise<'allow' | 'deny' | null>;
   /** how long one mailbox long-poll may last (the hook re-polls) */
@@ -24,6 +26,9 @@ const SAFE_ID = /^[A-Za-z0-9_-]{1,100}$/;
  *   POST /hook/<token>/<Event>      body: the hook's JSON            -> 200 (PermissionRequest: the decision JSON, or empty)
  *   GET  /mailbox/<token>/<session> long-poll                        -> 200 text (a message) | 204 (none yet) | 409 (already waiting)
  */
+/** Named pipes of `pet-helper pty` wrappers: \\.\pipe\claude-pet-<pid> */
+export const PIPE_NAME = /^\\\\\.\\pipe\\claude-pet-\d{1,10}$/;
+
 export async function startHookServer(o: HookServerOpts): Promise<{ port: number; close(): Promise<void> }> {
   const server = createServer((req, res) => {
     const url = new URL(req.url ?? '/', 'http://127.0.0.1');
@@ -33,6 +38,8 @@ export async function startHookServer(o: HookServerOpts): Promise<{ port: number
     if (kind === 'mailbox' && req.method === 'GET') {
       const sid = decodeURIComponent(rest);
       if (!SAFE_ID.test(sid)) { res.writeHead(400).end(); return; }
+      const pty = url.searchParams.get('pty');
+      if (pty && PIPE_NAME.test(pty)) o.onPty?.(sid, pty);
       if (o.mailbox.hasWaiter(sid)) { res.writeHead(409).end(); return; }
       let done = false;
       res.on('close', () => { if (!done) o.mailbox.cancel(sid); });

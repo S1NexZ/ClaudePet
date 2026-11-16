@@ -46,6 +46,14 @@ describe('hook http receiver', () => {
     const r2 = await post(`${b.base}/hook/tok/PermissionRequest`, { session_id: 's1' });
     expect([r2.status, await r2.text()]).toEqual([200, '']);
   });
+  it('passes the pty pipe of a wrapped session on, but only a well-formed pipe of ours', async () => {
+    const seen: Array<[string, string]> = [];
+    const { base } = await boot({ onPty: (sid: string, pipe: string) => seen.push([sid, pipe]) });
+    await fetch(`${base}/mailbox/tok/s1?pty=${encodeURIComponent('\\\\.\\pipe\\claude-pet-4242')}`);
+    await fetch(`${base}/mailbox/tok/s2?pty=${encodeURIComponent('\\\\.\\pipe\\evil')}`);
+    await fetch(`${base}/mailbox/tok/s3?pty=${encodeURIComponent('/tmp/x.sock')}`);
+    expect(seen).toEqual([['s1', '\\\\.\\pipe\\claude-pet-4242']]);
+  });
   it('mailbox long-poll: gets a message sent while waiting; 204 on timeout; 409 for a second waiter', async () => {
     const { base, mailbox } = await boot();
     const first = fetch(`${base}/mailbox/tok/s1`);

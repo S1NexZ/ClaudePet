@@ -287,7 +287,7 @@ async function main() {
 
   // ---- settings panel: appearance colors + permissions + pet model manager ----
   let permissions: PermissionPolicy = cfg.permissions ?? 'ask';
-  const connectionsTab = createConnectionsTab(host.connections);
+  const connectionsTab = createConnectionsTab({ ...host.connections, copy: (t: string) => host.copyText(t) });
   const modelsTab = createModelsTab(host, { show: (d) => loadSprite(d as typeof pet) });
   const settingsPanel = createSettingsPanel($('settings'), {
     save: (a) => host.setAppearance(a), sprite,

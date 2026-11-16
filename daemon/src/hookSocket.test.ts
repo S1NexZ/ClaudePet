@@ -15,7 +15,7 @@ afterEach(async () => { for (const c of closers.splice(0)) await c(); });
 function runHook(path: string, input: string) {
   return new Promise<{ code: number | null; stdout: string; ms: number }>((resolve) => {
     const t0 = Date.now();
-    const p = spawn(process.execPath, [HOOK], { env: { ...process.env, CLAUDE_PET_SOCK: path } });
+    const p = spawn(process.execPath, [HOOK], { env: { ...process.env, PET_PTY_SOCK: '', CLAUDE_PET_SOCK: path } });
     let stdout = '';
     p.stdout.on('data', (d) => (stdout += d));
     p.on('close', (code) => resolve({ code, stdout, ms: Date.now() - t0 }));

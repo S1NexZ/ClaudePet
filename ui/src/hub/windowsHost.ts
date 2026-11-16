@@ -62,6 +62,10 @@ export function createWindowsHost(o: WindowsHostOpts) {
   let server: { port: number; close(): Promise<void> } | null = null;
   const adopted = new Set<string>();
   let lastAdopt = 0;
+  /** `pet-helper pty` wrappers announced by their waiters before their session was known: session id -> pipe, applied once it is */
+  const pendingPtys = new Map<string, string>();
+  const attachPty = (sid: string, pipe: string) => { if (store.get(sid)) { if (store.setPty(sid, pipe)) bridge.snapshot(); } else pendingPtys.set(sid, pipe); };
+  const flushPtys = () => { for (const [sid, pipe] of pendingPtys) if (store.get(sid)) { pendingPtys.delete(sid); if (store.setPty(sid, pipe)) bridge.snapshot(); } };
   /** sessions seen only in transcripts (the pet started later, or hooks are not connected there): shown as idle until a hook arrives */
   const adopt = async (now: number) => {
     for (const r of await findRunning(join(o.claudeHome, 'projects'), now, 10 * 60_000)) {
@@ -83,7 +87,7 @@ export function createWindowsHost(o: WindowsHostOpts) {
     /** starts the receiver; resolves false (and reports why) when the port is taken */
     async start(): Promise<boolean> {
       try {
-        server = await startHookServer({ port: o.port, token, mailbox, onEvent: (e) => bridge.onHook(e), onPermission: (e) => bridge.onPermission(e) });
+        server = await startHookServer({ port: o.port, token, mailbox, onPty: attachPty, onEvent: (e) => bridge.onHook(e), onPermission: (e) => bridge.onPermission(e) });
         bridge.snapshot();
         return true;
       } catch (e) {
@@ -93,7 +97,7 @@ export function createWindowsHost(o: WindowsHostOpts) {
     },
     async stop(): Promise<void> { await server?.close(); server = null; },
     handle: (cmd: AppCommand) => bridge.handle(cmd),
-    tick: (now: number) => { bridge.tick(now); if (now - lastAdopt > 15_000) { lastAdopt = now; void adopt(now).catch(() => {}); } },
+    tick: (now: number) => { bridge.tick(now); flushPtys(); if (now - lastAdopt > 15_000) { lastAdopt = now; void adopt(now).catch(() => {}); } },
     snapshot: () => bridge.snapshot(),
     /** what is installed in the Windows settings.json now, and what installing / updating would change */
     state(permissions: boolean = o.permissionsFromPet()): HostHooksState {

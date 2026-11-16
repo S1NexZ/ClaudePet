@@ -10,8 +10,9 @@ export interface HostState {
   distro?: string;
   settingsPath?: string;
 }
-export interface ConnectionsState { answerPermissions: boolean; helper: boolean; windows: HostState; wsl: HostState; /** other WSL distros that are followed */ others?: Array<HostState & { id: string }> }
+export interface ConnectionsState { answerPermissions: boolean; helper: boolean; /** full path of pet-helper.exe (for the PowerShell wrapper line) */ helperPath?: string; windows: HostState; wsl: HostState; /** other WSL distros that are followed */ others?: Array<HostState & { id: string }> }
 export interface ConnectionsHost {
+  copy?(text: string): void;
   get(): Promise<ConnectionsState>;
   apply(host: string, action: 'connect' | 'disconnect'): Promise<ConnectionsState>;
   answerPermissions(on: boolean): Promise<ConnectionsState>;
@@ -62,7 +63,19 @@ export function createConnectionsTab(host: ConnectionsHost) {
   const render = (box: HTMLElement) => {
     if (!state) { box.append(el('div', 's-hint', L('Загрузка…', 'Loading…', '加载中…'))); void load(); return; }
     box.append(el('div', 's-hint', L('Питомец видит сессии Claude Code там, где подключены хуки. Хуки пишутся в ~/.claude/settings.json с показом изменений и копией файла.', 'The pet sees Claude Code sessions wherever the hooks are connected. They are written to ~/.claude/settings.json after showing the changes, with a backup.', '宠物能看到已连接钩子的 Claude Code 会话。钩子会在显示改动后写入 ~/.claude/settings.json，并保留备份。')));
-    box.append(hostRow('windows', state.windows), hostRow('wsl', state.wsl));
+    box.append(hostRow('windows', state.windows));
+    if (state.helperPath && host.copy) {
+      const w = el('div', 's-section c-host');
+      w.append(el('div', 's-title', L('Windows: Esc, «Стоп» и ввод из питомца', 'Windows: Esc, Stop and typing from the pet', 'Windows：从宠物按 Esc、停止和输入')));
+      w.append(el('div', 's-hint', L('Чтобы питомец мог прерывать и печатать в Windows-сессии как в терминале, запускайте claude через обёртку. Добавьте эту строку в профиль PowerShell (notepad $PROFILE):', 'To let the pet interrupt and type into a Windows session like a terminal, start claude through the wrapper. Add this line to your PowerShell profile (notepad $PROFILE):', '要让宠物像终端一样中断并向 Windows 会话输入，请通过包装器启动 claude。把这一行加入 PowerShell 配置文件（notepad $PROFILE）：')));
+      const line = `function claude { & '${state.helperPath.replace(/'/g, "''")}' pty claude @args }`;
+      const code = el('code', 'c-code', line);
+      const cp = el('button', 's-btn', L('Копировать строку', 'Copy the line', '复制该行')); cp.type = 'button';
+      cp.addEventListener('click', () => { host.copy!(line); cp.textContent = L('Скопировано', 'Copied', '已复制'); });
+      w.append(code, cp);
+      box.append(w);
+    }
+    box.append(hostRow('wsl', state.wsl));
     for (const o of state.others ?? []) box.append(hostRow(o.id, o));
     if (!state.helper) box.append(el('div', 's-hint c-err', L('pet-helper.exe не найден: сообщения в Windows-сессии доставляться не будут.', 'pet-helper.exe was not found: messages to Windows sessions cannot be delivered.', '未找到 pet-helper.exe：无法向 Windows 会话发送消息。')));
     const perm = el('label', 's-radio'); perm.style.display = 'block';
