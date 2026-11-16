@@ -306,6 +306,12 @@ async function main() {
     const key = rectsKey(rects);
     if (key !== rectsSent) { rectsSent = key; host.rects(rects); }
   };
+  // the window's height follows the content (the width is constant); it hangs from the pet's top, so growing never moves the pet
+  let sizeSent = 0;
+  const fitWindow = () => {
+    const h = Math.ceil($('stage').offsetHeight) + 8;
+    if (h !== sizeSent) { sizeSent = h; host.resize(424, h); }
+  };
   // the pet runs the way the window is being dragged (the OS moves it; main reports each step)
   let movedAt = 0;
   host.onMoving((dx) => { movedAt = performance.now(); anim.setDrag(dx > 0 ? 'right' : 'left'); });
@@ -493,7 +499,7 @@ async function main() {
 
   // ---- frame loop ----
   let lastKey = '', lastText = '', lastNotified = '';
-  let ringHover = false;
+  let ringHover = false, lastHeavy = 0;
   // Smooth motion: frames cross-fade into each other (a state change fades a little longer and gets a soft "pop"),
   // and a calm pet breathes. All of it is skipped when the OS asks for reduced motion.
   const reduceMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false;
@@ -548,6 +554,9 @@ async function main() {
       motion.setPulse(v.state !== 'idle' && v.state !== 'done' && v.state !== 'sleeping');
       $('chip').classList.toggle('offline', !connected);
     }
+    // the heavy DOM work (panels, chat, rects, window size) does not need 60 fps: ~15 Hz is plenty and keeps an idle pet quiet
+    if (t - lastHeavy < 66) { requestAnimationFrame(tick); return; }
+    lastHeavy = t;
     const pp = s?.pendingPermission;
     $('perm').hidden = !pp;
     if (pp) {
@@ -567,6 +576,7 @@ async function main() {
     renderPanel(snap);
     renderChatMenu();
     renderChat(chatS);
+    fitWindow();
     reportRects();
     reportHover();
     requestAnimationFrame(tick);

@@ -4,6 +4,7 @@
 
 ## Unreleased
 
+- Idle load cut from ~80% to ~15% of one core: the window is only as tall as its content again (it hangs from the pet's top, so growing never moves the pet), the heavy DOM work runs at ~15 Hz, the stage is `position: fixed` (no focus-scroll jumps).
 - Idle GPU load halved: the breathing animation is stepped instead of repainting every frame. The usage ring is a bit more opaque at rest.
 - Panels open below the pet again; the constant-size window hangs from the pet's top, so it can be dragged anywhere (panels may reach past the screen edge) and never snaps back.
 - The window no longer resizes at all (a constant transparent, click-through stage): no more stale "second pet" frame when a panel opens. Settings have a fixed height so switching tabs does not jump.

@@ -19,9 +19,9 @@ import { clampScale, PET_SCALE_MIN, PET_SCALE_MAX } from './petScale.js';
 import { PERMISSION_POLICIES, type PermissionPolicy } from '../../shared/src/types.js';
 import { L, setLang, getLang, resolveLang, LANG_PREFS, type LangPref } from '../../shared/src/i18n.js';
 
-/** Initial size; the renderer then sizes the window to its content (see pet:resize). */
+/** Width is constant; the height starts at the pet's own part and the renderer grows it downwards when a panel opens (see pet:resize). */
 /** the window never resizes: a transparent, click-through stage of this size, the pet stands at its bottom */
-const STAGE_W = 424, STAGE_H = 780;
+const STAGE_W = 424, STAGE_H = 260, MAX_H = 1000;
 // Packaged: everything ships under resources/. Dev: bridge is built into <repo>/build, bundled pet models live in <repo>/models.
 const res = (...p: string[]) => (app.isPackaged ? join(process.resourcesPath, ...p) : join(__dirname, '../..', ...(p[0] === 'models' ? p : ['build', ...p])));
 const bridgePath = process.env.CLAUDE_PET_BRIDGE ?? res('bridge', 'bridge.cjs');
@@ -333,7 +333,7 @@ if (primary) app.whenReady().then(async () => {
     mouseOver = over;
     win.setIgnoreMouseEvents(!over, { forward: true });
     if (process.env.CLAUDE_PET_DEBUG) log(`hit=${over}`);
-  }, 30);
+  }, 40);
   app.on('before-quit', () => clearInterval(hitTimer));
   // Dragging is the OS's own window move (CSS app-region on the sprite): smooth at the display's rate.
   // While it moves, the renderer is told the direction so the pet can run that way.
@@ -342,11 +342,20 @@ if (primary) app.whenReady().then(async () => {
   const anchorOf = (): Anchor => { const b = win.getBounds(); return { cx: b.x + b.width / 2, bottom: b.y + IDLE_H }; };
   let anchor: Anchor = initialAnchor; // where the pet stands; only the user's drags change it
   // the drag is over: remember where the pet stands
+  let pendingH = 0;
+  const applyHeight = (height: number) => {
+    const b = win.getBounds();
+    if (b.height === height) return;
+    ownMoveUntil = Date.now() + 150;
+    win.setBounds({ x: b.x, y: b.y, width: b.width, height }); // the window hangs from the pet's top: growing downwards never moves the pet
+    lastX = win.getBounds().x;
+  };
   const endDrag = () => {
     if (dragIdle) { clearTimeout(dragIdle); dragIdle = null; }
     const wasDragging = dragging;
     dragging = false;
     anchor = anchorOf();
+    if (pendingH) { const h = pendingH; pendingH = 0; applyHeight(h); }
     if (wasDragging) try { writeFileSync(userFile('window.json'), JSON.stringify(anchor)); } catch { /* non-fatal */ }
   };
   win.on('move', () => {
@@ -369,8 +378,12 @@ if (primary) app.whenReady().then(async () => {
     endDrag();
     if (process.env.CLAUDE_PET_DEBUG) log(`anchor=${JSON.stringify(anchor)}`);
   });
-  // the window has a constant size (see STAGE_W/STAGE_H); older renderers may still ask to resize: ignored
-  ipcMain.on('pet:resize', () => { /* no-op */ });
+  // constant width; the height follows the content (grows downwards from the pet). While the user drags, the OS owns the window: wait for the drop.
+  ipcMain.on('pet:resize', (_e, _w: number, h: number) => {
+    const height = Math.min(MAX_H, Math.max(120, Math.ceil(Number(h) || 0)));
+    if (dragging) { pendingH = height; return; }
+    applyHeight(height);
+  });
   // right-click on a drag region would open Windows' system menu: show ours instead
   win.on('system-context-menu', (e) => { e.preventDefault(); trayMenu().popup({ window: win }); });
   ipcMain.on('pet:notify', (_e, title: string, body: string) => {
