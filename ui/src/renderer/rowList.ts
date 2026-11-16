@@ -1,7 +1,7 @@
 /** A session row: updated in place (no rebuild) so hover, focus and the pointer never flicker when the clock ticks. */
-export interface RowData { id: string; current: boolean; tone: string; name: string; meta: string; tip: string; dismissable: boolean }
+export interface RowData { id: string; current: boolean; tone: string; name: string; meta: string; tip: string; dismissable: boolean; group?: boolean; open?: boolean }
 
-export interface RowHandlers { open(id: string): void; dismiss(id: string): void; dismissLabel: string }
+export interface RowHandlers { open(id: string): void; toggle(): void; dismiss(id: string): void; dismissLabel: string }
 
 function make(h: RowHandlers): HTMLElement {
   const row = document.createElement('button');
@@ -18,6 +18,15 @@ function make(h: RowHandlers): HTMLElement {
   return row;
 }
 
+function makeGroup(h: RowHandlers): HTMLElement {
+  const row = document.createElement('button');
+  const name = document.createElement('span'); name.className = 'name';
+  const chev = document.createElement('i'); chev.className = 'chev';
+  row.append(name, chev);
+  row.addEventListener('click', () => h.toggle());
+  return row;
+}
+
 const setText = (e: Element, t: string) => { if (e.textContent !== t) e.textContent = t; };
 
 /** Make `container` show `rows` in order (before `tail`, if given), reusing existing elements by session id. */
@@ -27,7 +36,14 @@ export function syncRows(container: HTMLElement, rows: RowData[], h: RowHandlers
   let prev: Element | null = null;
   for (const r of rows) {
     let el = have.get(r.id);
-    if (el) have.delete(r.id); else { el = make(h); el.dataset.id = r.id; }
+    if (el) have.delete(r.id); else { el = r.group ? makeGroup(h) : make(h); el.dataset.id = r.id; }
+    if (r.group) {
+      const gc = `row group${r.open ? ' open' : ''}`; if (el.className !== gc) el.className = gc;
+      setText(el.children[0], r.name); el.setAttribute('aria-expanded', String(!!r.open));
+      const w: Element | null = prev ? prev.nextElementSibling : container.firstElementChild;
+      if (w !== el) container.insertBefore(el, w ?? tail);
+      prev = el; continue;
+    }
     const cls = `row${r.current ? ' current' : ''}${r.dismissable ? ' can-x' : ''}`;
     if (el.className !== cls) el.className = cls;
     const [dot, name, meta] = Array.from(el.children);

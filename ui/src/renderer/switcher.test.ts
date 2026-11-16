@@ -41,3 +41,17 @@ describe('nextChatId (Ctrl+Tab style cycling)', () => {
     expect(nextChatId([], 'a', 1)).toBeNull();
   });
 });
+
+describe('isQuiet', () => {
+  const mk = (state: any, ago: number, id = 'a') => ({ id, state, lastEventAt: 10_000_000 - ago } as any);
+  it('folds only calm, old sessions that are not on screen', async () => {
+    const { isQuiet } = await import('./switcher.js');
+    const now = 10_000_000;
+    expect(isQuiet(mk('sleeping', 6 * 60_000), null, now)).toBe(true);
+    expect(isQuiet(mk('done', 6 * 60_000), null, now)).toBe(true);
+    expect(isQuiet(mk('done', 60_000), null, now)).toBe(false);
+    expect(isQuiet(mk('thinking', 60 * 60_000), null, now)).toBe(false);
+    expect(isQuiet(mk('waiting', 60 * 60_000), null, now)).toBe(false);
+    expect(isQuiet(mk('sleeping', 60 * 60_000), 'a', now)).toBe(false);
+  });
+});

@@ -1,7 +1,7 @@
 import { statusView, STATE_LABEL, formatElapsed, hostTag } from './labels.js';
 import { createConnectionsTab, type ConnectionsHost } from './connectionsTab.js';
 import { pinSnapshot, focusSnapshot } from './view.js';
-import { sessionRows, nextChatId } from './switcher.js';
+import { sessionRows, nextChatId, isQuiet } from './switcher.js';
 import { decideSend, placeholderFor, isBusyReply, canStop, parseSlash, type Mode } from './compose.js';
 import { applyChat, mergeHistory } from './chatStore.js';
 import { mdBlocks, mdInline } from './md.js';
@@ -426,6 +426,15 @@ async function main() {
   // ---- chat header switcher: one click on a session switches to its chat ----
   const setMenu = (open: boolean) => { chatMenu.hidden = !open; switchBtn.setAttribute('aria-expanded', String(open)); chatMenuKey = ''; if (open) hideModels(); };
   switchBtn.addEventListener('click', () => setMenu(chatMenu.hidden));
+  // calm sessions are folded into one collapsed group; the arrow unfolds them (shared by both lists)
+  let showQuiet = false, lastSnap: Snapshot | null = null;
+  const foldRows = (rows: Array<RowData & { quiet: boolean }>): RowData[] => {
+    const act = rows.filter((r) => !r.quiet), q = rows.filter((r) => r.quiet);
+    if (q.length === 0) return act;
+    const g: RowData = { id: '__quiet', current: false, tone: '', name: L(`Неактивные · ${q.length}`, `Inactive · ${q.length}`, `不活跃 · ${q.length}`), meta: '', tip: '', dismissable: false, group: true, open: showQuiet };
+    return showQuiet ? [...act, g, ...q] : [...act, g];
+  };
+  const toggleQuiet = () => { showQuiet = !showQuiet; renderPanel(lastSnap); renderChatMenu(); };
   const dismissLabel = L('Убрать из списка', 'Remove from list', '从列表移除');
   let newRow: HTMLElement | null = null;
   const renderChatMenu = () => {
@@ -440,8 +449,8 @@ async function main() {
       newRow.addEventListener('click', async () => { setMenu(false); if (await chooseFolder()) { chatId = null; pinnedId = null; mode = 'new'; input.focus(); } });
     }
     if (newRow.parentElement !== chatMenu) chatMenu.append(newRow);
-    const data: RowData[] = rows.map((r) => ({ id: r.id, current: r.current, tone: r.tone === 'busy' ? '' : r.tone, name: r.title, meta: r.meta, tip: r.cwd, dismissable: !r.owned }));
-    syncRows(chatMenu, data, { open: (id) => { setMenu(false); openChat(id); }, dismiss: (id) => host.send({ type: 'dismiss', sessionId: id }), dismissLabel }, newRow);
+    const data = foldRows(rows.map((r) => ({ id: r.id, current: r.current, tone: r.tone === 'busy' ? '' : r.tone, name: r.title, meta: r.meta, tip: r.cwd, dismissable: !r.owned, quiet: r.quiet })));
+    syncRows(chatMenu, data, { toggle: toggleQuiet, open: (id) => { setMenu(false); openChat(id); }, dismiss: (id) => host.send({ type: 'dismiss', sessionId: id }), dismissLabel }, newRow);
   };
   chatMenu.addEventListener('keydown', (e) => { if (e.key === 'Escape') { e.stopPropagation(); setMenu(false); input.focus(); } });
   // Ctrl+Tab / Ctrl+Shift+Tab cycle through the chats without touching the mouse
@@ -466,12 +475,12 @@ async function main() {
       panel.replaceChildren(panelEmpty); return;
     }
     if (panelEmpty?.parentElement === panel) panelEmpty.remove();
-    const data: RowData[] = list.map((x) => ({
+    const data = foldRows(list.map((x) => ({
       id: x.id, current: x.id === snap?.attention,
       tone: x.state === 'waiting' || x.state === 'error' ? 'alert' : x.state === 'idle' || x.state === 'sleeping' ? 'quiet' : '',
-      name: x.project, meta: `${hostTag(x) ? `${hostTag(x)} · ` : ''}${STATE_LABEL[x.state]} · ${formatElapsed(now - x.since)}`, tip: x.cwd, dismissable: !x.owned,
-    }));
-    syncRows(panel, data, { open: (id) => openChat(id), dismiss: (id) => host.send({ type: 'dismiss', sessionId: id }), dismissLabel });
+      name: x.project, meta: `${hostTag(x) ? `${hostTag(x)} · ` : ''}${STATE_LABEL[x.state]} · ${formatElapsed(now - x.since)}`, tip: x.cwd, dismissable: !x.owned, quiet: isQuiet(x, snap?.attention ?? null, now),
+    })));
+    syncRows(panel, data, { toggle: toggleQuiet, open: (id) => openChat(id), dismiss: (id) => host.send({ type: 'dismiss', sessionId: id }), dismissLabel });
   };
 
   // ---- hover dock: the buttons rest as a shadow under the pet and grow out of it while the cursor is over the pet ----
@@ -565,6 +574,7 @@ async function main() {
     if (input.disabled !== busy) { input.disabled = busy; if (!busy && expanded) input.focus(); }
     $('btn-stop').hidden = !(busy && canStop(chatS));
     $('btn-send').hidden = busy && canStop(chatS);
+    lastSnap = snap;
     renderPanel(snap);
     renderChatMenu();
     renderChat(chatS);

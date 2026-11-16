@@ -9,6 +9,12 @@ export interface SessionRow {
   current: boolean;
   cwd: string;
   owned: boolean;
+  quiet: boolean;
+}
+
+/** A session that has been calm for a while (and is not the one on screen): the lists fold these into a collapsed group. */
+export function isQuiet(x: Session, currentId: string | null, now: number): boolean {
+  return x.id !== currentId && (x.state === 'idle' || x.state === 'sleeping' || x.state === 'done') && now - x.lastEventAt > 5 * 60_000;
 }
 
 /** Rows for the session lists (chat header dropdown and the wave panel): newest activity first. */
@@ -25,6 +31,7 @@ export function sessionRows(sessions: Session[], currentId: string | null, now: 
       current: x.id === currentId,
       cwd: x.cwd,
       owned: x.owned,
+      quiet: isQuiet(x, currentId, now),
     }));
 }
 

@@ -277,3 +277,10 @@ body { font-family: "Segoe UI", "Microsoft YaHei UI", system-ui, sans-serif; col
   opacity: 0; transform: translateY(-3px); transition: opacity .16s ease, transform .16s ease; backdrop-filter: blur(8px);
 }
 #tip.on { opacity: 1; transform: none; }
+
+/* folded group of calm sessions */
+.row.group { color: var(--muted); font-size: 12px; }
+.row.group .name { font-family: inherit; }
+.row.group .chev { flex: none; width: 7px; height: 7px; border-right: 1.6px solid currentColor; border-bottom: 1.6px solid currentColor; transform: translateY(-2px) rotate(45deg); transition: transform .2s ease; margin-right: 4px; }
+.row.group.open .chev { transform: translateY(1px) rotate(-135deg); }
+.row.group:hover { color: var(--text); }
