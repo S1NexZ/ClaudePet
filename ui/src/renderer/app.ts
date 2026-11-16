@@ -309,7 +309,9 @@ async function main() {
   let sizeSent = '';
   const fitWindow = () => {
     const kids = Array.from($('stage').children).filter((e) => !(e as HTMLElement).hidden) as HTMLElement[];
-    const w = Math.max(...kids.map((e) => e.offsetWidth)) + 16;
+    // the status chip animates its width: reserve its expanded width so the window doesn't resize on every frame of the animation
+    const chipFull = Math.min(400, 8 + 16 + 28 + 2 + $('label').offsetWidth + $('detail').scrollWidth + 8);
+    const w = Math.max(...kids.map((e) => (e.id === 'chip' ? chipFull : e.offsetWidth))) + 16;
     const h = kids.reduce((a, e) => a + e.offsetHeight, 0) + 6 * (kids.length - 1) + 16;
     const key = `${w}x${h}`;
     if (key !== sizeSent) { sizeSent = key; host.resize(w, h); }
@@ -523,7 +525,10 @@ async function main() {
     const v = statusView(snap, connected, Date.now());
     anim.setState(v.state);
     if (movedAt && t - movedAt > 180) { movedAt = 0; anim.setDrag(null); }
-    dockPill.classList.toggle('rest', !(peek || settingsPanel.isOpen() || usageOpen || dockPill.matches(':focus-within')));
+    const awake = peek || settingsPanel.isOpen() || usageOpen || dockPill.matches(':focus-within');
+    dockPill.classList.toggle('rest', !awake);
+    $('chip').classList.toggle('rest', !awake);
+    $('stage').classList.toggle('peek', awake);
     const { row, col } = anim.frame(t);
     if (row !== curRow || col !== curCol) {
       const rowChanged = curRow >= 0 && row !== curRow;

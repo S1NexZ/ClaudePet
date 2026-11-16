@@ -2,6 +2,12 @@
 
 Формат: [Keep a Changelog](https://keepachangelog.com/ru/1.1.0/), версии по [SemVer](https://semver.org/lang/ru/).
 
+## Unreleased
+
+- The status chip rests as a dot and a word next to the pet and slides out on hover.
+- The usage ring is a small, quiet arc by the pet that grows and shows its number on hover.
+- Smoother hover animations (no window resizing during the slide-out, no spring overshoot).
+
 ## [0.2.0] — первый публичный релиз
 ### Добавлено
 - Общая живая сессия Claude Code между терминалом и питомцем (PTY-обёртка `pet-claude.py`, unix-сокет, один процесс и один транскрипт); Stop и обнаружение Esc/Ctrl+C из терминала.
