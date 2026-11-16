@@ -1,9 +1,10 @@
 {
   "id": "clawd",
   "displayName": "Clawd",
-  "description": "A compact Codex pet based on official Claude Code pixel Clawd frames, extracted without stretching.",
+  "description": "An unofficial Claude-inspired companion for Codex. https://github.com/godxxy1229/clawd-codex-pet",
   "spritesheetPath": "spritesheet.webp",
+  "spriteVersionNumber": 2,
   "kind": "creature",
-  "source": "codex-pets.net",
-  "sourceId": "clawd"
+  "source": "github.com/godxxy1229/clawd-codex-pet",
+  "sourceId": "clawd-svg"
 }

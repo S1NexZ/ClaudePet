@@ -246,6 +246,7 @@ async function main() {
   let spriteToken = 0;
   let onSpriteLoaded: () => void = () => {};
   const petWin = window as unknown as { __petAtlas: HTMLCanvasElement; __petAtlasReady?: boolean };
+  const anim = new Animator();
   const loadSprite = async (data: typeof pet) => {
     const token = ++spriteToken;
     const img = new Image();
@@ -257,11 +258,12 @@ async function main() {
     const ax = a.getContext('2d', { willReadFrequently: true })!;
     ax.drawImage(img, 0, 0);
     atlas = a; actx = ax; petWin.__petAtlas = a; petWin.__petAtlasReady = false;
+    anim.setRowFrames(data.rows.map((r) => r.frames));
     baseHue = dominantHue(ax.getImageData(0, 0, a.width, a.height).data);
     atlasVersion++;
     onSpriteLoaded();
     void (async () => {
-      for (let r = 0; r * ch < a.height; r++) for (let c = 0; c * cw < a.width; c++) {
+      for (let r = 0; r * ch < a.height && r < data.rows.length; r++) for (let c = 0; c * cw < a.width; c++) {
         if (token !== spriteToken) return;
         const cell = ax.getImageData(c * cw, r * ch, cw, ch);
         const stabilize = data.tweaks?.stabilize !== false;
@@ -302,7 +304,6 @@ async function main() {
   $('btn-settings').addEventListener('click', () => settingsPanel.toggle());
   host.onOpenSettings(() => settingsPanel.open());
 
-  const anim = new Animator();
 
   // ---- window behaviour: report interactive boxes (main decides click-through) and content size ----
   let rectsSent = '';

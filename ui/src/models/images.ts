@@ -10,5 +10,7 @@ export function imageSize(b: Buffer): { w: number; h: number; format: 'webp' | '
   }
   return null;
 }
-/** The atlas layout the pet's animator is built for: 8 columns x 9 rows of 192x208 cells. */
+/** The atlas layout the pet's animator is built for: 8 columns of 192x208 cells and 9 rows (1536x1872) or, for v2 packs, 11 rows (1536x2288). */
 export const SHEET = { w: 1536, h: 1872 } as const;
+export const SHEET_V2_H = 2288;
+export const sheetSizeOk = (s: { w: number; h: number }): boolean => s.w === SHEET.w && (s.h === SHEET.h || s.h === SHEET_V2_H);

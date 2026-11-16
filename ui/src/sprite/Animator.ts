@@ -24,7 +24,7 @@ export class Animator {
   private startedAt: number | null = null;
   private drag: DragDir | null = null;
   private dragStartedAt: number | null = null;
-  private readonly rowFrames: readonly number[];
+  private rowFrames: readonly number[];
   private readonly frameMs?: number;
   private readonly minHoldMs: number;
 
@@ -33,6 +33,9 @@ export class Animator {
     this.frameMs = o.frameMs;
     this.minHoldMs = o.minHoldMs ?? 900;
   }
+
+  /** A pack with another row layout (e.g. the 11-row v2 sheets) was loaded. */
+  setRowFrames(frames: readonly number[]): void { this.rowFrames = frames; }
 
   setState(s: PetState): void {
     this.want = s;
@@ -82,6 +85,7 @@ export class Animator {
   }
 
   private stepMs(row: number): number {
-    return this.frameMs ?? ROW_LOOP_MS[row] / this.rowFrames[row];
+    // the per-frame pace of the standard layout, so a pack with an extra frame in a row simply runs a bit longer
+    return this.frameMs ?? (row < ROW_LOOP_MS.length ? ROW_LOOP_MS[row] / ROW_FRAMES[row] : 250);
   }
 }

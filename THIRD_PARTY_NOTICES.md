@@ -4,13 +4,12 @@ The MIT license in `LICENSE` covers **only the original source code of Claude Pe
 which keep their own licenses and rights.
 
 ## Pet model: Clawd (`models/clawd`)
-- Pack `clawd`, Codex pet format, source recorded in its `pet.json`: **codex-pets.net** (sourceId `clawd`).
-- Description recorded in the pack: "A compact Codex pet based on official Claude Code pixel Clawd frames, extracted without stretching."
-- The character Clawd is the mascot of Anthropic's Claude Code; rights to the character and the original pixel art belong to their owners.
-- The pack's individual author is not named in its metadata, so none is stated here. Attribution is not a license: **the redistribution terms of this
-  pack have not been verified by the Claude Pet author.** The files `pet.json` and `spritesheet.webp` are included unmodified.
-  `tweaks.json` next to them is Claude Pet's own display setting.
-- If you are the author or a rights holder and want the credit changed or the pack removed, please open an issue.
+- Pack `clawd-svg`, Codex pet format v2, installed under the id `clawd`; source recorded in its description: https://github.com/godxxy1229/clawd-codex-pet ("An unofficial Claude-inspired companion for Codex.").
+- The character Clawd is the mascot of Anthropic's Claude Code; rights to the character belong to their owners. The sprite sheet is included unmodified.
+
+## Pet model: Claude娘 / Claude-maiden (`models/claude-maiden`)
+- Pack `claude-maiden`, Codex pet format v2 ("An orange-haired, amber-eyed Claude."); the author is not named in the pack's metadata.
+- A fan-made personification of Anthropic's Claude; rights to the artwork belong to its author. Included unmodified.
 
 ## Claude Agent SDK (`@anthropic-ai/claude-agent-sdk`)
 - © Anthropic PBC. All rights reserved. Use is subject to Anthropic's legal agreements: https://code.claude.com/docs/en/legal-and-compliance

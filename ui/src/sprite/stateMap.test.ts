@@ -15,3 +15,12 @@ describe('rowForState', () => {
     for (const r of Object.values(EXPECTED)) expect(r).toBeLessThan(ROW_FRAMES.length);
   });
 });
+
+describe('v2 sheets', () => {
+  it('have an idle row of 7 frames and 11 rows; the first nine keep the standard layout', async () => {
+    const { ROW_FRAMES_V2 } = await import('./stateMap.js');
+    expect(ROW_FRAMES_V2).toHaveLength(11);
+    expect(ROW_FRAMES_V2.slice(1, 9)).toEqual(ROW_FRAMES.slice(1));
+    expect(ROW_FRAMES_V2[0]).toBe(7);
+  });
+});

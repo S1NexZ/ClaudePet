@@ -1,6 +1,7 @@
 import { readFile, access } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
-import { CELL, ROW_FRAMES } from './stateMap.js';
+import { CELL, ROW_FRAMES, ROW_FRAMES_V2 } from './stateMap.js';
+import { imageSize, SHEET_V2_H } from '../models/images.js';
 
 export interface Pet {
   id: string;
@@ -23,6 +24,8 @@ export async function loadPet(dir: string): Promise<Pet> {
   }
   const sheet = join(root, meta.spritesheetPath ?? 'spritesheet.webp');
   try { await access(sheet); } catch { throw new Error(`Spritesheet not found: ${meta.spritesheetPath ?? 'spritesheet.webp'} in ${root}`); }
+  const size = imageSize(await readFile(sheet).catch(() => Buffer.alloc(0)));
+  const frames = size?.h === SHEET_V2_H ? ROW_FRAMES_V2 : ROW_FRAMES;
   let tweaks: Pet['tweaks'] = {};
   try { tweaks = JSON.parse(await readFile(join(root, 'tweaks.json'), 'utf8')); } catch { /* no or broken tweaks: none */ }
   return {
@@ -31,6 +34,6 @@ export async function loadPet(dir: string): Promise<Pet> {
     displayName: meta.displayName ?? meta.id ?? 'pet',
     image: sheet,
     cell: { ...CELL },
-    rows: ROW_FRAMES.map((frames) => ({ frames })),
+    rows: frames.map((f) => ({ frames: f })),
   };
 }

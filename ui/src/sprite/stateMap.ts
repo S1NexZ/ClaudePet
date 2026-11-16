@@ -4,6 +4,8 @@ import type { PetState } from '../../../shared/src/types.js';
 export const ROW_FRAMES = [6, 8, 8, 4, 5, 8, 6, 6, 6] as const;
 /** Loop duration per row (ms). Calm pacing: ~4-5.5 fps instead of a fixed 8 fps; run rows stay brisker. */
 export const ROW_LOOP_MS = [2200, 1350, 1350, 1200, 1200, 1900, 1600, 1600, 1600] as const;
+/** Sheets of spriteVersionNumber 2 (1536x2288, 11 rows): the idle row has 7 frames and two more rows follow (not used by the pet). */
+export const ROW_FRAMES_V2 = [7, 8, 8, 4, 5, 8, 6, 6, 6, 7, 7] as const;
 export const CELL = { w: 192, h: 208 } as const;
 
 const ROW: Record<PetState, number> = {
