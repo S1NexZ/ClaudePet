@@ -10,6 +10,7 @@ import { listModels, pickModel, MODEL_ID, DEFAULT_MODEL } from './models/registr
 import { installModelFromZip, installModelFromDir, removeModel, scanPetFolder, ModelError } from './models/install.js';
 import { loadSettings, saveSettings } from './settings.js';
 import { wslBridgeArgs, splitLines } from './bridgeLaunch.js';
+import { focusByTitle } from './focusWindow.js';
 import { overAny, type Rect } from './hitTest.js';
 import { placeStage, restoreAnchor, IDLE_H, type Anchor } from './placement.js';
 import { terminalCommand, windowsTerminalCommand } from './terminal.js';
@@ -107,6 +108,19 @@ if (primary) app.whenReady().then(async () => {
     }));
     if (isConfirmed(r)) toBridge({ type: 'hooks', apply: true });
   };
+  const markWaiters = new Map<string, (ok: boolean) => void>();
+  /** the session's own terminal: title its tab, then raise the window/tab with that title (false: no live terminal to move to) */
+  const focusTerminalOf = async (s: { id: string; project: string }): Promise<boolean> => {
+    const mark = `${s.project} - Claude ${s.id.slice(0, 4)}`;
+    const marked = await new Promise<boolean>((resolve) => {
+      const t = setTimeout(() => { markWaiters.delete(s.id); resolve(false); }, 3000);
+      markWaiters.set(s.id, (ok) => { clearTimeout(t); resolve(ok); });
+      toBridge({ type: 'term-mark', sessionId: s.id, text: mark });
+    });
+    if (!marked) return false;
+    await new Promise((r) => setTimeout(r, 350)); // let the terminal apply the title
+    return focusByTitle(mark);
+  };
   const onLine = (line: string) => {
     let m: any;
     try { m = JSON.parse(line); } catch { return; }
@@ -122,6 +136,7 @@ if (primary) app.whenReady().then(async () => {
       if (demo) toBridge({ type: 'start', cwd: demo.cwd, prompt: demo.prompt });
       return;
     }
+    if (m.type === 'termMark') { const w = markWaiters.get(String(m.sessionId)); if (w) { markWaiters.delete(String(m.sessionId)); w(!!m.ok); } return; }
     if (m.type === 'hooks') { wslHooks = m; if (hooksWaiter) { const w = hooksWaiter; hooksWaiter = null; w(m); return; } void onHooks(m); return; }
     if (m.type === 'snapshot') { wslSnap = m; pushSnapshot(); return; }
     win.webContents.send('pet:msg', m);
@@ -374,7 +389,14 @@ if (primary) app.whenReady().then(async () => {
       launchWin(true);
       return;
     }
-    if (s.owned) toBridge({ type: 'release', sessionId: s.id });
+    if (!s.owned) {
+      void focusTerminalOf(s).then((moved) => { if (!moved) openWslTerminal(s); });
+      return;
+    }
+    toBridge({ type: 'release', sessionId: s.id });
+    openWslTerminal(s);
+  });
+  const openWslTerminal = (s: { id: string; cwd: string; owned: boolean }) => {
     const launch = (useWt: boolean) => {
       const c = terminalCommand({ distro: wsl.distro, cwd: s.cwd, claude: wsl.claude, sessionId: s.id }, useWt);
       const p = spawn(c.file, c.args, { detached: true, stdio: 'ignore' });
@@ -382,7 +404,7 @@ if (primary) app.whenReady().then(async () => {
       p.unref();
     };
     setTimeout(() => launch(true), s.owned ? 500 : 0);
-  });
+  };
   ipcMain.handle('pet:pick-folder', async () => {
     const r = await dialog.showOpenDialog(win, { properties: ['openDirectory'], title: L('Папка для Claude Code', 'Folder for Claude Code', 'Claude Code 的文件夹') });
     return r.canceled ? null : r.filePaths[0];

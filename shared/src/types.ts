@@ -74,11 +74,13 @@ export type AppCommand =
   | { type: 'btw'; sessionId: string; text: string }
   | { type: 'release'; sessionId: string }
   | { type: 'dismiss'; sessionId: string }
+  | { type: 'term-mark'; sessionId: string; text: string }
   | { type: 'end'; sessionId: string }
   | { type: 'usage' };
 
 export type BridgeMessage =
   | Snapshot
+  | { type: 'termMark'; sessionId: string; ok: boolean }
   | { type: 'chat'; sessionId: string; event: ChatEvent }
   | { type: 'history'; sessionId: string; items: ChatItem[] }
   | { type: 'started'; sessionId: string }

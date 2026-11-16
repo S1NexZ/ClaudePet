@@ -184,6 +184,17 @@ describe('bridge', () => {
     expect(last(out, 'snapshot')?.sessions).toEqual([]);
   });
 
+  it('term-mark titles the terminal of a live claude process and reports it', async () => {
+    const titled: Array<[number, string]> = [];
+    const { bridge, out } = setup({ setTitle: (pid: number, t: string) => { titled.push([pid, t]); return true; } } as any);
+    bridge.onHook({ hook_event_name: 'Stop', session_id: 't1', cwd: '/x', pet_parents: [99, 4242] } as any);
+    await bridge.handle({ type: 'term-mark', sessionId: 't1', text: 'x · Claude t1' });
+    expect(titled).toEqual([[4242, 'x · Claude t1']]);
+    expect(last(out, 'termMark')).toEqual({ type: 'termMark', sessionId: 't1', ok: true });
+    await bridge.handle({ type: 'term-mark', sessionId: 'nope', text: 'y' });
+    expect(last(out, 'termMark')).toEqual({ type: 'termMark', sessionId: 'nope', ok: false });
+  });
+
   it('dismiss hides a session without touching its process, and late events do not bring it back', async () => {
     const { bridge, out, killed } = setup();
     bridge.onHook({ hook_event_name: 'Stop', session_id: 't1', cwd: '/x', pet_parents: [99, 4242] } as any);

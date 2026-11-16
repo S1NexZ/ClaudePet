@@ -1,4 +1,4 @@
-import { readFileSync, existsSync } from 'node:fs';
+import { readFileSync, existsSync, readlinkSync, writeFileSync } from 'node:fs';
 import type { SessionStore } from './sessionStore.js';
 import type { HookPayload } from './hookSocket.js';
 import { toWslPath } from './paths.js';
@@ -28,6 +28,16 @@ export function snapshotOf(store: SessionStore): Snapshot {
 }
 
 /** The app-facing core of the WSL bridge: commands in, messages out. Transport-free so it can be tested. */
+/** Writes a title-setting escape sequence to the terminal (pty) a process is attached to. */
+export function setTtyTitle(pid: number, text: string): boolean {
+  try {
+    const tty = readlinkSync(`/proc/${pid}/fd/0`);
+    if (!tty.startsWith('/dev/pts/')) return false;
+    writeFileSync(tty, `\x1b]0;${text.replace(/[\x00-\x1f\x7f]/g, ' ')}\x07`);
+    return true;
+  } catch { return false; }
+}
+
 export function createBridge(o: {
   store: SessionStore;
   runner: RunnerLike;
@@ -36,6 +46,8 @@ export function createBridge(o: {
   hooks: { settingsPath: string; hookPath: string; nodePath: string };
   /** process access (real /proc and kill by default; injectable for tests) */
   proc?: { name(pid: number): string | null; kill(pid: number): void };
+  /** sets the title of the terminal a process runs in (an OSC sequence written to its tty); false when it has no terminal */
+  setTitle?: (pid: number, text: string) => boolean;
   /** typing into a pet-claude.py PTY socket (injectable for tests) */
   pty?: { sendPrompt(sock: string, text: string): Promise<void>; sendEsc(sock: string): Promise<void> };
   /** the folder a session was started in, from its transcript (injectable for tests) */
@@ -187,6 +199,16 @@ export function createBridge(o: {
             pids.delete(id);
             ended.add(id);
             break;
+          }
+          case 'term-mark': { // the pet is about to look for this session's terminal window: give its tab a recognisable title
+            const id = String(cmd.sessionId); const pid = pids.get(id);
+            const set = o.setTitle ?? setTtyTitle;
+            const ok = !!pid && proc.name(pid) === 'claude' && set(pid, String(cmd.text));
+            if (ok && pid) { // Claude Code rewrites the title all the time (spinner): keep the marker up while the pet looks for the window
+              let n = 0; const t = setInterval(() => { if (++n > 14 || !set(pid, String(cmd.text))) clearInterval(t); }, 200); t.unref?.();
+            }
+            o.out({ type: 'termMark', sessionId: id, ok });
+            return;
           }
           case 'dismiss': { // hide a session from the list without touching its process (a live one reappears on its next prompt)
             const id = String(cmd.sessionId);
