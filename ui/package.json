@@ -1,0 +1,82 @@
+{
+  "name": "claude-pet",
+  "private": true,
+  "version": "0.2.0",
+  "main": "dist/main.cjs",
+  "scripts": {
+    "start": "electron .",
+    "dist": "electron-builder --win"
+  },
+  "devDependencies": {
+    "electron": "^33.0.0",
+    "electron-builder": "^25.1.8"
+  },
+  "productName": "Claude Pet",
+  "description": "Claude Pet: a desktop pet that shares live Claude Code sessions with the terminal",
+  "author": "S1NexZ",
+  "build": {
+    "appId": "local.claudepet.app",
+    "productName": "Claude Pet",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "../build/bridge",
+        "to": "bridge"
+      },
+      {
+        "from": "../build/hook",
+        "to": "hook"
+      },
+      {
+        "from": "../models",
+        "to": "models"
+      },
+      {
+        "from": "../scripts/pet-claude.py",
+        "to": "scripts/pet-claude.py"
+      },
+      {
+        "from": "../scripts/install-shell-integration.sh",
+        "to": "scripts/install-shell-integration.sh"
+      },
+      {
+        "from": "../LICENSE",
+        "to": "LICENSE"
+      },
+      {
+        "from": "../THIRD_PARTY_NOTICES.md",
+        "to": "THIRD_PARTY_NOTICES.md"
+      }
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "assets/icon.png"
+    },
+    "nsis": {
+      "oneClick": true,
+      "perMachine": false,
+      "shortcutName": "Claude Pet",
+      "runAfterFinish": true
+    },
+    "artifactName": "Claude-Pet-Setup-${version}.exe",
+    "publish": null
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/S1NexZ/ClaudePet.git"
+  }
+}

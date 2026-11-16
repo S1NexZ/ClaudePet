@@ -1,0 +1,17 @@
+node_modules/
+dist/
+.superpowers/
+*.log
+build/
+ui/release/
+sprites/
+*.codex-pet.zip
+docs/superpowers/
+.env
+*.pem
+*.key
+ui/release*/
+release-test/
+
+__pycache__/
+*.pyc

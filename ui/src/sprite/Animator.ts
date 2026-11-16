@@ -1,0 +1,87 @@
+import type { PetState } from '../../../shared/src/types.js';
+import { ROW_FRAMES, ROW_LOOP_MS, rowForState } from './stateMap.js';
+
+/** "done": jump once, then wave for as long as the state lasts. */
+const DONE_JUMP_ROW = 4;
+const DONE_WAVE_ROW = 3;
+const RUN_ROW = { right: 1, left: 2 } as const;
+export type DragDir = keyof typeof RUN_ROW;
+
+/** States that must show at once: the user has to act. */
+const URGENT: ReadonlySet<PetState> = new Set<PetState>(['waiting', 'error']);
+
+export interface AnimatorOpts {
+  /** Fixed ms per frame; default derives it from each row's loop time. */
+  frameMs?: number;
+  /** A shown animation is kept at least this long before switching to a non-urgent state (anti-flicker). */
+  minHoldMs?: number;
+  rowFrames?: readonly number[];
+}
+
+export class Animator {
+  private shown: PetState = 'idle';
+  private want: PetState = 'idle';
+  private startedAt: number | null = null;
+  private drag: DragDir | null = null;
+  private dragStartedAt: number | null = null;
+  private readonly rowFrames: readonly number[];
+  private readonly frameMs?: number;
+  private readonly minHoldMs: number;
+
+  constructor(o: AnimatorOpts = {}) {
+    this.rowFrames = o.rowFrames ?? ROW_FRAMES;
+    this.frameMs = o.frameMs;
+    this.minHoldMs = o.minHoldMs ?? 900;
+  }
+
+  setState(s: PetState): void {
+    this.want = s;
+  }
+
+  /** While the window is dragged the pet runs in that direction; null = released. */
+  setDrag(dir: DragDir | null): void {
+    if (dir === this.drag) return;
+    this.drag = dir;
+    this.dragStartedAt = null;
+    // after release show the current state straight away (the drag already broke continuity)
+    if (!dir) { this.shown = this.want; this.startedAt = null; }
+  }
+
+  frame(now: number): { row: number; col: number } {
+    if (this.drag) {
+      this.dragStartedAt ??= now;
+      const row = RUN_ROW[this.drag];
+      if (row >= this.rowFrames.length) return this.cycle(0, now - this.dragStartedAt);
+      return this.cycle(row, now - this.dragStartedAt);
+    }
+    this.startedAt ??= now;
+    if (this.want !== this.shown && (URGENT.has(this.want) || now - this.startedAt >= this.minHoldMs)) {
+      this.shown = this.want;
+      this.startedAt = now;
+    }
+    const elapsed = now - this.startedAt;
+    if (this.shown === 'done') return this.sequence(elapsed);
+    let row = rowForState(this.shown);
+    if (row >= this.rowFrames.length) row = 0;
+    return this.cycle(row, elapsed);
+  }
+
+  private cycle(row: number, elapsed: number): { row: number; col: number } {
+    return { row, col: Math.floor(elapsed / this.stepMs(row)) % this.rowFrames[row] };
+  }
+
+  /** Jump once (if the atlas has the row), then loop the wave (or idle, if there is no wave row). */
+  private sequence(elapsed: number): { row: number; col: number } {
+    let t = elapsed;
+    if (DONE_JUMP_ROW < this.rowFrames.length) {
+      const len = this.rowFrames[DONE_JUMP_ROW] * this.stepMs(DONE_JUMP_ROW);
+      if (t < len) return { row: DONE_JUMP_ROW, col: Math.floor(t / this.stepMs(DONE_JUMP_ROW)) };
+      t -= len;
+    }
+    return this.cycle(DONE_WAVE_ROW < this.rowFrames.length ? DONE_WAVE_ROW : 0, t);
+  }
+
+  private stepMs(row: number): number {
+    return this.frameMs ?? ROW_LOOP_MS[row] / this.rowFrames[row];
+  }
+}

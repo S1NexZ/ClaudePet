@@ -1,0 +1,69 @@
+# Claude Pet — developer notes (also read by Claude Code sessions working on this repo)
+
+Claude Pet is a Windows (Electron) desktop pet for Claude Code sessions running in WSL: it shows what the sessions do, has a chat, shares one live
+session with the terminal through a PTY wrapper, and shows subscription usage limits. User-facing docs are in `README.md` (Russian); this file is for developers.
+Chat language with the project owner: Russian (code and comments may be English). The source of truth is the code, not these notes.
+
+## Working rules
+- Keep outputs short; do not re-read whole files (`git log --oneline | head`, `docs/design.md`, targeted reads/grep).
+- Real interactive `claude` runs cost the user's limit: only when asked, with short prompts (`Reply with exactly: …`).
+- Never change the user's configuration (`~/.claude/settings.json`, `~/.bashrc`, `~/.profile`, `~/.claude.json`) without explicit consent (show a diff, back up first).
+- Never touch or kill the user's running Claude Code sessions; end only processes you started, by exact PID (no `pkill -f` with a pattern that matches your own command).
+- Do not add background processes, do not expose tokens/credentials/personal data (for `~/.claude.json` inspect structure only, never values).
+- Do not delete temporary files or test artifacts without permission. Do not weaken existing features (UI, animations, hotkey, PTY, SDK fallback).
+- Never claim something was tested when it was not; keep verified behaviour and assumptions apart.
+- Commits end with `Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>`. Do not push or publish without the owner's approval.
+
+## Environment
+- Develop in WSL; Node: `export PATH=$HOME/.local/node/bin:$PATH` (per command). Root is an npm workspace (`shared`, `daemon`, `hook`); `ui/` is a separate package.
+  Install `ui/` dependencies from a **Windows** terminal (`cd ui && npm install`) when you need to build the installer, so electron-builder gets Windows shims.
+- No gcc/make in WSL (native modules cannot be built).
+- Inside a Claude Code session the env has `CLAUDECODE`/`CLAUDE_CODE_*`: the `claude` shell function then bypasses the wrapper and a child `claude` does not save transcripts;
+  simulate a user terminal with `env -u CLAUDECODE -u CLAUDE_CODE_CHILD_SESSION …`.
+
+## Architecture
+Windows Electron (`ui/`) starts the bridge in WSL through `wsl.exe` (JSON lines on stdio). Bridge: `daemon/src/bridgeMain.ts` → `build/bridge/bridge.cjs`. Claude Code hooks (`hook/pet-hook.mjs`) send events to the unix socket `~/.claude-pet/hook.sock`.
+Closing the pet never kills Claude Code (the bridge exits on stdin EOF).
+- `daemon/src/`: `bridge.ts` (commands, sending, interrupt), `sessionStore.ts`, `mapEvent.ts`, `hookSocket.ts`, `ptySend.ts`, `runner.ts` (SDK fallback), `transcript.ts`, `usage.ts`, `usageLive.ts`, `installHooks.ts`, `installStatusLine.ts`, `cli.ts`.
+- `shared/src/types.ts`: bridge command/message types.
+- `ui/src/`: `main.ts` (window, tray, hotkey, IPC, dialogs), `settings.ts`, `appearance.ts`, `dialogs.ts`, `models/` (registry, zip, install, images), `sprite/` (loader, animator, cell cleanup, `fringe.ts`), `renderer/` (`app.ts`, `settingsPanel.ts`, `modelsTab.ts`, `usage.ts`, `compose.ts`, `chatStore.ts`, …).
+- `scripts/`: `pet-claude.py` (PTY wrapper), `install-shell-integration.sh` (guided `~/.bashrc` block), `start.sh`, `pet.sh`, `anim-test.sh`, tests `test-pet-claude.py`, `test-shell-integration.py`.
+- `models/clawd/`: the bundled default pet (third-party asset, see `THIRD_PARTY_NOTICES.md`). User models live in `%APPDATA%\Claude Pet\models`.
+
+### Claude Code integration
+- **PTY wrapper** `scripts/pet-claude.py` runs `claude` as one process on a PTY; the terminal and clients of `~/.claude-pet/pty/<wrapper pid>.sock` (dir 0700, socket 0600) share one PTY. The hook adds `pet_pty` (from `PET_PTY_SOCK`) to events; `SessionEnd` clears it. If `claude` is not on PATH it falls back to `~/.local/bin/claude`.
+- **Sending** (`bridge.ts`): a session with `pty` that is not `owned` gets the text typed into the same process (300 ms before Enter, bracketed paste for multi-line, control characters stripped); refused while Claude is busy; a dead socket falls back to the SDK.
+  Fallback = SDK `resume` (`runner.ts`): a second process, the user gets a warning dialog first. It resumes in `resumeCwd` (the folder the session was started in, read once from the transcript) because resuming from another folder makes Claude Code copy the session; a different session id in `system:init` aborts the attempt.
+- **Interrupt**: the Stop button types Esc into the PTY and marks the session idle. Esc/Ctrl+C typed in the terminal produce no hook: the bridge tick (1.5 s) looks for `[Request interrupted by user` in the transcript tail. History is re-read 700 ms after Stop / prompt / Esc.
+- **Confirmation dialogs** (`ui/src/dialogs.ts`): safe button first and default, `noLink: true` (measured: with command links and `defaultId === cancelId`, Enter picked the action).
+
+### Usage limits
+`daemon/src/usageLive.ts`: experimental SDK method `usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET` (`get_usage`), one short-lived `claude` process per request (no prompt, `persistSession:false`, `settingSources:[]`, `skipBehaviors:true`, env without `CLAUDE_*`/`ANTHROPIC_*`, cwd `~/.claude-pet/usage-query`), first at start and then every 60 s from the previous start,
+never overlapping, 25 s timeout, last good data kept on failure, children killed when the bridge stops (`CLAUDE_PET_LIVE_USAGE=0` disables it). Optional fallback source: `hook/pet-statusline.mjs` → `~/.claude-pet/usage.json` (`npx tsx daemon/src/cli.ts install-statusline [--dry-run]`).
+Display logic: `ui/src/renderer/usage.ts` (stale after a failed request or 190 s).
+
+### Models and settings
+Models are Codex-format packs (`pet.json` + 1536×1872 sheet, 8×9 cells of 192×208). `ui/src/models/zip.ts` reads ZIPs in memory with strict checks; `install.ts` validates, installs atomically and never overwrites. Settings (`ui/src/settings.ts`): autostart, notify, hotkey, active model, appearance colors (`#rrggbb`).
+The renderer can switch models without a restart (`loadSprite` in `app.ts`).
+
+## Build and test (verified)
+```
+export PATH=$HOME/.local/node/bin:$PATH
+npm install && (cd ui && npm install)
+npm run build          # bridge + UI bundles
+npm test               # Vitest
+npm run test:py        # PTY wrapper + shell integration checks
+npx tsc --noEmit -p .  # 2 known errors in ui/src/sprite/loadPet.test.ts (import.meta in a test), harmless
+npm run dist           # build + installer: ui/release/Claude-Pet-Setup-<version>.exe (run from WSL; uses cmd.exe)
+```
+Run the installer normally (one-click NSIS, per-user, installs to `%LOCALAPPDATA%\Programs\claude-pet` and starts the app); `/S` hung in earlier tests.
+To test the real UI: start `Claude Pet.exe --remote-debugging-port=9333` (listens on Windows localhost only; drive it with Windows `node.exe`); `--user-data-dir=<dir>` gives a clean profile.
+
+## Decisions (do not revisit without a reason)
+- The Agent SDK cannot attach to a running `claude`; tmux/reptyr do not work (ptrace_scope=1); `messagingSocketPath` in `~/.claude/sessions` is undocumented and not a user-input channel.
+- A stdlib-Python PTY wrapper was chosen (node-pty needs a compiler).
+- Usage limits: no private endpoints, no reading OAuth tokens, no scraping; the Admin/Usage API needs an organization key and has no Pro plan windows.
+- Character packs that are not ours (Miku, Clawd) are third-party assets: Miku is never tracked in this repository; Clawd ships with attribution and an explicit "redistribution terms not verified" note.
+
+## Known limitations
+Esc typed in the first seconds of a turn (while `UserPromptSubmit` hooks run) may be ignored by Claude Code; `get_usage` is experimental; tray menu is not automatically tested.

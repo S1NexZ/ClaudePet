@@ -1,0 +1,31 @@
+{
+  "name": "claude-pet",
+  "private": true,
+  "version": "0.2.0",
+  "type": "module",
+  "workspaces": [
+    "shared",
+    "daemon",
+    "hook"
+  ],
+  "scripts": {
+    "test": "vitest run",
+    "start": "bash scripts/start.sh",
+    "install-hooks": "tsx daemon/src/cli.ts install-hooks",
+    "build": "node daemon/build.mjs && node ui/build.mjs",
+    "dist": "npm run build && cd ui && cmd.exe /c \"npx electron-builder --win\"",
+    "test:py": "python3 scripts/test-pet-claude.py && python3 scripts/test-shell-integration.py"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "esbuild": "^0.28.2",
+    "tsx": "^4.23.15",
+    "typescript": "^5.6.0",
+    "vitest": "^2.1.0"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/S1NexZ/ClaudePet.git"
+  }
+}
