@@ -4,6 +4,11 @@
 
 ## Unreleased
 
+- **Universal integration.** The pet now sees Claude Code sessions everywhere, not only in WSL: a Windows host (HTTP hooks on `127.0.0.1:47821`) takes sessions from PowerShell, CMD, Windows Terminal, VS Code terminals and the Claude desktop app, and merges them with the WSL ones (a `Win` / `WSL` / `App` tag marks each session).
+- **Talking to any session.** A message from the pet chat reaches a session without a PTY through the *mailbox*: a background `asyncRewake` hook long-polls the pet and wakes the session with the text (verified end to end on a real idle Claude Code session). `pet-helper.exe` (C#, built with the .NET Framework compiler) is the Windows waiter, `pet-hook.mjs wait` the WSL one.
+- **Settings → Connections.** Per-host status and Connect / Update / Disconnect for the hooks in `settings.json` (always with the diff and a `.bak` copy; the user's own hooks are never touched).
+- **Permissions in the pet (opt-in, off by default).** Answer Claude Code's permission questions with Allow / Deny in the pet through the `PermissionRequest` hook; no answer in 30 s leaves Claude Code's normal dialog.
+- Running sessions are discovered from recent transcripts even before any hook arrives.
 - Idle load cut from ~80% to ~15% of one core: the window is only as tall as its content again (it hangs from the pet's top, so growing never moves the pet), the heavy DOM work runs at ~15 Hz, the stage is `position: fixed` (no focus-scroll jumps).
 - Idle GPU load halved: the breathing animation is stepped instead of repainting every frame. The usage ring is a bit more opaque at rest.
 - Panels open below the pet again; the constant-size window hangs from the pet's top, so it can be dragged anywhere (panels may reach past the screen edge) and never snaps back.

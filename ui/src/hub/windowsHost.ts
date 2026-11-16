@@ -6,6 +6,7 @@ import { createBridge } from '../../../daemon/src/bridge.js';
 import { createMailbox } from '../../../daemon/src/mailbox.js';
 import { startHookServer } from '../../../daemon/src/hookHttp.js';
 import { readTranscript } from '../../../daemon/src/transcript.js';
+import { findRunning } from '../../../daemon/src/adopt.js';
 import { planHostHooks, removeHostHooks, hooksStatus, readSettingsFile, writeSettingsFile, type HooksStatus } from '../../../daemon/src/hookConfig.js';
 import type { AppCommand, BridgeMessage } from '../../../shared/src/types.js';
 import { L } from '../../../shared/src/i18n.js';
@@ -59,6 +60,16 @@ export function createWindowsHost(o: WindowsHostOpts) {
     hooks: { settingsPath, hookPath: '', nodePath: '' },
   });
   let server: { port: number; close(): Promise<void> } | null = null;
+  const adopted = new Set<string>();
+  let lastAdopt = 0;
+  /** sessions seen only in transcripts (the pet started later, or hooks are not connected there): shown as idle until a hook arrives */
+  const adopt = async (now: number) => {
+    for (const r of await findRunning(join(o.claudeHome, 'projects'), now, 10 * 60_000)) {
+      if (adopted.has(r.id) || store.get(r.id)) continue;
+      adopted.add(r.id);
+      bridge.onHook({ hook_event_name: 'SessionStart', session_id: r.id, cwd: r.cwd, transcript_path: r.path });
+    }
+  };
   const origin = () => `http://127.0.0.1:${server?.port ?? o.port}`;
   const plan = (permissions: boolean) => {
     const { current, raw } = readSettingsFile(settingsPath);
@@ -82,7 +93,7 @@ export function createWindowsHost(o: WindowsHostOpts) {
     },
     async stop(): Promise<void> { await server?.close(); server = null; },
     handle: (cmd: AppCommand) => bridge.handle(cmd),
-    tick: (now: number) => bridge.tick(now),
+    tick: (now: number) => { bridge.tick(now); if (now - lastAdopt > 15_000) { lastAdopt = now; void adopt(now).catch(() => {}); } },
     snapshot: () => bridge.snapshot(),
     /** what is installed in the Windows settings.json now, and what installing / updating would change */
     state(permissions: boolean = o.permissionsFromPet()): HostHooksState {

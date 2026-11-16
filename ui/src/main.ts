@@ -281,7 +281,8 @@ if (primary) app.whenReady().then(async () => {
     if (!cmd || typeof cmd !== 'object') return;
     if (cmd.type === 'send') {
       const s = sessionById(String(cmd.sessionId));
-      if (s && !s.owned && !s.pty && !warnedTerminal.has(s.id)) {
+      // the warning is for the SDK fallback only: a session reachable through its mailbox (or on the Windows host) is woken by a hook, no second process
+      if (s && !s.owned && !s.pty && !s.mailbox && s.host !== 'windows' && !warnedTerminal.has(s.id)) {
         const r = await dialog.showMessageBox(win, confirmOptions({
           type: 'warning', action: L('Отправить', 'Send', '发送'), cancel: L('Отмена', 'Cancel', '取消'),
           message: L(`«${s.project}» открыта в терминале`, `“${s.project}” is open in a terminal`, `“${s.project}”已在终端中打开`),

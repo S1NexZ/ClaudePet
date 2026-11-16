@@ -87,3 +87,19 @@ describe('windows host', () => {
     expect(() => host.apply(false)).toThrow(/not valid JSON/);
   });
 });
+
+describe('windows host: adoption', () => {
+  it('adopts a recently written transcript as an idle session of the right front end (no hook needed)', async () => {
+    const { host, claudeHome, out } = boot();
+    await host.start();
+    const { mkdirSync } = await import('node:fs');
+    const dir = join(claudeHome, 'projects', 'C--Users-x-app');
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, 'abc-123.jsonl'), JSON.stringify({ type: 'user', entrypoint: 'claude-desktop', cwd: 'C:\\Users\\x\\app' }) + '\n');
+    host.tick(Date.now());
+    await new Promise((r) => setTimeout(r, 300));
+    host.tick(Date.now() + 2000);
+    const snap = [...out].reverse().find((m) => m.type === 'snapshot') as any;
+    expect(snap.sessions[0]).toMatchObject({ id: 'abc-123', project: 'app', state: 'idle', source: 'claude-desktop' });
+  });
+});

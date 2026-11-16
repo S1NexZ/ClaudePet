@@ -12,6 +12,7 @@ import { createBridge } from './bridge.js';
 import { listenHooks, defaultSocketPath } from './hookSocket.js';
 import { startHookServer } from './hookHttp.js';
 import { createMailbox } from './mailbox.js';
+import { findRunning } from './adopt.js';
 import { readTranscript } from './transcript.js';
 import { createUsageSource } from './usage.js';
 import { createUsagePoller, makeLiveFetch } from './usageLive.js';
@@ -67,7 +68,16 @@ listenHooks(defaultSocketPath(), (e) => bridge.onHook(e))
     send({ type: 'ready', claude: claude ?? null, distro: process.env.WSL_DISTRO_NAME ?? '' });
     bridge.snapshot();
     poller?.start();
-    const timer = setInterval(() => bridge.tick(Date.now()), 1500);
+    const adopted = new Set<string>();
+    let lastAdopt = 0;
+    const adoptRecent = async (now: number) => {
+      for (const r of await findRunning(join(homedir(), '.claude', 'projects'), now, 10 * 60_000)) {
+        if (adopted.has(r.id) || store.get(r.id)) continue;
+        adopted.add(r.id);
+        bridge.onHook({ hook_event_name: 'SessionStart', session_id: r.id, cwd: r.cwd, transcript_path: r.path });
+      }
+    };
+    const timer = setInterval(() => { const now = Date.now(); bridge.tick(now); if (now - lastAdopt > 15_000) { lastAdopt = now; void adoptRecent(now).catch(() => {}); } }, 1500);
     const quit = () => { clearInterval(timer); runner.closeAll(); void Promise.all([poller?.stop(), hooks.close(), http?.close()]).then(() => process.exit(0)); };
     const rl = createInterface({ input: process.stdin });
     rl.on('line', (line) => {
