@@ -9,6 +9,30 @@ const textOf = (content: unknown): string =>
       ? content.filter((b) => b?.type === 'text' && typeof b.text === 'string').map((b) => b.text).join('\n')
       : '';
 
+/** A message the pet delivered through the mailbox arrives as a hook-feedback record: this marker precedes the user's own text. */
+export const PET_MARKER = '[Claude Pet message]';
+export const petMessageOf = (t: string): string | null => {
+  const m = /\[Claude Pet message\]\s*([\s\S]*?)\s*(?:<\/system-reminder>|$)/.exec(t);
+  return m && m[1] ? m[1] : null;
+};
+
+/** Which Claude Code front end wrote a transcript (`entrypoint` of its first records: cli, claude-desktop, sdk-cli, vscode, ...). */
+export async function readEntrypoint(path: string): Promise<string | null> {
+  if (!path.endsWith('.jsonl')) return null;
+  try {
+    const fh = await open(path, 'r');
+    try {
+      const buf = Buffer.alloc(65536);
+      const { bytesRead } = await fh.read(buf, 0, buf.length, 0);
+      for (const line of buf.subarray(0, bytesRead).toString('utf8').split('\n').slice(0, 40)) {
+        const m = /"entrypoint":"([\w-]+)"/.exec(line);
+        if (m) return m[1];
+      }
+    } finally { await fh.close(); }
+  } catch { /* unreadable: unknown */ }
+  return null;
+}
+
 /** Extracts the visible conversation (user text, assistant text, tool calls) from Claude Code transcript JSONL. */
 export function parseTranscript(jsonl: string, limit = 40): ChatItem[] {
   const out: ChatItem[] = [];
@@ -20,6 +44,7 @@ export function parseTranscript(jsonl: string, limit = 40): ChatItem[] {
     if (e?.type === 'user') {
       const t = textOf(e.message?.content).trim();
       if (t && !t.startsWith('<')) out.push({ role: 'user', text: t });
+      else if (t.includes(PET_MARKER)) { const m = petMessageOf(t); if (m) out.push({ role: 'user', text: m }); }
     } else if (e?.type === 'assistant') {
       for (const b of Array.isArray(e.message?.content) ? e.message.content : []) {
         if (b?.type === 'text' && b.text?.trim()) out.push({ role: 'assistant', text: b.text.trim() });

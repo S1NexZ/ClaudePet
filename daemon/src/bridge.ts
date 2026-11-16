@@ -2,7 +2,9 @@ import { readFileSync, existsSync } from 'node:fs';
 import type { SessionStore } from './sessionStore.js';
 import type { HookPayload } from './hookSocket.js';
 import { toWslPath } from './paths.js';
-import { interruptedSince, readOriginalCwd } from './transcript.js';
+import { interruptedSince, readOriginalCwd, readEntrypoint, PET_MARKER } from './transcript.js';
+import type { Mailbox } from './mailbox.js';
+import { summarize } from './summary.js';
 import { sendPrompt, sendEsc, PtyGoneError } from './ptySend.js';
 import { planHooks, runInstall } from './installHooks.js';
 import type { AppCommand, BridgeMessage, ChatEvent, ChatItem, Snapshot, UsageInfo } from '../../shared/src/types.js';
@@ -41,6 +43,13 @@ export function createBridge(o: {
   usage?: { version(): number | string; read(): Promise<UsageInfo> };
   /** whether the transcript got an "interrupted by user" entry after a time (injectable for tests) */
   interrupted?: (path: string, sinceMs: number) => Promise<boolean>;
+  /** the pet's mailbox: delivers messages to sessions without a PTY through their armed waiter */
+  mailbox?: Mailbox;
+  /** no SDK fallback on this host: a message for a session without a PTY always goes to the mailbox (queued until a waiter arrives) */
+  mailboxOnly?: boolean;
+  /** answer PermissionRequest hooks through the pet (off by default); the Windows host reads the app setting here */
+  permissionsFromPet?: () => boolean;
+  permissionTimeoutMs?: number;
   /** delay of the second transcript read after Stop (Claude writes its reply after the hook fires) */
   stopRecheckMs?: number;
 }) {
@@ -55,9 +64,14 @@ export function createBridge(o: {
   const pids = new Map<string, number>();
   /** sessions the user ended: their late hook events (Stop, SessionEnd) must not bring them back */
   const ended = new Set<string>();
+  let permOn = false;
+  const permissionsOn = () => (o.permissionsFromPet ? o.permissionsFromPet() : permOn);
+  const asks = new Map<string, { sessionId: string; resolve: (d: 'allow' | 'deny' | null) => void; timer: ReturnType<typeof setTimeout> }>();
+  let askSeq = 0;
   let lastSnap = '';
   const snapshot = (onlyIfChanged = false) => {
     const s = snapshotOf(o.store);
+    if (o.mailbox) s.sessions = s.sessions.map((x) => ({ ...x, mailbox: o.mailbox!.hasWaiter(x.id) }));
     const key = JSON.stringify(s);
     if (onlyIfChanged && key === lastSnap) return;
     lastSnap = key;
@@ -117,6 +131,14 @@ export function createBridge(o: {
                 o.store.clearPty(id); // wrapper is gone: fall back to resuming through the SDK
               }
             }
+            if (o.mailbox && s && !s.owned && (o.mailboxOnly || o.mailbox.hasWaiter(id))) {
+              // no PTY: wake the session through its mailbox waiter (the text goes out as a hook-feedback reminder)
+              const text = String(cmd.text);
+              const r = o.mailbox.send(id, `${L('Пользователь написал это через Claude Pet. Считай это его сообщением и ответь на него.', 'The user wrote this through Claude Pet. Treat it as their message and answer it.', '用户通过 Claude Pet 写了这条消息。请把它当作用户的消息并回答。')}\n${PET_MARKER} ${text}`);
+              o.out({ type: 'chat', sessionId: id, event: { kind: 'user', text } });
+              if (r === 'delivered') o.store.apply({ hook_event_name: 'UserPromptSubmit', session_id: id, cwd: s.cwd });
+              break;
+            }
             await ensureResumeCwd(id);
             await o.runner.send(id, String(cmd.text));
             break;
@@ -130,7 +152,13 @@ export function createBridge(o: {
           }
           case 'language': if (cmd.lang === 'ru' || cmd.lang === 'en' || cmd.lang === 'zh') setLang(cmd.lang); break;
           case 'permission-mode': if (cmd.mode === 'ask' || cmd.mode === 'edits' || cmd.mode === 'all') o.runner.setPermissionPolicy(cmd.mode); break;
-          case 'permission': o.runner.respondPermission(String(cmd.id), cmd.allow === true); break;
+          case 'hook-permissions': permOn = cmd.on === true; return;
+          case 'permission': {
+            const ask = asks.get(String(cmd.id));
+            if (ask) { clearTimeout(ask.timer); asks.delete(String(cmd.id)); o.store.setPending(ask.sessionId, undefined); o.store.apply({ hook_event_name: 'UserPromptSubmit', session_id: ask.sessionId, cwd: o.store.get(ask.sessionId)?.cwd ?? '' }); ask.resolve(cmd.allow === true ? 'allow' : 'deny'); break; }
+            o.runner.respondPermission(String(cmd.id), cmd.allow === true);
+            break;
+          }
           case 'history': await history(String(cmd.sessionId)); return;
           case 'usage': if (o.usage) { usageVersion = o.usage.version(); o.out({ type: 'usage', usage: await o.usage.read() }); } return;
           case 'models': o.out({ type: 'models', models: await o.runner.models() }); return;
@@ -182,11 +210,27 @@ export function createBridge(o: {
       const claudePid = (e.pet_parents ?? []).find((p) => Number.isInteger(p) && proc.name(p) === 'claude');
       if (claudePid) pids.set(e.session_id, claudePid);
       o.store.apply(e);
+      if (newPath && typeof e.transcript_path === 'string' && !o.store.get(e.session_id)?.source) {
+        void readEntrypoint(e.transcript_path).then((src) => { if (src) { o.store.setSource(e.session_id, src); snapshot(true); } });
+      }
       snapshot();
       const sess = o.store.get(e.session_id);
       if ((e.hook_event_name === 'Stop' || newPath || (e.hook_event_name === 'UserPromptSubmit' && sess?.pty)) && !sess?.owned) void history(e.session_id);
       // the hook fires before Claude flushes the new lines to the transcript: read again shortly after
       if ((e.hook_event_name === 'Stop' || (e.hook_event_name === 'UserPromptSubmit' && sess?.pty)) && !sess?.owned) rereadLater(e.session_id);
+    },
+    /** A PermissionRequest hook: shown in the pet as Allow / Deny when the user switched that on; null = no opinion (the normal dialog stays). */
+    onPermission(e: HookPayload): Promise<'allow' | 'deny' | null> {
+      if (!permissionsOn() || o.store.get(e.session_id)?.owned) return Promise.resolve(null);
+      o.store.apply({ hook_event_name: 'Notification', session_id: e.session_id, cwd: e.cwd, message: 'permission' });
+      const id = `hp-${++askSeq}`;
+      o.store.setPending(e.session_id, { id, tool: String(e.tool_name ?? ''), summary: summarize(String(e.tool_name ?? ''), (e.tool_input ?? {}) as Record<string, unknown>) });
+      snapshot();
+      return new Promise((resolve) => {
+        const timer = setTimeout(() => { asks.delete(id); o.store.setPending(e.session_id, undefined); snapshot(); resolve(null); }, o.permissionTimeoutMs ?? 30_000);
+        timer.unref?.();
+        asks.set(id, { sessionId: e.session_id, resolve, timer });
+      });
     },
     onChat(sessionId: string, event: ChatEvent): void {
       o.out({ type: 'chat', sessionId, event });

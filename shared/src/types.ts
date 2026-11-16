@@ -60,6 +60,8 @@ export const PERMISSION_POLICIES: readonly PermissionPolicy[] = ['ask', 'edits',
 export type AppCommand =
   | { type: 'language'; lang: 'ru' | 'en' | 'zh' }
   | { type: 'permission-mode'; mode: PermissionPolicy }
+  /** answer Claude Code's PermissionRequest hook through the pet (WSL bridge; the Windows host reads the setting directly) */
+  | { type: 'hook-permissions'; on: boolean }
   | { type: 'start'; cwd: string; prompt: string }
   | { type: 'send'; sessionId: string; text: string }
   | { type: 'permission'; id: string; allow: boolean }

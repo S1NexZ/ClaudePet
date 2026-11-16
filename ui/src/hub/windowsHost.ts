@@ -1,0 +1,114 @@
+import { join } from 'node:path';
+import { randomBytes } from 'node:crypto';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { SessionStore } from '../../../daemon/src/sessionStore.js';
+import { createBridge } from '../../../daemon/src/bridge.js';
+import { createMailbox } from '../../../daemon/src/mailbox.js';
+import { startHookServer } from '../../../daemon/src/hookHttp.js';
+import { readTranscript } from '../../../daemon/src/transcript.js';
+import { planHostHooks, removeHostHooks, hooksStatus, readSettingsFile, writeSettingsFile, type HooksStatus } from '../../../daemon/src/hookConfig.js';
+import type { AppCommand, BridgeMessage } from '../../../shared/src/types.js';
+import { L } from '../../../shared/src/i18n.js';
+
+export const WINDOWS_HOST_PORT = 47821;
+
+export interface WindowsHostOpts {
+  /** the app's data folder (the hook token is kept there) */
+  dataDir: string;
+  /** `C:\Users\<user>\.claude` */
+  claudeHome: string;
+  /** 0 = any free port (tests) */
+  port: number;
+  /** pet-helper.exe (the mailbox waiter); without it the host still works but cannot deliver messages */
+  helperPath?: string;
+  out: (m: BridgeMessage) => void;
+  permissionsFromPet: () => boolean;
+}
+
+export interface HostHooksState extends HooksStatus { settingsPath: string; diff: string; error?: string }
+
+/**
+ * The Windows side of the pet: the same transport-free bridge the WSL process runs, inside Electron's main process, fed by Claude Code's
+ * HTTP hooks (PowerShell / CMD / Windows Terminal / VS Code terminal / the desktop app all read C:\Users\<user>\.claude\settings.json).
+ * Messages to its sessions go through the mailbox; there is no SDK fallback here.
+ */
+export function createWindowsHost(o: WindowsHostOpts) {
+  const settingsPath = join(o.claudeHome, 'settings.json');
+  const tokenFile = join(o.dataDir, 'hub.json');
+  const token = (() => {
+    try { const t = JSON.parse(readFileSync(tokenFile, 'utf8'))?.token; if (typeof t === 'string' && /^[0-9a-f]{16,}$/.test(t)) return t; } catch { /* first run */ }
+    const t = randomBytes(16).toString('hex');
+    mkdirSync(o.dataDir, { recursive: true });
+    writeFileSync(tokenFile, JSON.stringify({ token: t }));
+    return t;
+  })();
+  const store = new SessionStore();
+  const mailbox = createMailbox();
+  const no = (ru: string, en: string, zh: string) => async () => { throw new Error(L(ru, en, zh)); };
+  const bridge = createBridge({
+    store, out: o.out, readTranscript, mailbox, mailboxOnly: true, permissionsFromPet: o.permissionsFromPet,
+    runner: {
+      models: async () => [], setPermissionPolicy: () => {}, release: () => false, respondPermission: () => {},
+      setModel: no('Сменить модель можно в самой сессии', 'Change the model inside the session', '请在会话内切换模型'),
+      btw: no('/btw доступен только для сессий в WSL', '/btw works only for sessions in WSL', '/btw 仅适用于 WSL 中的会话'),
+      start: no('Новые чаты запускаются в WSL', 'New chats start in WSL', '新聊天在 WSL 中启动'),
+      send: no('Эту сессию нельзя разбудить: в ней не подключены хуки Claude Pet', 'This session cannot be reached: Claude Pet hooks are not connected in it', '无法连接此会话：其中未连接 Claude Pet 钩子'),
+      interrupt: no('Остановить можно только сессию в терминале-обёртке', 'Only a session in the wrapper terminal can be stopped', '只能停止包装终端中的会话'),
+    },
+    proc: { name: () => null, kill: () => {} },
+    hooks: { settingsPath, hookPath: '', nodePath: '' },
+  });
+  let server: { port: number; close(): Promise<void> } | null = null;
+  const origin = () => `http://127.0.0.1:${server?.port ?? o.port}`;
+  const plan = (permissions: boolean) => {
+    const { current, raw } = readSettingsFile(settingsPath);
+    const r = planHostHooks(current, { kind: 'windows', origin: origin(), token, helperPath: o.helperPath, permissions });
+    return { current, raw, ...r };
+  };
+
+  return {
+    token,
+    get port() { return server?.port ?? 0; },
+    /** starts the receiver; resolves false (and reports why) when the port is taken */
+    async start(): Promise<boolean> {
+      try {
+        server = await startHookServer({ port: o.port, token, mailbox, onEvent: (e) => bridge.onHook(e), onPermission: (e) => bridge.onPermission(e) });
+        bridge.snapshot();
+        return true;
+      } catch (e) {
+        o.out({ type: 'error', message: L(`Порт ${o.port} занят: хуки Windows не подключены (${(e as Error).message})`, `Port ${o.port} is busy: Windows hooks are not connected (${(e as Error).message})`, `端口 ${o.port} 被占用：未连接 Windows 钩子（${(e as Error).message}）`) });
+        return false;
+      }
+    },
+    async stop(): Promise<void> { await server?.close(); server = null; },
+    handle: (cmd: AppCommand) => bridge.handle(cmd),
+    tick: (now: number) => bridge.tick(now),
+    snapshot: () => bridge.snapshot(),
+    /** what is installed in the Windows settings.json now, and what installing / updating would change */
+    state(permissions: boolean = o.permissionsFromPet()): HostHooksState {
+      try {
+        const p = plan(permissions);
+        return { ...hooksStatus(p.current, 'windows'), settingsPath, diff: p.diff };
+      } catch (e) {
+        return { events: false, mailbox: false, permissions: false, settingsPath, diff: '', error: (e as Error).message };
+      }
+    },
+    /** writes our hooks after the caller got the user's consent (a .bak copy is kept) */
+    apply(permissions: boolean): { applied: boolean; diff: string } {
+      const p = plan(permissions);
+      if (!p.diff) return { applied: false, diff: '' };
+      writeSettingsFile(settingsPath, p.next, p.raw !== undefined);
+      return { applied: true, diff: p.diff };
+    },
+    /** removes only our entries */
+    remove(): { applied: boolean; diff: string } {
+      const { current, raw } = readSettingsFile(settingsPath);
+      const r = removeHostHooks(current);
+      if (!r.diff) return { applied: false, diff: '' };
+      writeSettingsFile(settingsPath, r.next, raw !== undefined);
+      return { applied: true, diff: r.diff };
+    },
+    settingsPath,
+    hasSettings: () => existsSync(settingsPath),
+  };
+}

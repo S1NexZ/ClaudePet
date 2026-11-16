@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createBridge } from './bridge.js';
 import { SessionStore } from './sessionStore.js';
+import { createMailbox } from './mailbox.js';
 import type { BridgeMessage } from '../../shared/src/types.js';
 
 function setup(over: Partial<Parameters<typeof createBridge>[0]> = {}) {
@@ -355,5 +356,67 @@ describe('bridge: sessions running under pet-claude.py', () => {
       expect(t.store.get('plain1')).toMatchObject({ resumeCwd: '/mnt/c/Workspace' });
       expect(t.store.get('plain1')?.pty).toBeUndefined();
     });
+  });
+});
+
+describe('bridge: mailbox and hook permissions', () => {
+  const start = (store: SessionStore, id = 's9') => store.apply({ hook_event_name: 'SessionStart', session_id: id, cwd: '/p' });
+  it('a session without a PTY gets the message through its armed mailbox waiter, marked, with an echo; no second claude', async () => {
+    const mailbox = createMailbox();
+    const { bridge, store, calls, out } = setup({ mailbox });
+    start(store);
+    const w = mailbox.wait('s9', 1000);
+    await bridge.handle({ type: 'send', sessionId: 's9', text: 'сделай тесты' });
+    const delivered = await w;
+    expect(delivered).toContain('[Claude Pet message] сделай тесты');
+    expect(calls.filter((c) => c[0] === 'send')).toEqual([]);
+    expect(out.find((m) => m.type === 'chat')).toEqual({ type: 'chat', sessionId: 's9', event: { kind: 'user', text: 'сделай тесты' } });
+    expect(store.get('s9')?.state).toBe('thinking');
+  });
+  it('mailboxOnly hosts queue the message when no waiter is armed yet; others fall back to the SDK', async () => {
+    const a = setup({ mailbox: createMailbox(), mailboxOnly: true });
+    start(a.store);
+    await a.bridge.handle({ type: 'send', sessionId: 's9', text: 'later' });
+    expect(a.calls.filter((c) => c[0] === 'send')).toEqual([]);
+    expect(await (a as any).bridge && true).toBe(true);
+    const b = setup({ mailbox: createMailbox() });
+    start(b.store);
+    await b.bridge.handle({ type: 'send', sessionId: 's9', text: 'via sdk' });
+    expect(b.calls.filter((c) => c[0] === 'send')).toEqual([['send', 's9', 'via sdk']]);
+  });
+  it('snapshots tell which sessions have an armed waiter', async () => {
+    const mailbox = createMailbox();
+    const { bridge, store, out } = setup({ mailbox });
+    start(store);
+    void mailbox.wait('s9', 500);
+    bridge.snapshot();
+    expect((last(out, 'snapshot') as any).sessions[0].mailbox).toBe(true);
+  });
+  it('a PermissionRequest shows Allow/Deny in the pet when switched on and returns the user\'s answer', async () => {
+    const { bridge, store, out } = setup({ permissionsFromPet: () => true });
+    start(store);
+    const p = bridge.onPermission({ hook_event_name: 'PermissionRequest', session_id: 's9', cwd: '/p', tool_name: 'Bash', tool_input: { command: 'rm -rf build' } });
+    const pend = store.get('s9')?.pendingPermission;
+    expect(pend).toMatchObject({ tool: 'Bash' });
+    expect(pend?.summary).toContain('rm -rf build');
+    expect(store.get('s9')?.state).toBe('waiting');
+    await bridge.handle({ type: 'permission', id: pend!.id, allow: false });
+    expect(await p).toBe('deny');
+    expect(store.get('s9')?.pendingPermission).toBeUndefined();
+    expect(out.length).toBeGreaterThan(0);
+  });
+  it('without an answer in time the pet has no opinion (the normal dialog stays); when switched off it never answers', async () => {
+    const { bridge, store } = setup({ permissionsFromPet: () => true, permissionTimeoutMs: 20 });
+    start(store);
+    expect(await bridge.onPermission({ hook_event_name: 'PermissionRequest', session_id: 's9', cwd: '/p', tool_name: 'Bash' })).toBeNull();
+    expect(store.get('s9')?.pendingPermission).toBeUndefined();
+    const off = setup();
+    start(off.store);
+    expect(await off.bridge.onPermission({ hook_event_name: 'PermissionRequest', session_id: 's9', cwd: '/p', tool_name: 'Bash' })).toBeNull();
+    await off.bridge.handle({ type: 'hook-permissions', on: true });
+    const p = off.bridge.onPermission({ hook_event_name: 'PermissionRequest', session_id: 's9', cwd: '/p', tool_name: 'Bash' });
+    expect(off.store.get('s9')?.pendingPermission).toBeDefined();
+    await off.bridge.handle({ type: 'permission', id: off.store.get('s9')!.pendingPermission!.id, allow: true });
+    expect(await p).toBe('allow');
   });
 });

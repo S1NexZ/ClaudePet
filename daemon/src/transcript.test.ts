@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { parseTranscript, readTranscript, hasInterruptSince, interruptedSince, readOriginalCwd } from './transcript.js';
+import { parseTranscript, readTranscript, hasInterruptSince, interruptedSince, readOriginalCwd, petMessageOf, readEntrypoint } from './transcript.js';
 
 const L = (o: unknown) => JSON.stringify(o);
 const lines = [
@@ -78,5 +78,28 @@ describe('readOriginalCwd', () => {
     expect(await readOriginalCwd(file(['{"type":"mode"}']))).toBeNull();
     expect(await readOriginalCwd('/nonexistent/x.jsonl')).toBeNull();
     expect(await readOriginalCwd(file(['{"cwd":"/x"}'], 'notes.txt'))).toBeNull();
+  });
+});
+
+describe('pet messages in transcripts', () => {
+  it('shows a message delivered through the mailbox as the user\'s own', () => {
+    const rec = { type: 'user', message: { role: 'user', content: '<task-notification>\n<summary>Stop hook feedback</summary>\n</task-notification>\n<system-reminder>\nStop hook blocking error from command "x": The user wrote this through Claude Pet.\n[Claude Pet message] напиши тесты\n</system-reminder>' } };
+    const items = parseTranscript(JSON.stringify(rec));
+    expect(items).toEqual([{ role: 'user', text: 'напиши тесты' }]);
+  });
+  it('petMessageOf returns null for other reminders', () => {
+    expect(petMessageOf('<system-reminder>something else</system-reminder>')).toBeNull();
+  });
+});
+
+describe('readEntrypoint', () => {
+  it('tells which Claude Code front end wrote a transcript', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'ep-'));
+    const f = join(dir, 'a.jsonl');
+    writeFileSync(f, '{"type":"mode"}\n{"type":"user","entrypoint":"claude-desktop","version":"2.1.325"}\n');
+    expect(await readEntrypoint(f)).toBe('claude-desktop');
+    writeFileSync(join(dir, 'b.jsonl'), '{"type":"mode"}\n');
+    expect(await readEntrypoint(join(dir, 'b.jsonl'))).toBeNull();
+    expect(await readEntrypoint(join(dir, 'missing.jsonl'))).toBeNull();
   });
 });

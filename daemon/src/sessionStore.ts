@@ -84,6 +84,11 @@ export class SessionStore {
     }
   }
 
+  setSource(id: string, source: string): void {
+    const s = this.sessions.get(id);
+    if (s && source) s.source = source;
+  }
+
   clearPty(id: string): void {
     const s = this.sessions.get(id);
     if (s) delete s.pty;
