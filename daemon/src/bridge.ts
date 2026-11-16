@@ -181,12 +181,16 @@ export function createBridge(o: {
             const id = String(cmd.sessionId);
             if (!o.runner.release(id)) {
               const pid = pids.get(id);
-              if (!pid || proc.name(pid) !== 'claude') throw new Error(L('Не нашёл процесс этой сессии: возможно, она уже закрыта', 'Could not find this session’s process: it may already be closed', '找不到此会话的进程：可能已关闭'));
-              proc.kill(pid);
+              if (pid && proc.name(pid) === 'claude') proc.kill(pid); // no process found = already closed: the stale row is simply dropped
             }
             o.store.remove(id);
             pids.delete(id);
             ended.add(id);
+            break;
+          }
+          case 'dismiss': { // hide a session from the list without touching its process (a live one reappears on its next prompt)
+            const id = String(cmd.sessionId);
+            o.store.remove(id); pids.delete(id); ended.add(id);
             break;
           }
           case 'hooks': {

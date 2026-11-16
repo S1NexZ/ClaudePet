@@ -73,6 +73,7 @@ export type AppCommand =
   | { type: 'setModel'; sessionId: string | null; model: string }
   | { type: 'btw'; sessionId: string; text: string }
   | { type: 'release'; sessionId: string }
+  | { type: 'dismiss'; sessionId: string }
   | { type: 'end'; sessionId: string }
   | { type: 'usage' };
 

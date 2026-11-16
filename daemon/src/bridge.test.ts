@@ -174,13 +174,25 @@ describe('bridge', () => {
     expect(last(out, 'snapshot')?.sessions).toEqual([]);
   });
 
-  it('end refuses when the process is gone or is no longer claude (pid reuse), and keeps the session', async () => {
+  it('end never kills a pid that is no longer claude (pid reuse) and just drops the stale row', async () => {
     const { bridge, out, killed, procs } = setup();
     bridge.onHook({ hook_event_name: 'Stop', session_id: 't1', cwd: '/x', pet_parents: [99, 4242] } as any);
     procs.set(4242, 'vim');
     await bridge.handle({ type: 'end', sessionId: 't1' });
     expect(killed).toEqual([]);
-    expect(last(out, 'error')?.message).toMatch(/процесс/i);
+    expect(last(out, 'error')).toBeUndefined();
+    expect(last(out, 'snapshot')?.sessions).toEqual([]);
+  });
+
+  it('dismiss hides a session without touching its process, and late events do not bring it back', async () => {
+    const { bridge, out, killed } = setup();
+    bridge.onHook({ hook_event_name: 'Stop', session_id: 't1', cwd: '/x', pet_parents: [99, 4242] } as any);
+    await bridge.handle({ type: 'dismiss', sessionId: 't1' });
+    expect(killed).toEqual([]);
+    expect(last(out, 'snapshot')?.sessions).toEqual([]);
+    bridge.onHook({ hook_event_name: 'PostToolUse', session_id: 't1', cwd: '/x' } as any);
+    expect(last(out, 'snapshot')?.sessions).toEqual([]);
+    bridge.onHook({ hook_event_name: 'UserPromptSubmit', session_id: 't1', cwd: '/x' } as any);
     expect(last(out, 'snapshot')?.sessions.map((x) => x.id)).toEqual(['t1']);
   });
 

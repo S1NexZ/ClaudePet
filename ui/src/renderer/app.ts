@@ -14,6 +14,8 @@ import { createSettingsPanel } from './settingsPanel.js';
 import { createModelsTab, type ModelsHost } from './modelsTab.js';
 import { clampScale } from '../petScale.js';
 import { localizeHtml } from './htmlText.js';
+import { syncRows, type RowData } from './rowList.js';
+import { initTooltips } from './tooltip.js';
 import { createMotion, animatePanels } from './motion.js';
 import { removeLightFringe } from '../sprite/fringe.js';
 import { dominantHue, type Appearance } from '../appearance.js';
@@ -91,6 +93,7 @@ async function main() {
   const cfg = await host.config();
   setLang(cfg.lang ?? 'ru');
   localizeHtml();
+  initTooltips();
   const { pet } = cfg;
 
   // ---- state ----
@@ -423,28 +426,22 @@ async function main() {
   // ---- chat header switcher: one click on a session switches to its chat ----
   const setMenu = (open: boolean) => { chatMenu.hidden = !open; switchBtn.setAttribute('aria-expanded', String(open)); chatMenuKey = ''; if (open) hideModels(); };
   switchBtn.addEventListener('click', () => setMenu(chatMenu.hidden));
+  const dismissLabel = L('Убрать из списка', 'Remove from list', '从列表移除');
+  let newRow: HTMLElement | null = null;
   const renderChatMenu = () => {
     if (chatMenu.hidden) return;
     const now = Date.now();
     const rows = sessionRows(raw?.sessions ?? [], chatId, now);
-    const key = rows.map((r) => `${r.id}|${r.meta}|${r.current}`).join(';');
-    if (key === chatMenuKey) return;
-    chatMenuKey = key;
-    chatMenu.replaceChildren();
-    const mk = (cls: string, tone: string, name: string, meta: string, title: string, go: () => void) => {
-      const row = document.createElement('button');
-      row.className = `row ${cls}`; row.setAttribute('role', 'option'); row.title = title;
-      const dot = document.createElement('i'); dot.className = `dot ${tone}`;
-      const n = document.createElement('span'); n.className = 'name'; n.textContent = name;
-      const m = document.createElement('span'); m.className = 'meta'; m.textContent = meta;
-      row.append(dot, n, m);
-      row.addEventListener('click', () => { setMenu(false); go(); });
-      chatMenu.append(row);
-    };
-    for (const r of rows) mk(r.current ? 'current' : '', r.tone === 'busy' ? '' : r.tone, r.title, r.meta, r.cwd, () => openChat(r.id));
-    mk('new', '', L('+ Новый чат…', '+ New chat…', '+ 新聊天…'), '', L('Выбрать папку и начать новую задачу', 'Pick a folder and start a new task', '选择文件夹并开始新任务'), async () => {
-      if (await chooseFolder()) { chatId = null; pinnedId = null; mode = 'new'; input.focus(); }
-    });
+    if (!newRow) {
+      newRow = document.createElement('button'); newRow.className = 'row new'; newRow.setAttribute('role', 'option');
+      newRow.dataset.tip = L('Выбрать папку и начать новую задачу', 'Pick a folder and start a new task', '选择文件夹并开始新任务');
+      const n = document.createElement('span'); n.className = 'name'; n.textContent = L('+ Новый чат…', '+ New chat…', '+ 新聊天…');
+      newRow.append(n);
+      newRow.addEventListener('click', async () => { setMenu(false); if (await chooseFolder()) { chatId = null; pinnedId = null; mode = 'new'; input.focus(); } });
+    }
+    if (newRow.parentElement !== chatMenu) chatMenu.append(newRow);
+    const data: RowData[] = rows.map((r) => ({ id: r.id, current: r.current, tone: r.tone === 'busy' ? '' : r.tone, name: r.title, meta: r.meta, tip: r.cwd, dismissable: !r.owned }));
+    syncRows(chatMenu, data, { open: (id) => { setMenu(false); openChat(id); }, dismiss: (id) => host.send({ type: 'dismiss', sessionId: id }), dismissLabel }, newRow);
   };
   chatMenu.addEventListener('keydown', (e) => { if (e.key === 'Escape') { e.stopPropagation(); setMenu(false); input.focus(); } });
   // Ctrl+Tab / Ctrl+Shift+Tab cycle through the chats without touching the mouse
@@ -459,31 +456,22 @@ async function main() {
   const panel = $('sessions');
   if (cfg.panel) panel.hidden = false;
   $('btn-activity').addEventListener('click', () => { panel.hidden = !panel.hidden; panelKey = ''; });
+  let panelEmpty: HTMLElement | null = null;
   const renderPanel = (snap: Snapshot | null) => {
     if (panel.hidden) return;
-    const rows = [...(raw?.sessions ?? [])].sort((a, b) => b.lastEventAt - a.lastEventAt);
     const now = Date.now();
-    const key = rows.map((x) => `${x.id}|${x.state}|${x.host}|${x.source}|${Math.floor((now - x.since) / 1000)}|${x.id === snap?.attention}`).join(';') + pinnedId;
-    if (key === panelKey) return;
-    panelKey = key;
-    panel.replaceChildren();
-    if (rows.length === 0) {
-      const e = document.createElement('div'); e.className = 'empty'; e.textContent = L('Сессий пока нет', 'No sessions yet', '还没有会话');
-      panel.append(e); return;
+    const list = [...(raw?.sessions ?? [])].sort((a, b) => b.lastEventAt - a.lastEventAt);
+    if (list.length === 0) {
+      if (!panelEmpty) { panelEmpty = document.createElement('div'); panelEmpty.className = 'empty'; panelEmpty.textContent = L('Сессий пока нет', 'No sessions yet', '还没有会话'); }
+      panel.replaceChildren(panelEmpty); return;
     }
-    for (const x of rows) {
-      const row = document.createElement('button');
-      row.className = 'row' + (x.id === snap?.attention ? ' current' : '');
-      const dot = document.createElement('i');
-      dot.className = 'dot' + (x.state === 'waiting' || x.state === 'error' ? ' alert' : x.state === 'idle' || x.state === 'sleeping' ? ' quiet' : '');
-      const name = document.createElement('span'); name.className = 'name'; name.textContent = x.project;
-      const meta = document.createElement('span'); meta.className = 'meta';
-      meta.textContent = `${hostTag(x) ? `${hostTag(x)} · ` : ''}${STATE_LABEL[x.state]} · ${formatElapsed(now - x.since)}`;
-      row.append(dot, name, meta);
-      row.title = x.cwd;
-      row.addEventListener('click', () => openChat(x.id));
-      panel.append(row);
-    }
+    if (panelEmpty?.parentElement === panel) panelEmpty.remove();
+    const data: RowData[] = list.map((x) => ({
+      id: x.id, current: x.id === snap?.attention,
+      tone: x.state === 'waiting' || x.state === 'error' ? 'alert' : x.state === 'idle' || x.state === 'sleeping' ? 'quiet' : '',
+      name: x.project, meta: `${hostTag(x) ? `${hostTag(x)} · ` : ''}${STATE_LABEL[x.state]} · ${formatElapsed(now - x.since)}`, tip: x.cwd, dismissable: !x.owned,
+    }));
+    syncRows(panel, data, { open: (id) => openChat(id), dismiss: (id) => host.send({ type: 'dismiss', sessionId: id }), dismissLabel });
   };
 
   // ---- hover dock: the buttons rest as a shadow under the pet and grow out of it while the cursor is over the pet ----

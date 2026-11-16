@@ -8,6 +8,7 @@ export interface SessionRow {
   tone: 'alert' | 'quiet' | 'busy';
   current: boolean;
   cwd: string;
+  owned: boolean;
 }
 
 /** Rows for the session lists (chat header dropdown and the wave panel): newest activity first. */
@@ -23,6 +24,7 @@ export function sessionRows(sessions: Session[], currentId: string | null, now: 
       tone: x.state === 'waiting' || x.state === 'error' ? 'alert' : x.state === 'idle' || x.state === 'sleeping' ? 'quiet' : 'busy',
       current: x.id === currentId,
       cwd: x.cwd,
+      owned: x.owned,
     }));
 }
 

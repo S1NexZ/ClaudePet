@@ -261,3 +261,19 @@ body { font-family: "Segoe UI", "Microsoft YaHei UI", system-ui, sans-serif; col
 #settings .c-chip { font-size: 11.5px; color: var(--muted); padding: 1px 7px; border-radius: 9px; background: var(--hover2); }
 #settings .c-chip.on { color: var(--text); }
 #settings .c-err { color: var(--alert); }
+
+/* dismiss cross on session rows: reserved space, appears on hover */
+.row-x { flex: none; display: grid; place-items: center; width: 18px; height: 18px; margin-right: -2px; border-radius: 50%; font-size: 14px; line-height: 1; color: var(--muted); opacity: 0; transition: opacity .15s, background .15s, color .15s; }
+.row:not(.can-x) .row-x { display: none; }
+.row:hover .row-x, .row:focus-visible .row-x { opacity: .8; }
+.row-x:hover { opacity: 1 !important; background: color-mix(in srgb, var(--alert) 30%, transparent); color: var(--text); }
+#sessions .row, #chat-menu .row { transition: background .15s; }
+
+/* soft tooltip */
+#tip {
+  position: fixed; z-index: 50; left: 0; top: 0; max-width: 300px; padding: 6px 10px; border-radius: 10px; pointer-events: none;
+  background: var(--glass); border: 1px solid var(--glass-line); box-shadow: 0 6px 18px rgba(0,0,0,.28);
+  color: var(--text); font: 12px/1.35 "Segoe UI", "Microsoft YaHei UI", system-ui, sans-serif; overflow-wrap: anywhere;
+  opacity: 0; transform: translateY(-3px); transition: opacity .16s ease, transform .16s ease; backdrop-filter: blur(8px);
+}
+#tip.on { opacity: 1; transform: none; }
