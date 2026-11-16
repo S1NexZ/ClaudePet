@@ -3,18 +3,18 @@ import { confirmOptions, isConfirmed } from './dialogs.js';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
 import { mkdirSync } from 'node:fs';
-import { spawn, type ChildProcess } from 'node:child_process';
+import { spawn, execFile } from 'node:child_process';
 import { appendFileSync, existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { loadPet } from './sprite/loadPet.js';
 import { listModels, pickModel, MODEL_ID, DEFAULT_MODEL } from './models/registry.js';
 import { installModelFromZip, installModelFromDir, removeModel, scanPetFolder, ModelError } from './models/install.js';
 import { loadSettings, saveSettings } from './settings.js';
-import { wslBridgeArgs, splitLines } from './bridgeLaunch.js';
 import { focusByTitle } from './focusWindow.js';
 import { overAny, type Rect } from './hitTest.js';
 import { placeStage, restoreAnchor, IDLE_H, type Anchor } from './placement.js';
 import { terminalCommand, windowsTerminalCommand } from './terminal.js';
 import { createWindowsHost, WINDOWS_HOST_PORT } from './hub/windowsHost.js';
+import { createWslHost, parseDistroList, secondaryDistros, portForDistro, type WslHost } from './hub/wslHost.js';
 import { mergeSnapshots, hostOf, hostOfPermission, type HostPart } from './hub/merge.js';
 import { toWslPath } from '../../daemon/src/paths.js';
 import { cleanAppearance } from './appearance.js';
@@ -76,17 +76,21 @@ if (primary) app.whenReady().then(async () => {
   win.setAlwaysOnTop(true, 'floating');
   win.setIgnoreMouseEvents(true, { forward: true }); // click-through except over the pet's own elements
 
-  // ---- bridge: one process inside WSL, JSON lines over stdio (no network) ----
-  let child: ChildProcess | null = null;
-  let rest = '', up = false, quitting = false, backoff = 1000, lastSnapshot: any = null, hooksManual = false;
-  let wslUp = false, winUp = false, wslSnap: any = null, winSnap: any = null, wslHooks: any = null, hooksWaiter: ((m: any) => void) | null = null;
-  let wsl = { distro: '', claude: '' };
-  const toBridge = (cmd: object) => { if (child?.stdin?.writable) child.stdin.write(JSON.stringify(cmd) + '\n'); };
-  // ---- hosts: the WSL bridge (a child process) and the Windows host (this process); the renderer sees one merged session list ----
-  const hostParts = (): HostPart[] => [{ host: 'wsl', snap: wslSnap }, { host: 'windows', snap: winSnap }];
+  // ---- hosts: a bridge process in every followed WSL distro (the default one is the primary), plus the Windows host (this process); the renderer sees one merged session list ----
+  let up = false, quitting = false, lastSnapshot: any = null, hooksManual = false;
+  let winUp = false, winSnap: any = null;
+  const hostUp = new Map<string, boolean>();
+  const hostSnap = new Map<string, any>();
+  const wslHosts = new Map<string, WslHost>();
+  const primary = () => wslHosts.get('wsl')!;
+  const toBridge = (cmd: object) => primary().send(cmd); // new chats, models and limits stay with the default distro
+  const toAllBridges = (cmd: object) => { for (const h of wslHosts.values()) h.send(cmd); };
+  const hostParts = (): HostPart[] => [
+    ...[...wslHosts.values()].map((h) => ({ host: h.id, snap: hostSnap.get(h.id) ?? null, distro: h.secondary || wslHosts.size > 1 ? h.name() : undefined })),
+    { host: 'windows', snap: winSnap },
+  ];
   const pushSnapshot = () => { lastSnapshot = mergeSnapshots(hostParts()); win.webContents.send('pet:msg', lastSnapshot); };
-  const sendUp = () => { up = wslUp || winUp; win.webContents.send('pet:bridge', up); };
-  const setUp = (v: boolean) => { wslUp = v; if (!v) { wslSnap = null; pushSnapshot(); } sendUp(); };
+  const sendUp = () => { up = winUp || [...hostUp.values()].some(Boolean); win.webContents.send('pet:bridge', up); };
   const helperPath = (() => { const p = app.isPackaged ? join(process.resourcesPath, 'helper', 'pet-helper.exe') : join(__dirname, '..', 'helper', 'pet-helper.exe'); return existsSync(p) ? p : undefined; })();
   const winHost = createWindowsHost({
     dataDir: app.getPath('userData'), claudeHome: join(homedir(), '.claude'), port: WINDOWS_HOST_PORT, helperPath,
@@ -108,53 +112,55 @@ if (primary) app.whenReady().then(async () => {
     }));
     if (isConfirmed(r)) toBridge({ type: 'hooks', apply: true });
   };
-  const markWaiters = new Map<string, (ok: boolean) => void>();
   /** the session's own terminal: title its tab, then raise the window/tab with that title (false: no live terminal to move to) */
-  const focusTerminalOf = async (s: { id: string; project: string }): Promise<boolean> => {
+  const focusTerminalOf = async (s: { id: string; project: string; host?: string }): Promise<boolean> => {
     const mark = `${s.project} - Claude ${s.id.slice(0, 4)}`;
-    const marked = await new Promise<boolean>((resolve) => {
-      const t = setTimeout(() => { markWaiters.delete(s.id); resolve(false); }, 3000);
-      markWaiters.set(s.id, (ok) => { clearTimeout(t); resolve(ok); });
-      toBridge({ type: 'term-mark', sessionId: s.id, text: mark });
-    });
-    if (!marked) return false;
+    const host = wslHosts.get(hostOf(s.id, hostParts()) ?? 'wsl') ?? primary();
+    if (!(await host.markTerminal(s.id, mark))) return false;
     await new Promise((r) => setTimeout(r, 350)); // let the terminal apply the title
     return focusByTitle(mark);
   };
-  const onLine = (line: string) => {
-    let m: any;
-    try { m = JSON.parse(line); } catch { return; }
-    if (m.type === 'ready') {
-      backoff = 1000; setUp(true); log(`bridge ready (claude=${m.claude}, distro=${m.distro})`);
-      wsl = { distro: String(m.distro ?? ''), claude: String(m.claude ?? '') };
-      if (!m.claude) void info(L('Claude Code не найден в WSL', 'Claude Code not found in WSL', '在 WSL 中未找到 Claude Code'), L('Установи Claude Code в WSL, чтобы питомец мог запускать сессии.', 'Install Claude Code in WSL so the pet can start sessions.', '请在 WSL 中安装 Claude Code，宠物才能启动会话。'));
-      hooksManual = false;
-      toBridge({ type: 'language', lang: getLang() });
-      toBridge({ type: 'permission-mode', mode: settings.permissions });
-      toBridge({ type: 'hook-permissions', on: settings.answerPermissions });
-      toBridge({ type: 'hooks', apply: false });
-      if (demo) toBridge({ type: 'start', cwd: demo.cwd, prompt: demo.prompt });
-      return;
-    }
-    if (m.type === 'termMark') { const w = markWaiters.get(String(m.sessionId)); if (w) { markWaiters.delete(String(m.sessionId)); w(!!m.ok); } return; }
-    if (m.type === 'hooks') { wslHooks = m; if (hooksWaiter) { const w = hooksWaiter; hooksWaiter = null; w(m); return; } void onHooks(m); return; }
-    if (m.type === 'snapshot') { wslSnap = m; pushSnapshot(); return; }
-    win.webContents.send('pet:msg', m);
-  };
-  const startBridge = () => {
-    rest = '';
-    child = spawn('wsl.exe', wslBridgeArgs(bridgePath), { windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] });
-    child.stdin!.on('error', (e) => log(`bridge stdin: ${e.message}`)); // EPIPE if it just died; exit handler restarts it
-    child.stdout!.setEncoding('utf8');
-    child.stdout!.on('data', (chunk: string) => { const r = splitLines(rest, chunk); rest = r.rest; r.lines.forEach(onLine); });
-    child.stderr!.on('data', (d) => log(`bridge stderr: ${String(d).trim().slice(0, 500)}`));
-    child.on('error', (e) => log(`bridge spawn error: ${e.message}`));
-    child.on('exit', (code) => {
-      log(`bridge exited (${code})`);
-      setUp(false);
-      if (!quitting) { setTimeout(startBridge, backoff); backoff = Math.min(backoff * 2, 10_000); }
+  const startHost = (o: { distro: string; port: number }) => {
+    const id = o.distro ? `wsl:${o.distro}` : 'wsl';
+    if (wslHosts.has(id)) return;
+    const h = createWslHost({
+      id, distro: o.distro, port: o.port, bridgePath, secondary: !!o.distro, log,
+      onSnapshot: (snap) => { if (snap) hostSnap.set(id, snap); else hostSnap.delete(id); pushSnapshot(); },
+      onMessage: (m) => win.webContents.send('pet:msg', m),
+      onUp: (v) => { hostUp.set(id, v); sendUp(); },
+      onReady: (host, r) => {
+        if (!host.secondary) {
+          if (!r.claude) void info(L('Claude Code не найден в WSL', 'Claude Code not found in WSL', '在 WSL 中未找到 Claude Code'), L('Установи Claude Code в WSL, чтобы питомец мог запускать сессии.', 'Install Claude Code in WSL so the pet can start sessions.', '请在 WSL 中安装 Claude Code，宠物才能启动会话。'));
+          hooksManual = false;
+        }
+        host.send({ type: 'language', lang: getLang() });
+        host.send({ type: 'permission-mode', mode: settings.permissions });
+        host.send({ type: 'hook-permissions', on: settings.answerPermissions });
+        if (!host.secondary) {
+          host.send({ type: 'hooks', apply: false });
+          if (demo) host.send({ type: 'start', cwd: demo.cwd, prompt: demo.prompt });
+        }
+        pushSnapshot();
+      },
+      onHooks: (host, m) => { if (!host.secondary) void onHooks(m); },
     });
+    wslHosts.set(id, h);
+    h.start();
   };
+  startHost({ distro: '', port: 47822 });
+  // other running WSL 2 distros are followed too (a stopped one is never started); checked every 30 s
+  const scanDistros = () => execFile('wsl.exe', ['-l', '-v'], { encoding: 'buffer', windowsHide: true, timeout: 8000 }, (err, out) => {
+    if (err || quitting) return;
+    const names = secondaryDistros(parseDistroList(new TextDecoder('utf-16le').decode(out)));
+    for (const name of names) {
+      if (wslHosts.has(`wsl:${name}`)) continue;
+      const taken = new Set<number>([47822, WINDOWS_HOST_PORT, ...[...wslHosts.values()].map((x) => x.port)]);
+      log(`following WSL distro ${name}`);
+      startHost({ distro: name, port: portForDistro(name, taken) });
+    }
+  });
+  const distroTimer = setInterval(scanDistros, 30_000);
+  setTimeout(scanDistros, 4000);
 
   // ---- settings, tray, hotkey ----
   const applySettings = () => {
@@ -281,13 +287,13 @@ if (primary) app.whenReady().then(async () => {
     if (!LANG_PREFS.includes(pref as LangPref)) return;
     settings = { ...settings, language: pref as LangPref }; applySettings();
     setLang(resolveLang(pref, app.getLocale()));
-    toBridge({ type: 'language', lang: getLang() });
+    toAllBridges({ type: 'language', lang: getLang() });
     win.webContents.reload();
   });
   ipcMain.on('pet:permissions', (_e, mode: unknown) => {
     if (!PERMISSION_POLICIES.includes(mode as PermissionPolicy)) return;
     settings = { ...settings, permissions: mode as PermissionPolicy }; applySettings();
-    toBridge({ type: 'permission-mode', mode: mode as PermissionPolicy });
+    toAllBridges({ type: 'permission-mode', mode: mode as PermissionPolicy });
   });
   ipcMain.on('pet:appearance', (_e, a) => { settings = { ...settings, appearance: cleanAppearance(a) }; applySettings(); });
   const sessionById = (id: string) => (lastSnapshot?.sessions ?? []).find((x: any) => x.id === id);
@@ -321,21 +327,21 @@ if (primary) app.whenReady().then(async () => {
     // a session's commands go to the host that owns it (new chats, models and limits stay with the WSL bridge)
     const h = cmd.type === 'permission' ? hostOfPermission(String(cmd.id), hostParts()) : typeof cmd.sessionId === 'string' ? hostOf(cmd.sessionId, hostParts()) : null;
     if (h === 'windows') { void winHost.handle(cmd); return; }
-    toBridge(cmd);
+    (h ? wslHosts.get(h) : undefined)?.send(cmd) ?? toBridge(cmd);
   });
   // ---- connections: our hooks in each host's settings.json (always with the diff and the user's consent) ----
-  const wslRequest = (cmd: object): Promise<any> => new Promise((resolve) => {
-    if (!wslUp) { resolve(null); return; }
-    const t = setTimeout(() => { hooksWaiter = null; resolve(null); }, 4000);
-    hooksWaiter = (m) => { clearTimeout(t); resolve(m); };
-    toBridge(cmd);
-  });
+  const wslRequest = (cmd: object, host: WslHost = primary()): Promise<any> => host.request(cmd);
+  const hostRowState = async (h: WslHost) => {
+    const w = await wslRequest({ type: 'hooks', apply: false, permissions: settings.answerPermissions }, h);
+    return { id: h.id, up: h.isUp(), distro: h.name(), port: h.secondary ? h.port : undefined, events: !!w?.events, mailbox: !!w?.mailbox, permissions: !!w?.permissions, diff: String(w?.diff ?? ''), error: w?.error as string | undefined };
+  };
   const connectionsState = async () => {
-    const w = await wslRequest({ type: 'hooks', apply: false, permissions: settings.answerPermissions });
+    const hosts = await Promise.all([...wslHosts.values()].map(hostRowState));
     return {
       answerPermissions: settings.answerPermissions, helper: !!helperPath,
       windows: { ...winHost.state(settings.answerPermissions), port: winHost.port, up: winUp },
-      wsl: { up: wslUp, distro: wsl.distro, events: !!w?.events, mailbox: !!w?.mailbox, permissions: !!w?.permissions, diff: String(w?.diff ?? ''), error: w?.error as string | undefined },
+      wsl: hosts.find((x) => x.id === 'wsl')!,
+      others: hosts.filter((x) => x.id !== 'wsl'),
     };
   };
   const confirmHooks = async (message: string, items: Array<{ file: string; diff: string }>) => {
@@ -354,11 +360,13 @@ if (primary) app.whenReady().then(async () => {
       if (diff && await confirmHooks(remove ? L('Отключить Windows от питомца?', 'Disconnect Windows from the pet?', '断开 Windows 与宠物的连接？') : L('Подключить Windows-сессии Claude Code?', 'Connect Windows Claude Code sessions?', '连接 Windows 的 Claude Code 会话？'), [{ file: windowsSettings, diff }])) {
         try { remove ? winHost.remove() : winHost.apply(settings.answerPermissions); } catch (e) { void info(L('Не удалось записать настройки', 'Could not write the settings', '无法写入设置'), (e as Error).message); }
       }
-    } else if (hostId === 'wsl') {
-      const p = await wslRequest({ type: 'hooks', apply: false, remove, permissions: settings.answerPermissions });
+    } else if (typeof hostId === 'string' && wslHosts.has(hostId)) {
+      const h = wslHosts.get(hostId)!;
+      const p = await wslRequest({ type: 'hooks', apply: false, remove, permissions: settings.answerPermissions }, h);
       if (p?.error) { void info(L('Не удалось прочитать settings.json', 'Could not read settings.json', '无法读取 settings.json'), String(p.error)); return connectionsState(); }
-      if (p?.diff && await confirmHooks(remove ? L('Отключить WSL от питомца?', 'Disconnect WSL from the pet?', '断开 WSL 与宠物的连接？') : L('Подключить сессии Claude Code в WSL?', 'Connect Claude Code sessions in WSL?', '连接 WSL 中的 Claude Code 会话？'), [{ file: `~/.claude/settings.json (WSL${wsl.distro ? `: ${wsl.distro}` : ''})`, diff: String(p.diff) }]))
-        await wslRequest({ type: 'hooks', apply: true, remove, permissions: settings.answerPermissions });
+      const label = h.name() ? `WSL: ${h.name()}` : 'WSL';
+      if (p?.diff && await confirmHooks(remove ? L(`Отключить ${label} от питомца?`, `Disconnect ${label} from the pet?`, `断开 ${label} 与宠物的连接？`) : L(`Подключить сессии Claude Code (${label})?`, `Connect Claude Code sessions (${label})?`, `连接 Claude Code 会话（${label}）？`), [{ file: `~/.claude/settings.json (${label})`, diff: String(p.diff) }]))
+        await wslRequest({ type: 'hooks', apply: true, remove, permissions: settings.answerPermissions }, h);
     }
     return connectionsState();
   });
@@ -367,12 +375,14 @@ if (primary) app.whenReady().then(async () => {
     const items: Array<{ file: string; diff: string; apply: () => Promise<unknown> | unknown }> = [];
     const ws = winHost.state(wanted);
     if (ws.events && !ws.error && ws.diff) items.push({ file: windowsSettings, diff: ws.diff, apply: () => winHost.apply(wanted) });
-    const wp = await wslRequest({ type: 'hooks', apply: false, permissions: wanted });
-    if (wp?.events && !wp.error && wp.diff) items.push({ file: `~/.claude/settings.json (WSL)`, diff: String(wp.diff), apply: () => wslRequest({ type: 'hooks', apply: true, permissions: wanted }) });
+    for (const h of wslHosts.values()) {
+      const wp = await wslRequest({ type: 'hooks', apply: false, permissions: wanted }, h);
+      if (wp?.events && !wp.error && wp.diff) items.push({ file: `~/.claude/settings.json (WSL${h.name() ? `: ${h.name()}` : ''})`, diff: String(wp.diff), apply: () => wslRequest({ type: 'hooks', apply: true, permissions: wanted }, h) });
+    }
     if (items.length && !(await confirmHooks(wanted ? L('Отвечать на разрешения в питомце?', 'Answer permission questions in the pet?', '在宠物中回答权限请求？') : L('Больше не отвечать на разрешения в питомце?', 'Stop answering permission questions in the pet?', '不再在宠物中回答权限请求？'), items))) return connectionsState();
     for (const i of items) { try { await i.apply(); } catch (e) { void info(L('Не удалось записать настройки', 'Could not write the settings', '无法写入设置'), (e as Error).message); } }
     settings = { ...settings, answerPermissions: wanted }; applySettings();
-    toBridge({ type: 'hook-permissions', on: wanted });
+    toAllBridges({ type: 'hook-permissions', on: wanted });
     return connectionsState();
   });
   // open a session in a real terminal (claude --resume); a pet-owned one is released first so only one client writes
@@ -393,12 +403,13 @@ if (primary) app.whenReady().then(async () => {
       void focusTerminalOf(s).then((moved) => { if (!moved) openWslTerminal(s); });
       return;
     }
-    toBridge({ type: 'release', sessionId: s.id });
+    (wslHosts.get(hostOf(s.id, hostParts()) ?? 'wsl') ?? primary()).send({ type: 'release', sessionId: s.id });
     openWslTerminal(s);
   });
   const openWslTerminal = (s: { id: string; cwd: string; owned: boolean }) => {
+    const th = wslHosts.get(hostOf(s.id, hostParts()) ?? 'wsl') ?? primary();
     const launch = (useWt: boolean) => {
-      const c = terminalCommand({ distro: wsl.distro, cwd: s.cwd, claude: wsl.claude, sessionId: s.id }, useWt);
+      const c = terminalCommand({ distro: th.name(), cwd: s.cwd, claude: th.claude(), sessionId: s.id }, useWt);
       const p = spawn(c.file, c.args, { detached: true, stdio: 'ignore' });
       p.on('error', (e) => { log(`terminal (${c.file}) failed: ${e.message}`); if (useWt) launch(false); });
       p.unref();
@@ -498,12 +509,11 @@ if (primary) app.whenReady().then(async () => {
   await win.loadFile(join(__dirname, 'index.html'));
   win.showInactive();
   log(`window bounds=${JSON.stringify(win.getBounds())} scale=${screen.getDisplayMatching(win.getBounds()).scaleFactor}`);
-  startBridge();
   void winHost.start().then((ok) => { winUp = ok; sendUp(); log(`windows host ${ok ? `listening on 127.0.0.1:${winHost.port}` : 'not started'}`); });
   const winTimer = setInterval(() => winHost.tick(Date.now()), 1500);
   registerHotkey();
   app.on('second-instance', summon);
-  app.on('before-quit', () => { clearInterval(winTimer); void winHost.stop(); quitting = true; child?.stdin?.end(); setTimeout(() => child?.kill(), 500); });
+  app.on('before-quit', () => { clearInterval(winTimer); void winHost.stop(); quitting = true; clearInterval(distroTimer); for (const h of wslHosts.values()) h.stop(); });
 
   if (iconArg) setTimeout(async () => {
     // app icon: the pet's face on a dark rounded tile, cut from the cleaned atlas

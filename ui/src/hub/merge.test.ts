@@ -26,3 +26,14 @@ describe('hub merge', () => {
     expect(hostOfPermission('hl-1', parts)).toBeNull();
   });
 });
+
+describe('several WSL distros', () => {
+  const snap = (id: string): any => ({ type: 'snapshot', sessions: [{ id, project: id, state: 'running', since: 0, lastEventAt: 1, cwd: '/x', owned: false }], attention: id });
+  it('tags every WSL session as wsl, adds the distro name, and routes by host id', () => {
+    const parts = [{ host: 'wsl', snap: snap('a'), distro: 'Ubuntu' }, { host: 'wsl:Debian', snap: snap('b'), distro: 'Debian' }, { host: 'windows', snap: snap('c') }];
+    const m = mergeSnapshots(parts);
+    expect(m.sessions.map((s) => [s.id, s.host, s.distro])).toEqual([['a', 'wsl', 'Ubuntu'], ['b', 'wsl', 'Debian'], ['c', 'windows', undefined]]);
+    expect(hostOf('b', parts)).toBe('wsl:Debian');
+    expect(hostOf('c', parts)).toBe('windows');
+  });
+});

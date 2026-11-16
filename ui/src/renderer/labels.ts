@@ -22,8 +22,8 @@ export const STATE_LABEL = new Proxy({} as Record<PetState, string>, {
 });
 
 /** A short tag for where a session runs: its host and, when known, the Claude Code front end (desktop app, IDE). '' when there is nothing to tell. */
-export function hostTag(s: { host?: string; source?: string }): string {
-  const host = s.host === 'windows' ? 'Win' : s.host === 'wsl' ? 'WSL' : '';
+export function hostTag(s: { host?: string; source?: string; distro?: string }): string {
+  const host = s.host === 'windows' ? 'Win' : s.host === 'wsl' ? (s.distro ? `WSL ${s.distro}` : 'WSL') : '';
   const src = ({ 'claude-desktop': 'App', vscode: 'VS Code', 'claude-vscode': 'VS Code', jetbrains: 'JetBrains' } as Record<string, string>)[s.source ?? ''] ?? '';
   return [host, src].filter(Boolean).join(' · ');
 }

@@ -14,6 +14,16 @@ describe('wslBridgeArgs', () => {
   });
 });
 
+describe('wslBridgeArgs for another distro', () => {
+  it('targets the distro, gets its own hook port and does not poll usage', () => {
+    const a = wslBridgeArgs('C:\\b\\bridge.cjs', { distro: 'Debian', port: 47930, noUsage: true });
+    expect(a.slice(0, 4)).toEqual(['-d', 'Debian', '-e', 'bash']);
+    const script = a[a.length - 1];
+    expect(script).toContain('export CLAUDE_PET_HOOK_PORT=47930;');
+    expect(script).toContain('export CLAUDE_PET_LIVE_USAGE=0;');
+  });
+});
+
 describe('splitLines', () => {
   it('yields complete lines and keeps the unfinished tail', () => {
     expect(splitLines('', '{"a":1}\n{"b"')).toEqual({ lines: ['{"a":1}'], rest: '{"b"' });

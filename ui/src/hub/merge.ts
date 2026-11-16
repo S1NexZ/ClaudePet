@@ -1,12 +1,13 @@
 import { pickAttention } from '../../../daemon/src/sessionStore.js';
 import type { Session, Snapshot } from '../../../shared/src/types.js';
 
-export type HostId = 'wsl' | 'windows';
-export interface HostPart { host: HostId; snap: Snapshot | null }
+/** 'windows', 'wsl' (the default distro) or 'wsl:<distro>' */
+export type HostId = string;
+export interface HostPart { host: HostId; snap: Snapshot | null; distro?: string }
 
 /** One session list from every host's snapshot (each session tagged with its host); the pet's attention is picked across all of them. */
 export function mergeSnapshots(parts: HostPart[]): Snapshot {
-  const sessions: Session[] = parts.flatMap((p) => (p.snap?.sessions ?? []).map((s) => ({ ...s, host: p.host })));
+  const sessions: Session[] = parts.flatMap((p) => (p.snap?.sessions ?? []).map((s) => ({ ...s, host: (p.host === 'windows' ? 'windows' : 'wsl') as 'wsl' | 'windows', ...(p.distro ? { distro: p.distro } : {}) })));
   return { type: 'snapshot', sessions, attention: pickAttention(sessions)?.id ?? null };
 }
 

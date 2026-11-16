@@ -10,10 +10,10 @@ export interface HostState {
   distro?: string;
   settingsPath?: string;
 }
-export interface ConnectionsState { answerPermissions: boolean; helper: boolean; windows: HostState; wsl: HostState }
+export interface ConnectionsState { answerPermissions: boolean; helper: boolean; windows: HostState; wsl: HostState; /** other WSL distros that are followed */ others?: Array<HostState & { id: string }> }
 export interface ConnectionsHost {
   get(): Promise<ConnectionsState>;
-  apply(host: 'windows' | 'wsl', action: 'connect' | 'disconnect'): Promise<ConnectionsState>;
+  apply(host: string, action: 'connect' | 'disconnect'): Promise<ConnectionsState>;
   answerPermissions(on: boolean): Promise<ConnectionsState>;
 }
 
@@ -32,12 +32,12 @@ export function createConnectionsTab(host: ConnectionsHost) {
 
   const chip = (ok: boolean, label: string) => { const c = el('span', `c-chip${ok ? ' on' : ''}`, `${ok ? '✓' : '○'} ${label}`); return c; };
 
-  const hostRow = (id: 'windows' | 'wsl', h: HostState) => {
+  const hostRow = (id: string, h: HostState) => {
     const row = el('div', 's-section c-host');
     const connected = h.events;
     const title = id === 'windows'
       ? L('Windows: PowerShell, CMD, терминалы, приложение Claude', 'Windows: PowerShell, CMD, terminals, the Claude app', 'Windows：PowerShell、CMD、终端、Claude 应用')
-      : `WSL${h.distro ? ` (${h.distro})` : ''}`;
+      : `WSL${h.distro ? ` (${h.distro})` : ''}${h.port ? ` · ${L('порт', 'port', '端口')} ${h.port}` : ''}`;
     row.append(el('div', 's-title', title));
     if (!h.up) { row.append(el('div', 's-hint', id === 'windows' ? L('Приёмник не запущен (порт занят?).', 'The receiver is not running (port busy?).', '接收器未运行（端口被占用？）') : L('Нет связи с WSL.', 'No connection to WSL.', '无法连接 WSL。'))); return row; }
     const chips = el('div', 'c-chips');
@@ -63,6 +63,7 @@ export function createConnectionsTab(host: ConnectionsHost) {
     if (!state) { box.append(el('div', 's-hint', L('Загрузка…', 'Loading…', '加载中…'))); void load(); return; }
     box.append(el('div', 's-hint', L('Питомец видит сессии Claude Code там, где подключены хуки. Хуки пишутся в ~/.claude/settings.json с показом изменений и копией файла.', 'The pet sees Claude Code sessions wherever the hooks are connected. They are written to ~/.claude/settings.json after showing the changes, with a backup.', '宠物能看到已连接钩子的 Claude Code 会话。钩子会在显示改动后写入 ~/.claude/settings.json，并保留备份。')));
     box.append(hostRow('windows', state.windows), hostRow('wsl', state.wsl));
+    for (const o of state.others ?? []) box.append(hostRow(o.id, o));
     if (!state.helper) box.append(el('div', 's-hint c-err', L('pet-helper.exe не найден: сообщения в Windows-сессии доставляться не будут.', 'pet-helper.exe was not found: messages to Windows sessions cannot be delivered.', '未找到 pet-helper.exe：无法向 Windows 会话发送消息。')));
     const perm = el('label', 's-radio'); perm.style.display = 'block';
     const cb = el('input'); cb.type = 'checkbox'; cb.checked = state.answerPermissions; cb.disabled = busy;
