@@ -59,7 +59,7 @@ body { font-family: "Segoe UI", "Microsoft YaHei UI", system-ui, sans-serif; col
 #dock-pill.rest { pointer-events: none; background-color: transparent; border-color: transparent; }
 /* soft contact shadow under the pet's feet: dense core, long feathered edge; melts away when the dock opens */
 #dock::before {
-  content: ""; position: absolute; left: 50%; top: 2px; width: 132px; height: 20px; margin-left: -66px; pointer-events: none; border-radius: 50%;
+  content: ""; position: absolute; left: 50%; top: 2px; width: 92px; height: 14px; margin-left: -46px; pointer-events: none; border-radius: 50%;
   background: radial-gradient(ellipse at 50% 50%, rgba(0,0,0,.5) 0%, rgba(0,0,0,.3) 34%, rgba(0,0,0,.1) 62%, transparent 78%); filter: blur(1.5px);
   transition: opacity .3s;
 }
