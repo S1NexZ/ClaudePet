@@ -1,4 +1,5 @@
-import { statusView, STATE_LABEL, formatElapsed } from './labels.js';
+import { statusView, STATE_LABEL, formatElapsed, hostTag } from './labels.js';
+import { createConnectionsTab, type ConnectionsHost } from './connectionsTab.js';
 import { pinSnapshot, focusSnapshot } from './view.js';
 import { sessionRows, nextChatId } from './switcher.js';
 import { decideSend, placeholderFor, isBusyReply, canStop, parseSlash, type Mode } from './compose.js';
@@ -53,6 +54,7 @@ declare global {
       onScale(cb: (s: number) => void): void;
       hoverRects(r: Rect[]): void;
       onHover(cb: (h: boolean) => void): void;
+      connections: ConnectionsHost;
       models: ModelsHost['models'];
       copyText: ModelsHost['copyText'];
       openUrl: ModelsHost['openUrl'];
@@ -282,15 +284,17 @@ async function main() {
 
   // ---- settings panel: appearance colors + permissions + pet model manager ----
   let permissions: PermissionPolicy = cfg.permissions ?? 'ask';
+  const connectionsTab = createConnectionsTab(host.connections);
   const modelsTab = createModelsTab(host, { show: (d) => loadSprite(d as typeof pet) });
   const settingsPanel = createSettingsPanel($('settings'), {
     save: (a) => host.setAppearance(a), sprite,
     petScale: { get: () => petScale, set: (s) => applyPetScale(s, true) },
     language: { get: () => cfg.language ?? 'auto', set: (l) => host.setLanguage(l) },
     permissions: { get: () => permissions, set: (m) => { permissions = m; host.setPermissions(m); } }, baseHue: () => baseHue,
-    tabs: [modelsTab.tab], onClose: () => void modelsTab.cancelPreview(),
+    tabs: [connectionsTab.tab, modelsTab.tab], onClose: () => void modelsTab.cancelPreview(),
   }, cfg.appearance ?? { primary: null, accent: null });
   modelsTab.attach(() => settingsPanel.rerender());
+  connectionsTab.attach(() => settingsPanel.rerender());
   onSpriteLoaded = () => settingsPanel.repaint(); // a model has its own body hue: the tint is recomputed
   $('btn-settings').addEventListener('click', () => settingsPanel.toggle());
   host.onOpenSettings(() => settingsPanel.open());
@@ -459,7 +463,7 @@ async function main() {
     if (panel.hidden) return;
     const rows = [...(raw?.sessions ?? [])].sort((a, b) => b.lastEventAt - a.lastEventAt);
     const now = Date.now();
-    const key = rows.map((x) => `${x.id}|${x.state}|${Math.floor((now - x.since) / 1000)}|${x.id === snap?.attention}`).join(';') + pinnedId;
+    const key = rows.map((x) => `${x.id}|${x.state}|${x.host}|${x.source}|${Math.floor((now - x.since) / 1000)}|${x.id === snap?.attention}`).join(';') + pinnedId;
     if (key === panelKey) return;
     panelKey = key;
     panel.replaceChildren();
@@ -474,7 +478,7 @@ async function main() {
       dot.className = 'dot' + (x.state === 'waiting' || x.state === 'error' ? ' alert' : x.state === 'idle' || x.state === 'sleeping' ? ' quiet' : '');
       const name = document.createElement('span'); name.className = 'name'; name.textContent = x.project;
       const meta = document.createElement('span'); meta.className = 'meta';
-      meta.textContent = `${STATE_LABEL[x.state]} · ${formatElapsed(now - x.since)}`;
+      meta.textContent = `${hostTag(x) ? `${hostTag(x)} · ` : ''}${STATE_LABEL[x.state]} · ${formatElapsed(now - x.since)}`;
       row.append(dot, name, meta);
       row.title = x.cwd;
       row.addEventListener('click', () => openChat(x.id));

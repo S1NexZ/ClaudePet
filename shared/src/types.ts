@@ -67,7 +67,8 @@ export type AppCommand =
   | { type: 'permission'; id: string; allow: boolean }
   | { type: 'interrupt'; sessionId: string }
   | { type: 'history'; sessionId: string }
-  | { type: 'hooks'; apply: boolean }
+  /** apply=false: report the plan; apply=true: write it (after the app got consent); remove: take our entries out; permissions: include the PermissionRequest hook (default: the current setting) */
+  | { type: 'hooks'; apply: boolean; permissions?: boolean; remove?: boolean }
   | { type: 'models' }
   | { type: 'setModel'; sessionId: string | null; model: string }
   | { type: 'btw'; sessionId: string; text: string }
@@ -80,7 +81,7 @@ export type BridgeMessage =
   | { type: 'chat'; sessionId: string; event: ChatEvent }
   | { type: 'history'; sessionId: string; items: ChatItem[] }
   | { type: 'started'; sessionId: string }
-  | { type: 'hooks'; diff: string; applied: boolean; installed: boolean; stale: boolean }
+  | { type: 'hooks'; diff: string; applied: boolean; installed: boolean; stale: boolean; events?: boolean; mailbox?: boolean; permissions?: boolean; error?: string }
   | { type: 'models'; models: Array<{ value: string; displayName: string; description: string }> }
   | { type: 'modelSet'; sessionId: string | null; model: string }
   | { type: 'usage'; usage: UsageInfo }

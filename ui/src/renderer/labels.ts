@@ -21,6 +21,13 @@ export const STATE_LABEL = new Proxy({} as Record<PetState, string>, {
   get: (_t, k) => ({ en: EN_LABEL, ru: RU_LABEL, zh: ZH_LABEL } as const)[getLang()][k as PetState],
 });
 
+/** A short tag for where a session runs: its host and, when known, the Claude Code front end (desktop app, IDE). '' when there is nothing to tell. */
+export function hostTag(s: { host?: string; source?: string }): string {
+  const host = s.host === 'windows' ? 'Win' : s.host === 'wsl' ? 'WSL' : '';
+  const src = ({ 'claude-desktop': 'App', vscode: 'VS Code', 'claude-vscode': 'VS Code', jetbrains: 'JetBrains' } as Record<string, string>)[s.source ?? ''] ?? '';
+  return [host, src].filter(Boolean).join(' · ');
+}
+
 export function formatElapsed(ms: number): string {
   const total = Math.max(0, Math.floor(ms / 1000));
   const h = Math.floor(total / 3600);

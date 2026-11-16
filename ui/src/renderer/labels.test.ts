@@ -31,3 +31,14 @@ describe('statusView', () => {
       expect(statusView(snap([sess({ state: st })]), true, 0).label).toMatch(/[А-Яа-я]/);
   });
 });
+
+import { hostTag } from './labels.js';
+describe('hostTag', () => {
+  it('names the host and the Claude Code front end', () => {
+    expect(hostTag({ host: 'windows', source: 'claude-desktop' })).toBe('Win · App');
+    expect(hostTag({ host: 'wsl' })).toBe('WSL');
+    expect(hostTag({ host: 'windows', source: 'vscode' })).toBe('Win · VS Code');
+    expect(hostTag({})).toBe('');
+    expect(hostTag({ host: 'wsl', source: 'sdk-cli' })).toBe('WSL');
+  });
+});

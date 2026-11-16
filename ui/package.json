@@ -34,6 +34,10 @@
         "to": "hook"
       },
       {
+        "from": "helper",
+        "to": "helper"
+      },
+      {
         "from": "../models",
         "to": "models"
       },

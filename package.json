@@ -13,7 +13,7 @@
     "start": "bash scripts/start.sh",
     "install-hooks": "tsx daemon/src/cli.ts install-hooks",
     "build": "node daemon/build.mjs && node ui/build.mjs",
-    "dist": "npm run build && cd ui && cmd.exe /c \"npx electron-builder --win\"",
+    "dist": "node scripts/build-helper.mjs && npm run build && cd ui && cmd.exe /c \"npx electron-builder --win\"",
     "test:py": "python3 scripts/test-pet-claude.py && python3 scripts/test-shell-integration.py"
   },
   "devDependencies": {

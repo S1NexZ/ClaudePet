@@ -1,6 +1,7 @@
 // Entry point of the WSL bridge: JSON lines on stdin/stdout to the Electron app, unix socket for hooks.
 import { createInterface } from 'node:readline';
-import { existsSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { randomBytes } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import { homedir } from 'node:os';
 import { join, dirname } from 'node:path';
@@ -9,6 +10,8 @@ import { SessionStore } from './sessionStore.js';
 import { SessionRunner } from './runner.js';
 import { createBridge } from './bridge.js';
 import { listenHooks, defaultSocketPath } from './hookSocket.js';
+import { startHookServer } from './hookHttp.js';
+import { createMailbox } from './mailbox.js';
 import { readTranscript } from './transcript.js';
 import { createUsageSource } from './usage.js';
 import { createUsagePoller, makeLiveFetch } from './usageLive.js';
@@ -27,6 +30,14 @@ const hookPath = process.env.CLAUDE_PET_HOOK ?? join(here, '../hook/pet-hook.mjs
 const claude = findClaude();
 const store = new SessionStore();
 let bridge: ReturnType<typeof createBridge>;
+// HTTP receiver of this WSL host (mailbox long-poll, PermissionRequest answers); its port and token are shared with `pet-hook.mjs wait` through ~/.claude-pet/hub.json
+const hubFile = join(homedir(), '.claude-pet', 'hub.json');
+const hubPort = Number(process.env.CLAUDE_PET_HOOK_PORT) || 47822;
+const hubToken = (() => {
+  try { const t = JSON.parse(readFileSync(hubFile, 'utf8'))?.token; if (typeof t === 'string' && /^[0-9a-f]{16,}$/.test(t)) return t; } catch { /* first run */ }
+  return randomBytes(16).toString('hex');
+})();
+const mailbox = createMailbox();
 const runner = new SessionRunner({
   store, claudePath: claude,
   onChange: () => bridge.snapshot(true),
@@ -39,15 +50,25 @@ bridge = createBridge({
   store, runner, out: send, readTranscript,
   usage: createUsageSource({ settingsPath: join(homedir(), '.claude', 'settings.json'), claudePath: claude, live: poller ?? undefined }),
   hooks: { settingsPath: join(homedir(), '.claude', 'settings.json'), hookPath, nodePath: process.execPath },
+  mailbox, permissionIdPrefix: 'hl-',
+  hostHooks: { origin: `http://127.0.0.1:${hubPort}`, token: hubToken },
 });
 
+const httpHooks = startHookServer({ port: hubPort, token: hubToken, mailbox, onEvent: (e) => bridge.onHook(e), onPermission: (e) => bridge.onPermission(e) })
+  .then((srv) => {
+    mkdirSync(dirname(hubFile), { recursive: true, mode: 0o700 });
+    writeFileSync(hubFile, JSON.stringify({ port: srv.port, token: hubToken }), { mode: 0o600 });
+    return srv;
+  })
+  .catch((e: Error) => { process.stderr.write(`hook http receiver unavailable: ${e.message}\n`); return null; });
 listenHooks(defaultSocketPath(), (e) => bridge.onHook(e))
-  .then((hooks) => {
+  .then(async (hooks) => {
+    const http = await httpHooks;
     send({ type: 'ready', claude: claude ?? null, distro: process.env.WSL_DISTRO_NAME ?? '' });
     bridge.snapshot();
     poller?.start();
     const timer = setInterval(() => bridge.tick(Date.now()), 1500);
-    const quit = () => { clearInterval(timer); runner.closeAll(); void Promise.all([poller?.stop(), hooks.close()]).then(() => process.exit(0)); };
+    const quit = () => { clearInterval(timer); runner.closeAll(); void Promise.all([poller?.stop(), hooks.close(), http?.close()]).then(() => process.exit(0)); };
     const rl = createInterface({ input: process.stdin });
     rl.on('line', (line) => {
       let cmd: AppCommand;

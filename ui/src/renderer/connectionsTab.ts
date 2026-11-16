@@ -1,0 +1,78 @@
+import { L } from '../../../shared/src/i18n.js';
+
+export interface HostState {
+  up: boolean;
+  events: boolean; mailbox: boolean; permissions: boolean;
+  /** what installing / updating would change; '' = nothing */
+  diff: string;
+  error?: string;
+  port?: number;
+  distro?: string;
+  settingsPath?: string;
+}
+export interface ConnectionsState { answerPermissions: boolean; helper: boolean; windows: HostState; wsl: HostState }
+export interface ConnectionsHost {
+  get(): Promise<ConnectionsState>;
+  apply(host: 'windows' | 'wsl', action: 'connect' | 'disconnect'): Promise<ConnectionsState>;
+  answerPermissions(on: boolean): Promise<ConnectionsState>;
+}
+
+const el = <K extends keyof HTMLElementTagNameMap>(tag: K, cls = '', text = ''): HTMLElementTagNameMap[K] => {
+  const e = document.createElement(tag); if (cls) e.className = cls; if (text) e.textContent = text; return e;
+};
+
+/** "Подключения" tab: which Claude Code sessions the pet can see (Windows terminals and the desktop app, WSL) and the permission switch. */
+export function createConnectionsTab(host: ConnectionsHost) {
+  let state: ConnectionsState | null = null;
+  let loading = false;
+  let busy = false;
+  let rerender = () => {};
+  const load = async () => { if (loading) return; loading = true; try { state = await host.get(); } catch { /* keep the old state */ } loading = false; rerender(); };
+  const run = async (p: Promise<ConnectionsState>) => { busy = true; rerender(); try { state = await p; } catch { /* keep */ } busy = false; rerender(); };
+
+  const chip = (ok: boolean, label: string) => { const c = el('span', `c-chip${ok ? ' on' : ''}`, `${ok ? '✓' : '○'} ${label}`); return c; };
+
+  const hostRow = (id: 'windows' | 'wsl', h: HostState) => {
+    const row = el('div', 's-section c-host');
+    const connected = h.events;
+    const title = id === 'windows'
+      ? L('Windows: PowerShell, CMD, терминалы, приложение Claude', 'Windows: PowerShell, CMD, terminals, the Claude app', 'Windows：PowerShell、CMD、终端、Claude 应用')
+      : `WSL${h.distro ? ` (${h.distro})` : ''}`;
+    row.append(el('div', 's-title', title));
+    if (!h.up) { row.append(el('div', 's-hint', id === 'windows' ? L('Приёмник не запущен (порт занят?).', 'The receiver is not running (port busy?).', '接收器未运行（端口被占用？）') : L('Нет связи с WSL.', 'No connection to WSL.', '无法连接 WSL。'))); return row; }
+    const chips = el('div', 'c-chips');
+    chips.append(chip(h.events, L('события', 'events', '事件')), chip(h.mailbox, L('сообщения в сессии', 'messages to sessions', '向会话发消息')), chip(h.permissions, L('разрешения', 'permissions', '权限')));
+    row.append(chips);
+    if (h.error) row.append(el('div', 's-hint c-err', h.error));
+    const line = el('div', 's-swatches');
+    const needsUpdate = connected && !!h.diff;
+    const connect = el('button', `s-btn${connected && !needsUpdate ? '' : ' primary'}`, connected ? (needsUpdate ? L('Обновить', 'Update', '更新') : L('Подключено', 'Connected', '已连接')) : L('Подключить', 'Connect', '连接'));
+    connect.type = 'button'; connect.disabled = busy || !!h.error || (connected && !needsUpdate);
+    connect.addEventListener('click', () => void run(host.apply(id, 'connect')));
+    line.append(connect);
+    if (connected || h.mailbox) {
+      const off = el('button', 's-btn', L('Отключить', 'Disconnect', '断开')); off.type = 'button'; off.disabled = busy;
+      off.addEventListener('click', () => void run(host.apply(id, 'disconnect')));
+      line.append(off);
+    }
+    row.append(line);
+    return row;
+  };
+
+  const render = (box: HTMLElement) => {
+    if (!state) { box.append(el('div', 's-hint', L('Загрузка…', 'Loading…', '加载中…'))); void load(); return; }
+    box.append(el('div', 's-hint', L('Питомец видит сессии Claude Code там, где подключены хуки. Хуки пишутся в ~/.claude/settings.json с показом изменений и копией файла.', 'The pet sees Claude Code sessions wherever the hooks are connected. They are written to ~/.claude/settings.json after showing the changes, with a backup.', '宠物能看到已连接钩子的 Claude Code 会话。钩子会在显示改动后写入 ~/.claude/settings.json，并保留备份。')));
+    box.append(hostRow('windows', state.windows), hostRow('wsl', state.wsl));
+    if (!state.helper) box.append(el('div', 's-hint c-err', L('pet-helper.exe не найден: сообщения в Windows-сессии доставляться не будут.', 'pet-helper.exe was not found: messages to Windows sessions cannot be delivered.', '未找到 pet-helper.exe：无法向 Windows 会话发送消息。')));
+    const perm = el('label', 's-radio'); perm.style.display = 'block';
+    const cb = el('input'); cb.type = 'checkbox'; cb.checked = state.answerPermissions; cb.disabled = busy;
+    cb.addEventListener('change', () => void run(host.answerPermissions(cb.checked)));
+    perm.append(cb, el('span', '', ` ${L('Отвечать на запросы разрешений в питомце', 'Answer permission questions in the pet', '在宠物中回答权限请求')}`));
+    box.append(perm, el('div', 's-hint', L('Выключено по умолчанию. Если питомец не ответил за 30 с, Claude Code покажет обычный диалог.', 'Off by default. If the pet does not answer within 30 s, Claude Code shows its normal dialog.', '默认关闭。如果宠物在 30 秒内未回答，Claude Code 会显示常规对话框。')));
+  };
+
+  return {
+    tab: { id: 'connections', title: L('Подключения', 'Connections', '连接'), render: (box: HTMLElement) => render(box) },
+    attach(fn: () => void) { rerender = fn; },
+  };
+}

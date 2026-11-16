@@ -12,7 +12,9 @@ import { loadSettings, saveSettings } from './settings.js';
 import { wslBridgeArgs, splitLines } from './bridgeLaunch.js';
 import { overAny, type Rect } from './hitTest.js';
 import { placeStage, restoreAnchor, IDLE_H, type Anchor } from './placement.js';
-import { terminalCommand } from './terminal.js';
+import { terminalCommand, windowsTerminalCommand } from './terminal.js';
+import { createWindowsHost, WINDOWS_HOST_PORT } from './hub/windowsHost.js';
+import { mergeSnapshots, hostOf, hostOfPermission, type HostPart } from './hub/merge.js';
 import { toWslPath } from '../../daemon/src/paths.js';
 import { cleanAppearance } from './appearance.js';
 import { clampScale, PET_SCALE_MIN, PET_SCALE_MAX } from './petScale.js';
@@ -76,9 +78,20 @@ if (primary) app.whenReady().then(async () => {
   // ---- bridge: one process inside WSL, JSON lines over stdio (no network) ----
   let child: ChildProcess | null = null;
   let rest = '', up = false, quitting = false, backoff = 1000, lastSnapshot: any = null, hooksManual = false;
+  let wslUp = false, winUp = false, wslSnap: any = null, winSnap: any = null, wslHooks: any = null, hooksWaiter: ((m: any) => void) | null = null;
   let wsl = { distro: '', claude: '' };
   const toBridge = (cmd: object) => { if (child?.stdin?.writable) child.stdin.write(JSON.stringify(cmd) + '\n'); };
-  const setUp = (v: boolean) => { up = v; if (!v) lastSnapshot = null; win.webContents.send('pet:bridge', v); };
+  // ---- hosts: the WSL bridge (a child process) and the Windows host (this process); the renderer sees one merged session list ----
+  const hostParts = (): HostPart[] => [{ host: 'wsl', snap: wslSnap }, { host: 'windows', snap: winSnap }];
+  const pushSnapshot = () => { lastSnapshot = mergeSnapshots(hostParts()); win.webContents.send('pet:msg', lastSnapshot); };
+  const sendUp = () => { up = wslUp || winUp; win.webContents.send('pet:bridge', up); };
+  const setUp = (v: boolean) => { wslUp = v; if (!v) { wslSnap = null; pushSnapshot(); } sendUp(); };
+  const helperPath = (() => { const p = app.isPackaged ? join(process.resourcesPath, 'helper', 'pet-helper.exe') : join(__dirname, '..', 'helper', 'pet-helper.exe'); return existsSync(p) ? p : undefined; })();
+  const winHost = createWindowsHost({
+    dataDir: app.getPath('userData'), claudeHome: join(homedir(), '.claude'), port: WINDOWS_HOST_PORT, helperPath,
+    permissionsFromPet: () => settings.answerPermissions,
+    out: (m) => { if (m.type === 'snapshot') { winSnap = m; pushSnapshot(); } else win.webContents.send('pet:msg', m); },
+  });
   const info = (message: string, detail = '') => dialog.showMessageBox(win, { type: 'info', title: 'Claude Pet', message, detail });
 
   const onHooks = async (m: { diff: string; applied: boolean; installed: boolean; stale: boolean }) => {
@@ -104,12 +117,13 @@ if (primary) app.whenReady().then(async () => {
       hooksManual = false;
       toBridge({ type: 'language', lang: getLang() });
       toBridge({ type: 'permission-mode', mode: settings.permissions });
+      toBridge({ type: 'hook-permissions', on: settings.answerPermissions });
       toBridge({ type: 'hooks', apply: false });
       if (demo) toBridge({ type: 'start', cwd: demo.cwd, prompt: demo.prompt });
       return;
     }
-    if (m.type === 'hooks') { void onHooks(m); return; }
-    if (m.type === 'snapshot') lastSnapshot = m;
+    if (m.type === 'hooks') { wslHooks = m; if (hooksWaiter) { const w = hooksWaiter; hooksWaiter = null; w(m); return; } void onHooks(m); return; }
+    if (m.type === 'snapshot') { wslSnap = m; pushSnapshot(); return; }
     win.webContents.send('pet:msg', m);
   };
   const startBridge = () => {
@@ -288,12 +302,77 @@ if (primary) app.whenReady().then(async () => {
       }));
       if (!isConfirmed(r)) return;
     }
+    // a session's commands go to the host that owns it (new chats, models and limits stay with the WSL bridge)
+    const h = cmd.type === 'permission' ? hostOfPermission(String(cmd.id), hostParts()) : typeof cmd.sessionId === 'string' ? hostOf(cmd.sessionId, hostParts()) : null;
+    if (h === 'windows') { void winHost.handle(cmd); return; }
     toBridge(cmd);
+  });
+  // ---- connections: our hooks in each host's settings.json (always with the diff and the user's consent) ----
+  const wslRequest = (cmd: object): Promise<any> => new Promise((resolve) => {
+    if (!wslUp) { resolve(null); return; }
+    const t = setTimeout(() => { hooksWaiter = null; resolve(null); }, 4000);
+    hooksWaiter = (m) => { clearTimeout(t); resolve(m); };
+    toBridge(cmd);
+  });
+  const connectionsState = async () => {
+    const w = await wslRequest({ type: 'hooks', apply: false, permissions: settings.answerPermissions });
+    return {
+      answerPermissions: settings.answerPermissions, helper: !!helperPath,
+      windows: { ...winHost.state(settings.answerPermissions), port: winHost.port, up: winUp },
+      wsl: { up: wslUp, distro: wsl.distro, events: !!w?.events, mailbox: !!w?.mailbox, permissions: !!w?.permissions, diff: String(w?.diff ?? ''), error: w?.error as string | undefined },
+    };
+  };
+  const confirmHooks = async (message: string, items: Array<{ file: string; diff: string }>) => {
+    const detail = items.map((i) => `${i.file}\n${i.diff.length > 1400 ? `${i.diff.slice(0, 1400)}\n…` : i.diff}`).join('\n\n') + `\n\n${L('Копия файла сохранится рядом (settings.json.bak). Хуки только сообщают питомцу о событиях; свои хуки пользователя не затрагиваются.', 'A copy of the file is kept next to it (settings.json.bak). The hooks only tell the pet about events; your own hooks are not touched.', '文件的备份会保存在旁边（settings.json.bak）。钩子只向宠物通知事件，不会改动你自己的钩子。')}`;
+    const r = await dialog.showMessageBox(win, confirmOptions({ type: 'question', action: L('Применить', 'Apply', '应用'), cancel: L('Отмена', 'Cancel', '取消'), message, detail }));
+    return isConfirmed(r);
+  };
+  const windowsSettings = join(homedir(), '.claude', 'settings.json');
+  ipcMain.handle('pet:connections', () => connectionsState());
+  ipcMain.handle('pet:connections-apply', async (_e, hostId: unknown, action: unknown) => {
+    const remove = action === 'disconnect';
+    if (hostId === 'windows') {
+      const st = winHost.state(settings.answerPermissions);
+      if (st.error) { void info(L('Не удалось прочитать settings.json', 'Could not read settings.json', '无法读取 settings.json'), st.error); return connectionsState(); }
+      const diff = remove ? winHost.removeDiff() : st.diff;
+      if (diff && await confirmHooks(remove ? L('Отключить Windows от питомца?', 'Disconnect Windows from the pet?', '断开 Windows 与宠物的连接？') : L('Подключить Windows-сессии Claude Code?', 'Connect Windows Claude Code sessions?', '连接 Windows 的 Claude Code 会话？'), [{ file: windowsSettings, diff }])) {
+        try { remove ? winHost.remove() : winHost.apply(settings.answerPermissions); } catch (e) { void info(L('Не удалось записать настройки', 'Could not write the settings', '无法写入设置'), (e as Error).message); }
+      }
+    } else if (hostId === 'wsl') {
+      const p = await wslRequest({ type: 'hooks', apply: false, remove, permissions: settings.answerPermissions });
+      if (p?.error) { void info(L('Не удалось прочитать settings.json', 'Could not read settings.json', '无法读取 settings.json'), String(p.error)); return connectionsState(); }
+      if (p?.diff && await confirmHooks(remove ? L('Отключить WSL от питомца?', 'Disconnect WSL from the pet?', '断开 WSL 与宠物的连接？') : L('Подключить сессии Claude Code в WSL?', 'Connect Claude Code sessions in WSL?', '连接 WSL 中的 Claude Code 会话？'), [{ file: `~/.claude/settings.json (WSL${wsl.distro ? `: ${wsl.distro}` : ''})`, diff: String(p.diff) }]))
+        await wslRequest({ type: 'hooks', apply: true, remove, permissions: settings.answerPermissions });
+    }
+    return connectionsState();
+  });
+  ipcMain.handle('pet:answer-permissions', async (_e, on: unknown) => {
+    const wanted = on === true;
+    const items: Array<{ file: string; diff: string; apply: () => Promise<unknown> | unknown }> = [];
+    const ws = winHost.state(wanted);
+    if (ws.events && !ws.error && ws.diff) items.push({ file: windowsSettings, diff: ws.diff, apply: () => winHost.apply(wanted) });
+    const wp = await wslRequest({ type: 'hooks', apply: false, permissions: wanted });
+    if (wp?.events && !wp.error && wp.diff) items.push({ file: `~/.claude/settings.json (WSL)`, diff: String(wp.diff), apply: () => wslRequest({ type: 'hooks', apply: true, permissions: wanted }) });
+    if (items.length && !(await confirmHooks(wanted ? L('Отвечать на разрешения в питомце?', 'Answer permission questions in the pet?', '在宠物中回答权限请求？') : L('Больше не отвечать на разрешения в питомце?', 'Stop answering permission questions in the pet?', '不再在宠物中回答权限请求？'), items))) return connectionsState();
+    for (const i of items) { try { await i.apply(); } catch (e) { void info(L('Не удалось записать настройки', 'Could not write the settings', '无法写入设置'), (e as Error).message); } }
+    settings = { ...settings, answerPermissions: wanted }; applySettings();
+    toBridge({ type: 'hook-permissions', on: wanted });
+    return connectionsState();
   });
   // open a session in a real terminal (claude --resume); a pet-owned one is released first so only one client writes
   ipcMain.on('pet:open-terminal', (_e, sessionId: string) => {
     const s = sessionById(String(sessionId));
     if (!s) return;
+    if (s.host === 'windows') {
+      const launchWin = (useWt: boolean) => {
+        const c = windowsTerminalCommand({ cwd: s.cwd, sessionId: s.id }, useWt);
+        const p = spawn(c.file, c.args, { detached: true, stdio: 'ignore' });
+        p.on('error', (e) => { log(`terminal (${c.file}) failed: ${e.message}`); if (useWt) launchWin(false); });
+        p.unref();
+      };
+      launchWin(true);
+      return;
+    }
     if (s.owned) toBridge({ type: 'release', sessionId: s.id });
     const launch = (useWt: boolean) => {
       const c = terminalCommand({ distro: wsl.distro, cwd: s.cwd, claude: wsl.claude, sessionId: s.id }, useWt);
@@ -397,9 +476,11 @@ if (primary) app.whenReady().then(async () => {
   win.showInactive();
   log(`window bounds=${JSON.stringify(win.getBounds())} scale=${screen.getDisplayMatching(win.getBounds()).scaleFactor}`);
   startBridge();
+  void winHost.start().then((ok) => { winUp = ok; sendUp(); log(`windows host ${ok ? `listening on 127.0.0.1:${winHost.port}` : 'not started'}`); });
+  const winTimer = setInterval(() => winHost.tick(Date.now()), 1500);
   registerHotkey();
   app.on('second-instance', summon);
-  app.on('before-quit', () => { quitting = true; child?.stdin?.end(); setTimeout(() => child?.kill(), 500); });
+  app.on('before-quit', () => { clearInterval(winTimer); void winHost.stop(); quitting = true; child?.stdin?.end(); setTimeout(() => child?.kill(), 500); });
 
   if (iconArg) setTimeout(async () => {
     // app icon: the pet's face on a dark rounded tile, cut from the cleaned atlas

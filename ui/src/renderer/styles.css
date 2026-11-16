@@ -176,7 +176,7 @@ body { font-family: "Segoe UI", "Microsoft YaHei UI", system-ui, sans-serif; col
 #settings { display: flex; flex-direction: column; width: 400px; height: 250px; background: var(--glass); border: 1px solid var(--glass-line); border-radius: 18px; overflow: hidden; }
 #settings .s-head { display: flex; align-items: center; padding: 2px 6px 0 6px; border-bottom: 1px solid var(--glass-line); flex: none; }
 #settings .s-tabs { display: flex; gap: 2px; flex: 1; }
-#settings .s-tab { all: unset; cursor: pointer; padding: 6px 9px; font-size: 12.5px; color: var(--muted); border-bottom: 2px solid transparent; white-space: nowrap; margin-bottom: -1px; }
+#settings .s-tab { all: unset; cursor: pointer; padding: 6px 7px; font-size: 12px; color: var(--muted); border-bottom: 2px solid transparent; white-space: nowrap; margin-bottom: -1px; }
 #settings .s-tab:hover { color: var(--text); }
 #settings .s-tab.on { color: var(--text); border-bottom-color: var(--teal); }
 #settings .s-tab:focus-visible, #settings .s-close:focus-visible, #settings .s-btn:focus-visible, #settings .s-link:focus-visible, #settings .s-swatch:focus-visible { outline: 2px solid var(--teal); }
@@ -240,3 +240,10 @@ body { font-family: "Segoe UI", "Microsoft YaHei UI", system-ui, sans-serif; col
 #settings .s-legend { display: grid; grid-template-columns: 1fr 1fr; gap: 3px 10px; }
 #settings .s-leg { display: flex; align-items: center; gap: 6px; font-size: 11.5px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 #settings .s-leg i { width: 8px; height: 8px; border-radius: 50%; flex: none; }
+
+/* ---- Connections tab ---- */
+#settings .c-host { padding: 6px 8px; border-radius: 10px; background: var(--hover); }
+#settings .c-chips { display: flex; gap: 6px; flex-wrap: wrap; }
+#settings .c-chip { font-size: 11.5px; color: var(--muted); padding: 1px 7px; border-radius: 9px; background: var(--hover2); }
+#settings .c-chip.on { color: var(--text); }
+#settings .c-err { color: var(--alert); }

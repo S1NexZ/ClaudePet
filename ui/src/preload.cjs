@@ -31,6 +31,11 @@ contextBridge.exposeInMainWorld('petHost', {
   onHover: (cb) => ipcRenderer.on('pet:hover', (_e, h) => cb(!!h)),
   setLanguage: (l) => ipcRenderer.send('pet:language', l),
   setPermissions: (m) => ipcRenderer.send('pet:permissions', m),
+  connections: {
+    get: () => ipcRenderer.invoke('pet:connections'),
+    apply: (host, action) => ipcRenderer.invoke('pet:connections-apply', host, action),
+    answerPermissions: (on) => ipcRenderer.invoke('pet:answer-permissions', on),
+  },
   setAppearance: (a) => ipcRenderer.send('pet:appearance', a),
   onOpenSettings: (cb) => ipcRenderer.on('pet:open-settings', () => cb()),
   notify: (title, body) => ipcRenderer.send('pet:notify', title, body),

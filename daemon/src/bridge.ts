@@ -6,7 +6,8 @@ import { interruptedSince, readOriginalCwd, readEntrypoint, PET_MARKER } from '.
 import type { Mailbox } from './mailbox.js';
 import { summarize } from './summary.js';
 import { sendPrompt, sendEsc, PtyGoneError } from './ptySend.js';
-import { planHooks, runInstall } from './installHooks.js';
+import { planHooks, removeHooks, lineDiff } from './installHooks.js';
+import { planHostHooks, removeHostHooks, hooksStatus, readSettingsFile, writeSettingsFile } from './hookConfig.js';
 import type { AppCommand, BridgeMessage, ChatEvent, ChatItem, Snapshot, UsageInfo } from '../../shared/src/types.js';
 import { L, setLang } from '../../shared/src/i18n.js';
 
@@ -50,6 +51,10 @@ export function createBridge(o: {
   /** answer PermissionRequest hooks through the pet (off by default); the Windows host reads the app setting here */
   permissionsFromPet?: () => boolean;
   permissionTimeoutMs?: number;
+  /** this host's hook receiver: lets the bridge install the mailbox waiter and the PermissionRequest hook next to the events hook */
+  hostHooks?: { origin: string; token: string };
+  /** prefix of permission ids (two hosts must not hand out the same id) */
+  permissionIdPrefix?: string;
   /** delay of the second transcript read after Stop (Claude writes its reply after the hook fires) */
   stopRecheckMs?: number;
 }) {
@@ -92,22 +97,24 @@ export function createBridge(o: {
   const checking = new Set<string>();
   let usageVersion: number | string = -1;
   const rereadLater = (id: string) => { setTimeout(() => void history(id), o.stopRecheckMs ?? 700).unref?.(); };
-  const hooksPlan = () => {
-    let current: Record<string, any> = {};
-    if (existsSync(o.hooks.settingsPath)) {
-      const raw = readFileSync(o.hooks.settingsPath, 'utf8');
-      current = raw.trim() ? JSON.parse(raw) : {};
-    }
+  /** What the hooks section of settings.json would become (events hook, plus mailbox waiter and permission hook when this bridge has a receiver) and what is installed now. */
+  const hooksPlan = (wantPerm: boolean, remove = false) => {
+    const { current, raw } = readSettingsFile(o.hooks.settingsPath);
     // our hook files referenced by the user's settings: none = not installed; any missing = stale
     const files = Object.values(current.hooks ?? {}).flat()
       .flatMap((g: any) => (Array.isArray(g?.hooks) ? g.hooks : []))
       .map((h: any) => /"([^"]*pet-hook\.mjs)"/.exec(String(h?.command ?? ''))?.[1])
       .filter((f): f is string => !!f);
-    return {
-      diff: planHooks(current, o.hooks.hookPath, o.hooks.nodePath).diff,
-      installed: files.length > 0,
-      stale: files.some((f) => !existsSync(f)),
-    };
+    let next: Record<string, any>;
+    if (remove) next = removeHostHooks(removeHooks(current).next).next;
+    else {
+      next = planHooks(current, o.hooks.hookPath, o.hooks.nodePath).next;
+      if (o.hostHooks) next = planHostHooks(next, { kind: 'wsl', origin: o.hostHooks.origin, token: o.hostHooks.token, nodePath: o.hooks.nodePath, hookPath: o.hooks.hookPath, permissions: wantPerm }).next;
+    }
+    const same = JSON.stringify(current) === JSON.stringify(next);
+    const diff = same ? '' : lineDiff(JSON.stringify({ hooks: current.hooks ?? {} }, null, 2).split('\n'), JSON.stringify({ hooks: next.hooks ?? {} }, null, 2).split('\n'));
+    const st = hooksStatus(current, 'wsl');
+    return { current, raw, next, diff, installed: files.length > 0, stale: files.some((f) => !existsSync(f)), ...st };
   };
 
   return {
@@ -182,14 +189,19 @@ export function createBridge(o: {
             ended.add(id);
             break;
           }
-          case 'hooks':
+          case 'hooks': {
+            const wantPerm = typeof cmd.permissions === 'boolean' ? cmd.permissions : permissionsOn();
+            let p;
+            try { p = hooksPlan(wantPerm, cmd.remove === true); }
+            catch (e) { o.out({ type: 'hooks', diff: '', applied: false, installed: false, stale: false, error: (e as Error).message }); return; }
             if (cmd.apply === true) {
-              await runInstall({ ...o.hooks, yes: true, ask: async () => 'y', out: () => {} });
-              o.out({ type: 'hooks', diff: '', applied: true, installed: true, stale: false });
+              if (p.diff) writeSettingsFile(o.hooks.settingsPath, p.next, p.raw !== undefined);
+              o.out({ type: 'hooks', diff: '', applied: !!p.diff, installed: cmd.remove !== true, stale: false, events: cmd.remove !== true, mailbox: cmd.remove !== true && !!o.hostHooks, permissions: cmd.remove !== true && wantPerm && !!o.hostHooks });
             } else {
-              o.out({ type: 'hooks', ...hooksPlan(), applied: false });
+              o.out({ type: 'hooks', diff: p.diff, applied: false, installed: p.installed, stale: p.stale, events: p.events, mailbox: p.mailbox, permissions: p.permissions });
             }
             return;
+          }
           default: throw new Error(L('Неизвестная команда', 'Unknown command', '未知命令'));
         }
         snapshot();
@@ -223,7 +235,7 @@ export function createBridge(o: {
     onPermission(e: HookPayload): Promise<'allow' | 'deny' | null> {
       if (!permissionsOn() || o.store.get(e.session_id)?.owned) return Promise.resolve(null);
       o.store.apply({ hook_event_name: 'Notification', session_id: e.session_id, cwd: e.cwd, message: 'permission' });
-      const id = `hp-${++askSeq}`;
+      const id = `${o.permissionIdPrefix ?? 'hp-'}${++askSeq}`;
       o.store.setPending(e.session_id, { id, tool: String(e.tool_name ?? ''), summary: summarize(String(e.tool_name ?? ''), (e.tool_input ?? {}) as Record<string, unknown>) });
       snapshot();
       return new Promise((resolve) => {

@@ -47,6 +47,19 @@ export function planHooks(current: Settings, hookPath: string, nodePath: string)
   return { next, diff: lineDiff(before, after) };
 }
 
+/** Settings without our events hook (entries whose command mentions pet-hook.mjs, the waiter included); the user's own hooks stay. */
+export function removeHooks(current: Settings): { next: Settings } {
+  const next: Settings = JSON.parse(JSON.stringify(current));
+  for (const ev of Object.keys(next.hooks ?? {})) {
+    const groups: any[] = Array.isArray(next.hooks[ev]) ? next.hooks[ev] : [];
+    for (const g of groups) if (Array.isArray(g?.hooks)) g.hooks = g.hooks.filter((h: any) => !String(h?.command ?? '').includes(MARKER));
+    const kept = groups.filter((g) => !Array.isArray(g?.hooks) || g.hooks.length > 0);
+    if (kept.length) next.hooks[ev] = kept; else delete next.hooks[ev];
+  }
+  if (next.hooks && Object.keys(next.hooks).length === 0) delete next.hooks;
+  return { next };
+}
+
 export interface InstallOpts {
   settingsPath: string; hookPath: string; nodePath: string;
   yes: boolean; ask: (question: string) => Promise<string>; out: (line: string) => void;

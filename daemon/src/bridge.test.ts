@@ -420,3 +420,32 @@ describe('bridge: mailbox and hook permissions', () => {
     expect(await p).toBe('allow');
   });
 });
+
+describe('bridge: hooks with a receiver (mailbox waiter and permission hook)', () => {
+  const host = { origin: 'http://127.0.0.1:47822', token: 'ab12cd' };
+  it('plan shows the waiter; apply writes events + waiter (+ permission only when asked); remove leaves the user\'s own hooks', async () => {
+    const mine = { theme: 'dark', hooks: { PreToolUse: [{ matcher: 'Bash', hooks: [{ type: 'command', command: 'rtk' }] }] } };
+    const { bridge, out, settingsPath } = setup({ hostHooks: host });
+    writeFileSync(settingsPath, JSON.stringify(mine));
+    await bridge.handle({ type: 'hooks', apply: false });
+    expect(last(out, 'hooks')).toMatchObject({ applied: false, diff: expect.stringContaining('wait'), events: false, mailbox: false, permissions: false });
+    await bridge.handle({ type: 'hooks', apply: true, permissions: false });
+    let st = JSON.parse(readFileSync(settingsPath, 'utf8'));
+    expect(st.hooks.Stop.some((g: any) => /pet-hook\.mjs" wait/.test(g.hooks[0].command))).toBe(true);
+    expect(st.hooks.PermissionRequest).toBeUndefined();
+    await bridge.handle({ type: 'hooks', apply: false, permissions: false });
+    expect(last(out, 'hooks')).toMatchObject({ diff: '', events: true, mailbox: true, permissions: false });
+    await bridge.handle({ type: 'hooks', apply: true, permissions: true });
+    st = JSON.parse(readFileSync(settingsPath, 'utf8'));
+    expect(st.hooks.PermissionRequest[0].hooks[0].url).toBe('http://127.0.0.1:47822/hook/ab12cd/PermissionRequest');
+    await bridge.handle({ type: 'hooks', apply: true, remove: true });
+    expect(JSON.parse(readFileSync(settingsPath, 'utf8'))).toEqual(mine);
+  });
+  it('a settings file that is not JSON is reported, not overwritten', async () => {
+    const { bridge, out, settingsPath } = setup({ hostHooks: host });
+    writeFileSync(settingsPath, '{ // c\n}');
+    await bridge.handle({ type: 'hooks', apply: true });
+    expect((last(out, 'hooks') as any).error).toMatch(/not valid JSON/);
+    expect(readFileSync(settingsPath, 'utf8')).toContain('// c');
+  });
+});

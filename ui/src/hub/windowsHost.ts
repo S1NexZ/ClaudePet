@@ -100,6 +100,10 @@ export function createWindowsHost(o: WindowsHostOpts) {
       writeSettingsFile(settingsPath, p.next, p.raw !== undefined);
       return { applied: true, diff: p.diff };
     },
+    /** what removing our entries would change (shown before the user agrees) */
+    removeDiff(): string {
+      try { return removeHostHooks(readSettingsFile(settingsPath).current).diff; } catch { return ''; }
+    },
     /** removes only our entries */
     remove(): { applied: boolean; diff: string } {
       const { current, raw } = readSettingsFile(settingsPath);
