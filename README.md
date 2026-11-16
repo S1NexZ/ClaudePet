@@ -1,10 +1,10 @@
 # Claude Pet
 
-**Claude Pet** is a Windows desktop pet for [Claude Code](https://code.claude.com) running in WSL. It shows what your Claude Code sessions are doing, has a chat,
+**Claude Pet** is a Windows desktop pet for [Claude Code](https://code.claude.com) running in WSL, Windows terminals and the Claude desktop app. It shows what your Claude Code sessions are doing, has a chat,
 and — its main trick — **shares one live Claude Code session with your terminal**: type from the pet or from the terminal, both talk to the same process and the same transcript.
-*(The app interface is available in **English and Russian** — it follows the system language, or pick one in Settings → Appearance. The documentation below is in Russian; the English summary is in the requirements and quick start sections.)*
+*(The app interface is available in **English, Russian and Chinese** — it follows the system language, or pick one in Settings → Appearance. The documentation below is in Russian; the English summary is in the requirements and quick start sections.)*
 
-Claude Pet — настольный питомец для Claude Code в WSL. Он показывает, что делают ваши сессии, содержит чат и **работает с той же живой сессией, что и ваш терминал**:
+Claude Pet — настольный питомец для Claude Code в WSL, терминалах Windows и десктопном приложении Claude. Он показывает, что делают ваши сессии, содержит чат и **работает с той же живой сессией, что и ваш терминал**:
 пишете из питомца или из терминала, а отвечает один и тот же процесс Claude Code с одним транскриптом.
 
 > Неофициальный независимый проект, не связан с Anthropic. Лицензия MIT распространяется только на исходный код (см. [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)).
@@ -38,7 +38,7 @@ Claude Pet — настольный питомец для Claude Code в WSL. О
 ## Быстрый старт
 
 1. Скачайте `Claude-Pet-Setup-<версия>.exe` со страницы [Releases](https://github.com/S1NexZ/ClaudePet/releases) и запустите. Установка в один шаг, после неё питомец запустится сам.
-2. **Подключите хуки Claude Code** (трей → «Подключить хуки Claude Code…»). Питомец покажет точное изменение `~/.claude/settings.json`, сохранит копию и применит его только после вашего согласия. Без хуков питомец не видит сессии.
+2. **Подключите хуки Claude Code**: «Настройки → Подключения» (отдельно для Windows и WSL; в трее есть то же самое). Питомец покажет точное изменение `settings.json`, сохранит копию `.bak` и применит его только после вашего согласия. Без хуков питомец не видит сессии. Так подключаются PowerShell/CMD/Windows Terminal, VS Code и десктопное приложение Claude; сообщения из чата доходят до таких сессий через «почтовый ящик» (фоновый хук будит сессию).
 3. **Подключите терминал** (трей → «Подключить терминал (WSL)…»): приложение покажет одну команду для WSL-терминала. Скрипт покажет изменение `~/.bashrc`, спросит подтверждение, сделает резервную копию и его можно отменить (`--uninstall`).
    Без этого шага питомец тоже работает, но писать в терминальную сессию сможет только через запасной путь SDK.
 4. Откройте **новое** окно WSL-терминала и запустите `claude` как обычно. Питомец должен показать эту сессию; `Ctrl+Alt+P` откроет чат.
@@ -73,7 +73,10 @@ Claude Pet — настольный питомец для Claude Code в WSL. О
 - Данные питомца: см. [docs/privacy.md](docs/privacy.md).
 
 ## Известные ограничения
-- Только Windows + WSL2; интерфейс на русском; установщик не подписан.
+- Только Windows; интерфейс на русском, английском и китайском; установщик не подписан.
+- Сессии на Windows (терминалы, десктоп, IDE): есть статус, чат и ответы на разрешения (по желанию), но нет Esc/«Стоп» из питомца, лимитов и запуска нового чата — они остаются за WSL. Из WSL подхватывается только дистрибутив по умолчанию. Десктопное приложение проверено на практике, IDE-расширения — только по логике (читают тот же `settings.json`).
+- Сообщение из питомца в сессию без обёртки показывается в терминале как «Stop hook feedback», в чате питомца и транскрипте — как ваше.
+- Ответы на разрешения из питомца выключены по умолчанию (Настройки → Подключения); без ответа за 30 с Claude Code показывает обычный диалог.
 - **Лимиты** получаются через экспериментальный метод Agent SDK (`usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET`): он может измениться или исчезнуть при обновлении Claude Code, тогда лимиты станут недоступны. Каждый запрос — короткий процесс `claude` (~2 с, до ~230 МБ памяти) раз в минуту, он обновляет `~/.claude.json` штатным способом Claude Code. Нулевой расход лимита не гарантируется (запрос не отправляет промпт, но процент целый и данные могут запаздывать).
 - Запасной путь SDK запускает второй процесс Claude Code: в уже открытом терминале ответ не появится. Для сессий под обёрткой этого нет.
 - Esc, нажатый в первые секунды хода (пока выполняются хуки), Claude Code может проигнорировать.

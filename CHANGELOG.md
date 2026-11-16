@@ -2,28 +2,23 @@
 
 Формат: [Keep a Changelog](https://keepachangelog.com/ru/1.1.0/), версии по [SemVer](https://semver.org/lang/ru/).
 
-## Unreleased
+## [0.3.0] — 2026-11-17
+### Добавлено
+- **Универсальная интеграция**: питомец видит сессии Claude Code не только в WSL, но и в PowerShell/CMD/Windows Terminal, терминалах VS Code и десктопном приложении Claude (HTTP-хуки на `127.0.0.1:47821`); у каждой сессии метка `Win` / `WSL` / `App`.
+- **Чат с любой сессией** без PTY через «почтовый ящик»: фоновый `asyncRewake`-хук (`pet-helper.exe` на Windows, `pet-hook.mjs wait` в WSL) будит сессию текстом из питомца. Проверено на живой простаивающей сессии WSL и десктопного приложения.
+- **Настройки → Подключения**: статус по хостам, Подключить / Обновить / Отключить хуки (всегда с diff и копией `.bak`, ваши хуки не затрагиваются).
+- **Разрешения в питомце** (по желанию, выключено по умолчанию): Разрешить / Отклонить через хук `PermissionRequest`; без ответа за 30 с остаётся обычный диалог Claude Code.
+- Запущенные сессии находятся по свежим транскриптам ещё до первого хука.
+- Китайский язык интерфейса; компактные настройки с вкладками (в т. ч. «Подключения»).
+- Статус в виде цветного кружка (зелёный — готов, синий — думает, жёлтый — тесты, красный — разрешение/ошибка и т. д.), слово выезжает при наведении; легенда в настройках. Кольцо лимита встроено в плашку статуса.
+- Редактор RGB остаётся открытым, пока вы его не закроете.
+- Анимации на GSAP: панели выезжают из питомца и сворачиваются, прерываемые таймлайны.
+- Мягкая тень под питомцем и тонкая скруглённая полоса прокрутки.
 
-- **Universal integration.** The pet now sees Claude Code sessions everywhere, not only in WSL: a Windows host (HTTP hooks on `127.0.0.1:47821`) takes sessions from PowerShell, CMD, Windows Terminal, VS Code terminals and the Claude desktop app, and merges them with the WSL ones (a `Win` / `WSL` / `App` tag marks each session).
-- **Talking to any session.** A message from the pet chat reaches a session without a PTY through the *mailbox*: a background `asyncRewake` hook long-polls the pet and wakes the session with the text (verified end to end on a real idle Claude Code session). `pet-helper.exe` (C#, built with the .NET Framework compiler) is the Windows waiter, `pet-hook.mjs wait` the WSL one.
-- **Settings → Connections.** Per-host status and Connect / Update / Disconnect for the hooks in `settings.json` (always with the diff and a `.bak` copy; the user's own hooks are never touched).
-- **Permissions in the pet (opt-in, off by default).** Answer Claude Code's permission questions with Allow / Deny in the pet through the `PermissionRequest` hook; no answer in 30 s leaves Claude Code's normal dialog.
-- Running sessions are discovered from recent transcripts even before any hook arrives.
-- Idle load cut from ~80% to ~15% of one core: the window is only as tall as its content again (it hangs from the pet's top, so growing never moves the pet), the heavy DOM work runs at ~15 Hz, the stage is `position: fixed` (no focus-scroll jumps).
-- Idle GPU load halved: the breathing animation is stepped instead of repainting every frame. The usage ring is a bit more opaque at rest.
-- Panels open below the pet again; the constant-size window hangs from the pet's top, so it can be dragged anywhere (panels may reach past the screen edge) and never snaps back.
-- The window no longer resizes at all (a constant transparent, click-through stage): no more stale "second pet" frame when a panel opens. Settings have a fixed height so switching tabs does not jump.
-- Usage ring number is centered.
-- The usage ring lives in the status chip: a small arc next to the status dot that settles at the end of the row when the chip unfolds.
-- The window has a constant width and the UI hangs from its bottom edge, so opening or closing panels never moves or shakes the pet.
-- Panels (settings, chat, sessions, limits, notices) slide out of the pet and fold back with GSAP; they open upwards so the pet never moves.
-- The status chip rests as a colored dot (green ready, blue thinking, cyan reading, violet writing, orange running, yellow testing, red permission/error, pink subagent, lime done, grey asleep); the word and details unfold on hover. A legend is in Settings.
-- Settings: the RGB editor (sliders + HEX) stays open until closed instead of resetting after one click.
-- Chinese (中文) interface language; compact settings split into five tabs.
-- Hover and state animations are driven by GSAP (interruptible timelines: they turn around mid-way instead of jumping).
-- The status chip rests as a dot and a word next to the pet and slides out on hover.
-- The usage ring is a small, quiet arc by the pet that grows and shows its number on hover.
-- Smoother hover animations (no window resizing during the slide-out, no spring overshoot).
+### Изменено
+- Нагрузка в покое снижена примерно с 80% до ~15% одного ядра (окно по высоте контента и подвешено к питомцу, тяжёлая работа с DOM ~15 Гц, «дыхание» ступенчатое).
+- Панели открываются под питомцем; окно не сдвигает питомца и не возвращает его назад при перетаскивании.
+- Убрана «вторая Мику» на пару кадров при открытии панелей.
 
 ## [0.2.0] — первый публичный релиз
 ### Добавлено
