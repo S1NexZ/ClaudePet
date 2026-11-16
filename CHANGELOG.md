@@ -4,6 +4,9 @@
 
 ## Unreleased
 
+- Panels (settings, chat, sessions, limits, notices) slide out of the pet and fold back with GSAP; they open upwards so the pet never moves.
+- The status chip rests as a colored dot (green ready, blue thinking, cyan reading, violet writing, orange running, yellow testing, red permission/error, pink subagent, lime done, grey asleep); the word and details unfold on hover. A legend is in Settings.
+- Settings: the RGB editor (sliders + HEX) stays open until closed instead of resetting after one click.
 - Chinese (中文) interface language; compact settings split into five tabs.
 - Hover and state animations are driven by GSAP (interruptible timelines: they turn around mid-way instead of jumping).
 - The status chip rests as a dot and a word next to the pet and slides out on hover.

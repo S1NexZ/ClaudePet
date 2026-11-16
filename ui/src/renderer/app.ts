@@ -13,7 +13,7 @@ import { createSettingsPanel } from './settingsPanel.js';
 import { createModelsTab, type ModelsHost } from './modelsTab.js';
 import { clampScale } from '../petScale.js';
 import { localizeHtml } from './htmlText.js';
-import { createMotion } from './motion.js';
+import { createMotion, animatePanels } from './motion.js';
 import { removeLightFringe } from '../sprite/fringe.js';
 import { dominantHue, type Appearance } from '../appearance.js';
 import type { AppCommand, BridgeMessage, ChatItem, Session, Snapshot, UsageInfo, PermissionPolicy } from '../../../shared/src/types.js';
@@ -508,6 +508,7 @@ async function main() {
   // Smooth motion: frames cross-fade into each other (a state change fades a little longer and gets a soft "pop"),
   // and a calm pet breathes. All of it is skipped when the OS asks for reduced motion.
   const reduceMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false;
+  animatePanels(['notice', 'perm', 'sessions', 'settings', 'usage', 'chat', 'chat-menu', 'models'].map((id) => document.getElementById(id)), reduceMotion);
   const motion = createMotion({ sprite, dockPill, chip: $('chip'), ring: usageRing }, reduceMotion);
   usageRing.addEventListener('mouseenter', () => { ringHover = true; });
   usageRing.addEventListener('mouseleave', () => { ringHover = false; });
@@ -528,7 +529,7 @@ async function main() {
     const awake = peek || settingsPanel.isOpen() || usageOpen || dockPill.matches(':focus-within');
     dockPill.classList.toggle('rest', !awake);
     $('chip').classList.toggle('rest', !awake);
-    motion.setAwake(awake);
+    motion.setAwake(awake || expanded);
     const lvl = usageRing.getAttribute('data-level');
     motion.setRing(awake || ringHover || lvl === 'high' || lvl === 'full');
     const { row, col } = anim.frame(t);
@@ -553,6 +554,9 @@ async function main() {
       $('label').textContent = v.label;
       $('detail').textContent = v.detail;
       $('chip').classList.toggle('attention', v.attention);
+      $('chip').dataset.state = v.state;
+      $('chip').title = `${v.label} ${v.detail}`.trim();
+      motion.setPulse(v.state !== 'idle' && v.state !== 'done' && v.state !== 'sleeping');
       $('chip').classList.toggle('offline', !connected);
     }
     const pp = s?.pendingPermission;
