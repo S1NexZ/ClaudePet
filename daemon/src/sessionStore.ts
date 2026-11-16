@@ -13,7 +13,23 @@ const MAX_SESSIONS = 15;
 const QUIET: PetState[] = ['idle', 'sleeping', 'done'];
 
 function projectName(cwd: string): string {
-  return posix.basename(cwd.replace(/\/+$/, '')) || cwd;
+  // Windows paths use backslashes
+  return posix.basename(cwd.replace(/\\/g, '/').replace(/\/+$/, '')) || cwd;
+}
+
+/** The session the pet should show: waiting > error > newest active > newest overall. Works on a merged list from several hosts. */
+export function pickAttention(all: Session[]): Session | null {
+  if (all.length === 0) return null;
+  const newest = (xs: Session[]) => xs.reduce((a, b) => (b.lastEventAt >= a.lastEventAt ? b : a));
+  for (const pick of [
+    (x: Session) => x.state === 'waiting',
+    (x: Session) => x.state === 'error',
+    (x: Session) => !QUIET.includes(x.state),
+  ]) {
+    const hit = all.filter(pick);
+    if (hit.length) return newest(hit);
+  }
+  return newest(all);
 }
 
 export class SessionStore {
@@ -117,20 +133,9 @@ export class SessionStore {
     return [...this.sessions.values()];
   }
 
-  /** The session the pet should show: waiting > error > newest active > newest overall. */
+  /** The session the pet should show (see pickAttention). */
   attention(): Session | null {
-    const all = this.list();
-    if (all.length === 0) return null;
-    const newest = (xs: Session[]) => xs.reduce((a, b) => (b.lastEventAt >= a.lastEventAt ? b : a));
-    for (const pick of [
-      (x: Session) => x.state === 'waiting',
-      (x: Session) => x.state === 'error',
-      (x: Session) => !QUIET.includes(x.state),
-    ]) {
-      const hit = all.filter(pick);
-      if (hit.length) return newest(hit);
-    }
-    return newest(all);
+    return pickAttention(this.list());
   }
 
   private setState(s: Session, state: PetState, now: number): void {

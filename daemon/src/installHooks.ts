@@ -33,7 +33,8 @@ export function planHooks(current: Settings, hookPath: string, nodePath: string)
   next.hooks ??= {};
   for (const ev of HOOK_EVENTS) {
     const groups: any[] = (next.hooks[ev] ??= []);
-    for (const g of groups) g.hooks = (g.hooks ?? []).filter((h: any) => !String(h.command ?? '').includes(MARKER));
+    // the mailbox waiter (`pet-hook.mjs wait`) belongs to hookConfig.ts: leave it alone here
+    for (const g of groups) g.hooks = (g.hooks ?? []).filter((h: any) => !(String(h.command ?? '').includes(MARKER) && !/\swait\b/.test(String(h.command))));
     const kept = groups.filter((g) => g.hooks.length > 0);
     const group: Settings = TOOL_EVENTS.has(ev) ? { matcher: '*' } : {};
     group.hooks = [{ type: 'command', command }];

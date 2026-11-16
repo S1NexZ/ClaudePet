@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { SessionStore } from './sessionStore.js';
+import { SessionStore, pickAttention } from './sessionStore.js';
 import type { HookEvent } from '../../shared/src/types.js';
 
 const ev = (session_id: string, hook_event_name: string, extra: Partial<HookEvent> = {}): HookEvent =>
@@ -188,5 +188,21 @@ describe('SessionStore', () => {
     expect(s.get('busy')).toBeDefined();
     expect(s.get('s0')).toBeUndefined();
     expect(s.get('s19')).toBeDefined();
+  });
+});
+
+describe('Windows hosts', () => {
+  it('names a session after the last folder of a Windows cwd', () => {
+    const s = new SessionStore();
+    s.apply({ hook_event_name: 'SessionStart', session_id: 'w1', cwd: 'C:\\Users\\x\\my-proj' });
+    s.apply({ hook_event_name: 'SessionStart', session_id: 'w2', cwd: 'C:\\Users\\x\\other\\' });
+    expect(s.get('w1')?.project).toBe('my-proj');
+    expect(s.get('w2')?.project).toBe('other');
+  });
+  it('pickAttention works across a merged list: waiting beats a newer busy session', () => {
+    const mk = (id: string, state: any, at: number) => ({ id, cwd: '/', project: id, state, since: at, lastEventAt: at, owned: false });
+    const list = [mk('a', 'thinking', 100), mk('b', 'waiting', 50), mk('c', 'idle', 200)];
+    expect(pickAttention(list)?.id).toBe('b');
+    expect(pickAttention([])).toBeNull();
   });
 });

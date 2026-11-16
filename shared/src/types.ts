@@ -27,6 +27,12 @@ export interface Session {
   /** folder the session was STARTED in (from its transcript): resuming from any other folder makes Claude Code copy the session. Set once. */
   resumeCwd?: string;
   pendingPermission?: PendingPermission;
+  /** where the session runs: 'wsl' (the WSL bridge) or 'windows' (the Windows host); set by the app when it merges hosts */
+  host?: 'wsl' | 'windows';
+  /** which Claude Code front end started it, from the transcript's `entrypoint` (cli, claude-desktop, vscode, sdk-cli, ...) */
+  source?: string;
+  /** a mailbox waiter is armed: a message sent from the pet is delivered even without a PTY */
+  mailbox?: boolean;
 }
 
 export interface Snapshot {
