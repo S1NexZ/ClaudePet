@@ -11,7 +11,7 @@ import { installModelFromZip, installModelFromDir, removeModel, scanPetFolder, M
 import { loadSettings, saveSettings } from './settings.js';
 import { wslBridgeArgs, splitLines } from './bridgeLaunch.js';
 import { overAny, type Rect } from './hitTest.js';
-import { placeStage, restoreAnchor, type Anchor } from './placement.js';
+import { placeStage, restoreAnchor, IDLE_H, type Anchor } from './placement.js';
 import { terminalCommand } from './terminal.js';
 import { toWslPath } from '../../daemon/src/paths.js';
 import { cleanAppearance } from './appearance.js';
@@ -49,7 +49,7 @@ function startAnchor(): Anchor {
     if (a.cx >= wa.x && a.cx <= wa.x + wa.width && a.bottom > wa.y + 60 && a.bottom <= wa.y + wa.height + 1) return a;
   }
   const wa = screen.getPrimaryDisplay().workArea;
-  return { cx: wa.x + wa.width - 160, bottom: wa.y + wa.height - 8 };
+  return { cx: wa.x + wa.width - 160, bottom: Math.max(wa.y + 260, wa.y + wa.height - 440) }; // room below the pet for the chat and settings
 }
 
 // A second launch only summons the running pet (see 'second-instance'); it must not start anything itself.
@@ -66,7 +66,7 @@ if (primary) app.whenReady().then(async () => {
   const pet = await loadPet(process.env.CLAUDE_PET_SPRITE ?? chosen!.dir);
   const initialAnchor = startAnchor();
   const win = new BrowserWindow({
-    ...(() => { const wa = screen.getDisplayNearestPoint({ x: Math.round(initialAnchor.cx), y: Math.round(initialAnchor.bottom - 1) }).workArea; return placeStage(initialAnchor, STAGE_W, Math.min(STAGE_H, wa.height), wa); })(), frame: false, transparent: true, resizable: false,
+    ...(() => { const wa = screen.getDisplayNearestPoint({ x: Math.round(initialAnchor.cx), y: Math.round(initialAnchor.bottom - 1) }).workArea; return placeStage(initialAnchor, STAGE_W, STAGE_H, wa); })(), frame: false, transparent: true, resizable: false,
     alwaysOnTop: true, skipTaskbar: true, hasShadow: false, show: false, maximizable: false, minimizable: false, fullscreenable: false,
     webPreferences: { preload: join(__dirname, 'preload.cjs'), contextIsolation: true, sandbox: true },
   });
@@ -339,7 +339,7 @@ if (primary) app.whenReady().then(async () => {
   // While it moves, the renderer is told the direction so the pet can run that way.
   let lastX = win.getBounds().x, moveSteps = 0, ownMoveUntil = 0;
   let dragging = false, dragIdle: NodeJS.Timeout | null = null;
-  const anchorOf = (): Anchor => { const b = win.getBounds(); return { cx: b.x + b.width / 2, bottom: b.y + b.height }; };
+  const anchorOf = (): Anchor => { const b = win.getBounds(); return { cx: b.x + b.width / 2, bottom: b.y + IDLE_H }; };
   let anchor: Anchor = initialAnchor; // where the pet stands; only the user's drags change it
   // the drag is over: remember where the pet stands
   const endDrag = () => {

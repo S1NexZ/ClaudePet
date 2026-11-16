@@ -4,6 +4,7 @@
 
 ## Unreleased
 
+- Panels open below the pet again; the constant-size window hangs from the pet's top, so it can be dragged anywhere (panels may reach past the screen edge) and never snaps back.
 - The window no longer resizes at all (a constant transparent, click-through stage): no more stale "second pet" frame when a panel opens. Settings have a fixed height so switching tabs does not jump.
 - Usage ring number is centered.
 - The usage ring lives in the status chip: a small arc next to the status dot that settles at the end of the row when the chip unfolds.

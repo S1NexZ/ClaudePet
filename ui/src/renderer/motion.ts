@@ -113,11 +113,11 @@ export function animatePanels(els: Array<HTMLElement | null>, reduce: boolean): 
         if (!v) {
           if (!cur && !leaving) return; // already shown
           leaving = false; gsap.killTweensOf(el); real(false);
-          gsap.fromTo(el, { opacity: 0, y: 14, scale: 0.97, transformOrigin: '50% 100%' }, { opacity: 1, y: 0, scale: 1, duration: 0.38, delay: 0.06, ease: 'power3.out', clearProps: 'opacity,transform' });
+          gsap.fromTo(el, { opacity: 0, y: -14, scale: 0.97, transformOrigin: '50% 0' }, { opacity: 1, y: 0, scale: 1, duration: 0.38, delay: 0.06, ease: 'power3.out', clearProps: 'opacity,transform' });
         } else {
           if (cur || leaving) return; // already hidden / on the way out
           leaving = true; gsap.killTweensOf(el);
-          gsap.to(el, { opacity: 0, y: 10, scale: 0.97, transformOrigin: '50% 100%', duration: 0.2, ease: 'power2.in', onComplete: () => { leaving = false; real(true); gsap.set(el, { clearProps: 'opacity,transform' }); } });
+          gsap.to(el, { opacity: 0, y: -10, scale: 0.97, transformOrigin: '50% 0', duration: 0.2, ease: 'power2.in', onComplete: () => { leaving = false; real(true); gsap.set(el, { clearProps: 'opacity,transform' }); } });
         }
       },
     });

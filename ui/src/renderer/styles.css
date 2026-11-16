@@ -20,8 +20,8 @@
 * { box-sizing: border-box; margin: 0; }
 html, body { width: 100%; height: 100%; background: transparent; overflow: hidden; user-select: none; }
 body { font-family: "Segoe UI", "Microsoft YaHei UI", system-ui, sans-serif; color: var(--text); }
-/* the stage hangs from the window's bottom edge and does not depend on the window's height: a resize can never shift the pet */
-#stage { position: absolute; left: 0; right: 0; bottom: 0; display: flex; flex-direction: column; align-items: center; gap: 6px; padding-bottom: 8px; }
+/* the stage hangs from the window's top edge: the pet stands at the top, the panels open below it (and may reach past the screen: the user moves the pet) */
+#stage { position: absolute; left: 0; right: 0; top: 0; display: flex; flex-direction: column; align-items: center; gap: 6px; padding-top: 16px; }
 #sprite { width: 100%; height: 100%; display: block; -webkit-app-region: drag; transform-origin: 50% 100%; }
 /* the status chip: motion by GSAP (motion.ts); --bgo is the opacity of its glass pill (::before) */
 #chip {
@@ -56,7 +56,6 @@ body { font-family: "Segoe UI", "Microsoft YaHei UI", system-ui, sans-serif; col
 /* ---- hover dock: under the pet's feet a dark shadow rests; on hover it grows into the button pill and the icons rise out of it ---- */
 #dock { position: relative; flex: none; height: 46px; margin-top: -6px; display: flex; justify-content: center; align-items: flex-start; }
 #dock-pill.rest { pointer-events: none; }
-#pill { margin-top: -6px; }
 #compose { display: flex; align-items: center; width: 384px; gap: 2px; }
 #input {
   flex: 1; min-width: 0; padding: 0 8px; height: 36px; color: var(--text); font: 14px "Segoe UI", "Microsoft YaHei UI", system-ui, sans-serif;

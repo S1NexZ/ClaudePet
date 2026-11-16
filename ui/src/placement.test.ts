@@ -32,10 +32,10 @@ describe('restoreAnchor', () => {
 
 describe('placeStage', () => {
   const wa = { x: 0, y: 0, width: 1920, height: 1040 };
-  it('puts the stage bottom centre on the anchor and lets the top stick out of the screen', () => {
-    expect(placeStage({ cx: 800, bottom: 700 }, 424, 780, wa)).toEqual({ x: 588, y: -80, width: 424, height: 780 });
+  it('puts the anchor (IDLE_H below the window top) on the anchor point and lets the lower part stick out of the screen', () => {
+    expect(placeStage({ cx: 800, bottom: 700 }, 424, 780, wa)).toEqual({ x: 588, y: 462, width: 424, height: 780 });
   });
   it('keeps the pet on screen: the anchor is pulled inside the work area', () => {
-    expect(placeStage({ cx: 5, bottom: 2000 }, 424, 780, wa)).toEqual({ x: -152, y: 260, width: 424, height: 780 });
+    expect(placeStage({ cx: 5, bottom: 2000 }, 424, 780, wa)).toEqual({ x: -152, y: 802, width: 424, height: 780 });
   });
 });
