@@ -38,7 +38,7 @@ export function createMotion(p: MotionParts, reduce: boolean) {
   chip.timeScale(speed).progress(0);
 
   // ---- the usage ring: a small quiet arc by the pet; it grows and shows its number when awake ----
-  gsap.set(p.ring, { scale: 0.7, opacity: 0.7, transformOrigin: '50% 50%' });
+  gsap.set(p.ring, { scale: 0.7, opacity: 0.92, transformOrigin: '50% 50%' });
   gsap.set(ringText, { opacity: 0 });
   const ring = gsap.timeline({ paused: true, defaults: { ease: EASE } })
     .to(p.ring, { scale: 1, opacity: 1, duration: 0.4, ease: 'back.out(1.4)' }, 0)
@@ -53,7 +53,7 @@ export function createMotion(p: MotionParts, reduce: boolean) {
 
   // ---- the pet itself: a calm pet breathes; a state change gives it a soft squash ----
   let popping = false;
-  const breath = gsap.to(p.sprite, { y: -1.5, scaleX: 1.012, scaleY: 1.02, duration: 1.8, ease: 'sine.inOut', yoyo: true, repeat: -1, paused: true });
+  const breath = gsap.to(p.sprite, { y: -1.5, scaleX: 1.012, scaleY: 1.02, duration: 1.8, ease: 'steps(12)', yoyo: true, repeat: -1, paused: true }); // stepped: ~7 visible changes a second instead of a repaint on every frame (the idle GPU cost)
   let breathing = false;
   const settle = () => { gsap.to(p.sprite, { y: 0, scaleX: 1, scaleY: 1, duration: 0.35, ease: 'power2.out', overwrite: 'auto' }); };
 
