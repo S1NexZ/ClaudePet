@@ -7,7 +7,7 @@ const sq = (s: string) => `'${s.replace(/'/g, `'\\''`)}'`;
 export function wslBridgeArgs(bridgeWinPath: string): string[] {
   const script =
     'N="$HOME/.local/node/bin/node"; [ -x "$N" ] || N="$(command -v node)"; ' +
-    `[ -n "$N" ] || { echo '{"type":"error","message":"${L('В WSL не найден Node.js', 'Node.js was not found in WSL')}"}'; exit 1; }; ` +
+    `[ -n "$N" ] || { echo '{"type":"error","message":"${L('В WSL не найден Node.js', 'Node.js was not found in WSL', '在 WSL 中未找到 Node.js')}"}'; exit 1; }; ` +
     `exec "$N" ${sq(toWslPath(bridgeWinPath))}`;
   return ['-e', 'bash', '-c', script];
 }

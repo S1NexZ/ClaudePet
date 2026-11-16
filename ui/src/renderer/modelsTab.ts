@@ -76,7 +76,7 @@ export function createModelsTab(host: ModelsHost, api: { show(data: PetData): Pr
 
   const preview = async (id: string) => {
     const d = await host.models.data(id);
-    if (!d) { message = { kind: 'err', text: L('Не удалось загрузить модель.', 'Could not load the model.') }; rerender(); return; }
+    if (!d) { message = { kind: 'err', text: L('Не удалось загрузить модель.', 'Could not load the model.', '无法加载模型。') }; rerender(); return; }
     previewId = id === active()?.id ? null : id;
     await api.show(d);
     rerender();
@@ -91,8 +91,8 @@ export function createModelsTab(host: ModelsHost, api: { show(data: PetData): Pr
   const apply = async () => {
     if (!previewId) return;
     const r = await host.models.use(previewId);
-    if (r.ok && r.models) { list = r.models; previewId = null; message = { kind: 'ok', text: L('Модель применена и сохранена.', 'Model applied and saved.') }; }
-    else message = { kind: 'err', text: r.error ?? L('Не удалось применить модель.', 'Could not apply the model.') };
+    if (r.ok && r.models) { list = r.models; previewId = null; message = { kind: 'ok', text: L('Модель применена и сохранена.', 'Model applied and saved.', '模型已应用并保存。') }; }
+    else message = { kind: 'err', text: r.error ?? L('Не удалось применить модель.', 'Could not apply the model.', '无法应用模型。') };
     rerender();
   };
   const remove = async (id: string) => {
@@ -102,8 +102,8 @@ export function createModelsTab(host: ModelsHost, api: { show(data: PetData): Pr
       list = r.models; thumbs.delete(id);
       if (previewId === id) previewId = null;
       if (r.pet) await api.show(r.pet);
-      message = { kind: 'ok', text: L('Модель удалена.', 'Model removed.') };
-    } else message = { kind: 'err', text: r.error ?? L('Не удалось удалить модель.', 'Could not remove the model.') };
+      message = { kind: 'ok', text: L('Модель удалена.', 'Model removed.', '模型已移除。') };
+    } else message = { kind: 'err', text: r.error ?? L('Не удалось удалить модель.', 'Could not remove the model.', '无法移除模型。') };
     rerender();
   };
   const afterInstall = async (r: OpResult) => {
@@ -111,69 +111,69 @@ export function createModelsTab(host: ModelsHost, api: { show(data: PetData): Pr
     if (r.canceled) { rerender(); return; }
     if (r.ok && r.models && r.model) {
       list = r.models; for (const m of list) void thumb(m.id);
-      message = { kind: 'ok', text: L(`Установлена: «${r.model.name}». Нажмите «Применить», чтобы оставить её.`, `Installed: “${r.model.name}”. Press Apply to keep it.`) };
+      message = { kind: 'ok', text: L(`Установлена: «${r.model.name}». Нажмите «Применить», чтобы оставить её.`, `Installed: “${r.model.name}”. Press Apply to keep it.`, `已安装：“${r.model.name}”。点“应用”以保留。`) };
       await preview(r.model.id); // shown on the pet right away; applied only on request
-    } else message = { kind: 'err', text: r.error ?? L('Не удалось установить модель.', 'Could not install the model.') };
+    } else message = { kind: 'err', text: r.error ?? L('Не удалось установить модель.', 'Could not install the model.', '无法安装模型。') };
     rerender();
   };
-  const installZip = async (path?: string) => { busy = true; message = null; progress = { percent: 0, message: L('Начало', 'Starting') }; rerender(); await afterInstall(await host.models.installZip(path)); };
+  const installZip = async (path?: string) => { busy = true; message = null; progress = { percent: 0, message: L('Начало', 'Starting', '正在启动') }; rerender(); await afterInstall(await host.models.installZip(path)); };
   host.models.onProgress((p) => { if (busy) { progress = { percent: p.percent, message: p.message }; rerender(); } });
 
   const renderList = (box: HTMLElement) => {
     const sec = el('div', 's-section');
-    sec.append(el('div', 's-title', L('Установленные модели', 'Installed models')));
+    sec.append(el('div', 's-title', L('Установленные модели', 'Installed models', '已安装的模型')));
     const ul = el('div', 'm-list');
     for (const m of list) {
       const shown = previewId ? m.id === previewId : m.active;
       const row = el('div', `m-row${shown ? ' on' : ''}`);
       const t = el('img', 'm-thumb') as HTMLImageElement; t.alt = ''; if (thumbs.get(m.id)) t.src = thumbs.get(m.id)!;
       const info = el('div', 'm-info');
-      info.append(el('div', 'm-name', m.name), el('div', 's-hint', [m.bundled ? L('встроенная', 'built-in') : L('своя', 'custom'), m.source ? `${L('источник', 'source')}: ${m.source}` : '', m.active ? L('активна', 'active') : ''].filter(Boolean).join(' · ')));
+      info.append(el('div', 'm-name', m.name), el('div', 's-hint', [m.bundled ? L('встроенная', 'built-in', '内置') : L('своя', 'custom', '自定义'), m.source ? `${L('источник', 'source', '来源')}: ${m.source}` : '', m.active ? L('активна', 'active', '当前使用') : ''].filter(Boolean).join(' · ')));
       const acts = el('div', 'm-acts');
-      acts.append(btn(shown ? L('Выбрана', 'Selected') : L('Выбрать', 'Select'), 's-btn', () => void preview(m.id), shown));
-      if (!m.bundled) { const x = btn('✕', 's-btn m-del', () => void remove(m.id)); x.title = L('Удалить модель', 'Remove model'); x.setAttribute('aria-label', L(`Удалить модель ${m.name}`, `Remove model ${m.name}`)); acts.append(x); }
+      acts.append(btn(shown ? L('Выбрана', 'Selected', '已选择') : L('Выбрать', 'Select', '选择'), 's-btn', () => void preview(m.id), shown));
+      if (!m.bundled) { const x = btn('✕', 's-btn m-del', () => void remove(m.id)); x.title = L('Удалить модель', 'Remove model', '移除模型'); x.setAttribute('aria-label', L(`Удалить модель ${m.name}`, `Remove model ${m.name}`, `移除模型 ${m.name}`)); acts.append(x); }
       row.append(t, info, acts);
       ul.append(row);
     }
-    if (!list.length) ul.append(el('div', 's-hint', L('Моделей пока нет.', 'No models yet.')));
+    if (!list.length) ul.append(el('div', 's-hint', L('Моделей пока нет.', 'No models yet.', '还没有模型。')));
     sec.append(ul);
     if (previewId) {
       const pv = list.find((m) => m.id === previewId);
       const bar = el('div', 'm-preview');
-      bar.append(el('span', '', `${L('Предпросмотр', 'Preview')}: ${pv?.name ?? previewId}`), btn(L('Применить', 'Apply'), 's-btn primary', () => void apply()), btn(L('Отмена', 'Cancel'), 's-btn', () => void cancelPreview()));
+      bar.append(el('span', '', `${L('Предпросмотр', 'Preview', '预览')}: ${pv?.name ?? previewId}`), btn(L('Применить', 'Apply', '应用'), 's-btn primary', () => void apply()), btn(L('Отмена', 'Cancel', '取消'), 's-btn', () => void cancelPreview()));
       sec.append(bar);
     }
     box.append(sec);
   };
 
   const renderNpm = (box: HTMLElement) => {
-    box.append(el('div', 's-title', L('Установка через npm', 'Install via npm')));
-    box.append(el('div', 's-hint', L('Модели формата Codex ставит сторонний пакет codex-pets (лицензия MIT, не связан с Claude Pet). Он кладёт модель в папку ~/.codex/pets, а Claude Pet устанавливает её оттуда после проверки.', 'Codex-format models are installed by the third-party package codex-pets (MIT license, not affiliated with Claude Pet). It puts the model into ~/.codex/pets and Claude Pet installs it from there after validation.')));
+    box.append(el('div', 's-title', L('Установка через npm', 'Install via npm', '通过 npm 安装')));
+    box.append(el('div', 's-hint', L('Модели формата Codex ставит сторонний пакет codex-pets (лицензия MIT, не связан с Claude Pet). Он кладёт модель в папку ~/.codex/pets, а Claude Pet устанавливает её оттуда после проверки.', 'Codex-format models are installed by the third-party package codex-pets (MIT license, not affiliated with Claude Pet). It puts the model into ~/.codex/pets and Claude Pet installs it from there after validation.', 'Codex 格式的模型由第三方包 codex-pets 安装（MIT 许可，与 Claude Pet 无关联）。它会把模型放入 ~/.codex/pets，Claude Pet 在验证后从那里安装。')));
     const code = el('div', 'm-code');
-    code.append(el('code', '', NPM_COMMAND), btn(L('Копировать', 'Copy'), 's-btn', () => { host.copyText(NPM_COMMAND); message = { kind: 'ok', text: L('Команда скопирована.', 'Command copied.') }; rerender(); }));
+    code.append(el('code', '', NPM_COMMAND), btn(L('Копировать', 'Copy', '复制'), 's-btn', () => { host.copyText(NPM_COMMAND); message = { kind: 'ok', text: L('Команда скопирована.', 'Command copied.', '命令已复制。') }; rerender(); }));
     box.append(code);
-    box.append(el('div', 's-hint', L('Замените <pet-id> на идентификатор модели из каталога codex-pets и выполните команду в терминале Windows (PowerShell). Папка ~/.codex/pets внутри WSL приложению не видна: для неё используйте ZIP.', 'Replace <pet-id> with a model id from the codex-pets catalog and run the command in a Windows terminal (PowerShell). The ~/.codex/pets folder inside WSL is not visible to the app: use a ZIP for that.')));
+    box.append(el('div', 's-hint', L('Замените <pet-id> на идентификатор модели из каталога codex-pets и выполните команду в терминале Windows (PowerShell). Папка ~/.codex/pets внутри WSL приложению не видна: для неё используйте ZIP.', 'Replace <pet-id> with a model id from the codex-pets catalog and run the command in a Windows terminal (PowerShell). The ~/.codex/pets folder inside WSL is not visible to the app: use a ZIP for that.', '把 <pet-id> 替换为 codex-pets 目录中的模型 id，并在 Windows 终端（PowerShell）中运行该命令。应用看不到 WSL 内的 ~/.codex/pets 文件夹：请改用 ZIP。')));
     const row = el('div', 'm-line');
-    row.append(btn(L('Открыть пакет на npmjs.com', 'Open the package on npmjs.com'), 's-btn', () => host.openUrl(NPM_PAGE)), btn(L('Проверить папку', 'Check folder'), 's-btn', async () => { codex = await host.models.codexScan(); rerender(); }));
+    row.append(btn(L('Открыть пакет на npmjs.com', 'Open the package on npmjs.com', '在 npmjs.com 上打开该包'), 's-btn', () => host.openUrl(NPM_PAGE)), btn(L('Проверить папку', 'Check folder', '检查文件夹'), 's-btn', async () => { codex = await host.models.codexScan(); rerender(); }));
     box.append(row);
     if (codex) {
-      box.append(el('div', 's-hint', codex.found.length ? L(`Найдено в ${codex.dir}:`, `Found in ${codex.dir}:`) : codex.exists ? L(`В ${codex.dir} моделей не найдено.`, `No models found in ${codex.dir}.`) : L(`Папка ${codex.dir} ещё не создана (npm-установщик её создаёт).`, `The folder ${codex.dir} does not exist yet (the npm installer creates it).`)));
+      box.append(el('div', 's-hint', codex.found.length ? L(`Найдено в ${codex.dir}:`, `Found in ${codex.dir}:`, `在 ${codex.dir} 中找到：`) : codex.exists ? L(`В ${codex.dir} моделей не найдено.`, `No models found in ${codex.dir}.`, `在 ${codex.dir} 中未找到模型。`) : L(`Папка ${codex.dir} ещё не создана (npm-установщик её создаёт).`, `The folder ${codex.dir} does not exist yet (the npm installer creates it).`, `文件夹 ${codex.dir} 尚不存在（npm 安装程序会创建它）。`)));
       for (const f of codex.found) {
         const r = el('div', 'm-line');
-        r.append(el('span', 'm-name', f.name), f.installed ? el('span', 's-hint', L('уже установлена', 'already installed')) : btn(L('Установить', 'Install'), 's-btn primary', async () => {
-          busy = true; message = null; progress = { percent: 0, message: L('Начало', 'Starting') }; rerender();
+        r.append(el('span', 'm-name', f.name), f.installed ? el('span', 's-hint', L('уже установлена', 'already installed', '已安装')) : btn(L('Установить', 'Install', '安装'), 's-btn primary', async () => {
+          busy = true; message = null; progress = { percent: 0, message: L('Начало', 'Starting', '正在启动') }; rerender();
           const res = await host.models.codexImport(f.id); await afterInstall(res); codex = await host.models.codexScan(); rerender();
         }, busy));
         box.append(r);
       }
     }
-    box.append(el('div', 's-hint', L('Claude Pet сам npm не запускает и ничего не публикует. Собственного npm-пакета моделей у Claude Pet пока нет.', 'Claude Pet never runs npm itself and publishes nothing. Claude Pet has no npm model package of its own yet.')));
+    box.append(el('div', 's-hint', L('Claude Pet сам npm не запускает и ничего не публикует. Собственного npm-пакета моделей у Claude Pet пока нет.', 'Claude Pet never runs npm itself and publishes nothing. Claude Pet has no npm model package of its own yet.', 'Claude Pet 自己从不运行 npm，也不会发布任何内容。Claude Pet 目前还没有自己的 npm 模型包。')));
   };
 
   const renderDownload = (box: HTMLElement) => {
-    box.append(el('div', 's-title', L('Установка из ZIP-архива', 'Install from a ZIP archive')));
+    box.append(el('div', 's-title', L('Установка из ZIP-архива', 'Install from a ZIP archive', '从 ZIP 压缩包安装')));
     const drop = el('div', 'm-drop');
-    drop.append(el('div', '', L('Перетащите ZIP-архив сюда', 'Drop a ZIP archive here')), btn(L('Выбрать ZIP…', 'Choose ZIP…'), 's-btn primary', () => void installZip(), busy));
+    drop.append(el('div', '', L('Перетащите ZIP-архив сюда', 'Drop a ZIP archive here', '将 ZIP 压缩包拖到这里')), btn(L('Выбрать ZIP…', 'Choose ZIP…', '选择 ZIP…'), 's-btn primary', () => void installZip(), busy));
     drop.addEventListener('dragover', (e) => { e.preventDefault(); drop.classList.add('over'); });
     drop.addEventListener('dragleave', () => drop.classList.remove('over'));
     drop.addEventListener('drop', (e) => {
@@ -181,16 +181,16 @@ export function createModelsTab(host: ModelsHost, api: { show(data: PetData): Pr
       const f = e.dataTransfer?.files?.[0];
       if (!f || busy) return;
       const p = host.models.pathForFile(f);
-      if (!p || !/\.zip$/i.test(p)) { message = { kind: 'err', text: L('Нужен файл с расширением .zip.', 'A .zip file is required.') }; rerender(); return; }
+      if (!p || !/\.zip$/i.test(p)) { message = { kind: 'err', text: L('Нужен файл с расширением .zip.', 'A .zip file is required.', '需要 .zip 文件。') }; rerender(); return; }
       void installZip(p);
     });
     box.append(drop);
-    box.append(el('div', 's-hint', L('Нужен пак формата Codex: pet.json и лист спрайтов 1536×1872 (.webp или .png). Скрипты и исполняемые файлы запрещены, архив проверяется до установки и ничего не запускает.', 'A Codex-format pack is required: pet.json and a 1536×1872 sprite sheet (.webp or .png). Scripts and executables are not allowed; the archive is checked before installing and nothing is run.')));
-    box.append(btn(L('Открыть папку моделей', 'Open models folder'), 's-link', () => host.models.reveal()));
+    box.append(el('div', 's-hint', L('Нужен пак формата Codex: pet.json и лист спрайтов 1536×1872 (.webp или .png). Скрипты и исполняемые файлы запрещены, архив проверяется до установки и ничего не запускает.', 'A Codex-format pack is required: pet.json and a 1536×1872 sprite sheet (.webp or .png). Scripts and executables are not allowed; the archive is checked before installing and nothing is run.', '需要 Codex 格式的包：pet.json 和 1536×1872 的雪碧图（.webp 或 .png）。不允许脚本和可执行文件；安装前会检查压缩包，不会运行任何内容。')));
+    box.append(btn(L('Открыть папку моделей', 'Open models folder', '打开模型文件夹'), 's-link', () => host.models.reveal()));
   };
 
   const render = (box: HTMLElement) => {
-    if (!loaded) { void refresh(); box.append(el('div', 's-hint', L('Загрузка…', 'Loading…'))); return; }
+    if (!loaded) { void refresh(); box.append(el('div', 's-hint', L('Загрузка…', 'Loading…', '加载中…'))); return; }
     renderList(box);
     const install = el('div', 's-section');
     const tabs = el('div', 'm-subtabs'); tabs.setAttribute('role', 'tablist');
@@ -209,7 +209,7 @@ export function createModelsTab(host: ModelsHost, api: { show(data: PetData): Pr
   };
 
   return {
-    tab: { id: 'models', title: L('Модели', 'Models'), render },
+    tab: { id: 'models', title: L('Модели', 'Models', '模型'), render },
     attach(fn: () => void) { rerender = fn; },
     cancelPreview,
     /** state for tests / the host */

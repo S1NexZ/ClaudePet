@@ -19,4 +19,12 @@ describe('i18n', () => {
     expect(resolveLang('ru', 'en-US')).toBe('ru');
     expect(resolveLang(undefined, 'ru-RU')).toBe('ru');
   });
+  it('Chinese: zh-* follows the system, an explicit choice wins, a missing translation falls back to English', () => {
+    expect(resolveLang('auto', 'zh-CN')).toBe('zh');
+    expect(resolveLang('auto', 'zh-TW')).toBe('zh');
+    expect(resolveLang('zh', 'en-US')).toBe('zh');
+    setLang('zh');
+    expect(L('Привет', 'Hello', '你好')).toBe('你好');
+    expect(L('Привет', 'Hello')).toBe('Hello');
+  });
 });

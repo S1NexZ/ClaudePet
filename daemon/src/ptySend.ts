@@ -18,7 +18,7 @@ export function typedInput(text: string): { body: string; submit: string } {
 }
 
 export class PtyGoneError extends Error {
-  constructor() { super(L('Сокет терминальной сессии недоступен: окно закрыто или Claude завершился', 'The terminal session socket is unavailable: the window was closed or Claude exited')); this.name = 'PtyGoneError'; }
+  constructor() { super(L('Сокет терминальной сессии недоступен: окно закрыто или Claude завершился', 'The terminal session socket is unavailable: the window was closed or Claude exited', '终端会话套接字不可用：窗口已关闭或 Claude 已退出')); this.name = 'PtyGoneError'; }
 }
 
 const wait = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));

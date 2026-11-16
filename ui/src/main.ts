@@ -81,15 +81,15 @@ if (primary) app.whenReady().then(async () => {
   const info = (message: string, detail = '') => dialog.showMessageBox(win, { type: 'info', title: 'Claude Pet', message, detail });
 
   const onHooks = async (m: { diff: string; applied: boolean; installed: boolean; stale: boolean }) => {
-    if (m.applied) { void info(L('Хуки подключены', 'Hooks connected'), L('Новые сессии Claude Code будут видны питомцу. Уже открытые терминалы нужно перезапустить.', 'New Claude Code sessions will be visible to the pet. Terminals that are already open need a restart.')); return; }
-    if (!m.diff) { if (hooksManual) void info(L('Хуки уже подключены', 'Hooks are already connected')); return; }
+    if (m.applied) { void info(L('Хуки подключены', 'Hooks connected', '钩子已连接'), L('Новые сессии Claude Code будут видны питомцу. Уже открытые терминалы нужно перезапустить.', 'New Claude Code sessions will be visible to the pet. Terminals that are already open need a restart.', '新的 Claude Code 会话将对宠物可见。已打开的终端需要重启。')); return; }
+    if (!m.diff) { if (hooksManual) void info(L('Хуки уже подключены', 'Hooks are already connected', '钩子已经连接')); return; }
     // unasked, only offer when they're absent or broken; an install pointing at a working copy is left alone
     if (!hooksManual && m.installed && !m.stale) return;
     const added = m.diff.split('\n').filter((l) => l.startsWith('+ ')).length;
     const r = await dialog.showMessageBox(win, confirmOptions({
-      type: 'question', action: L('Подключить', 'Connect'), cancel: L('Не сейчас', 'Not now'),
-      message: L('Подключить хуки Claude Code?', 'Connect Claude Code hooks?'),
-      detail: `${L(`Чтобы видеть сессии из терминала, питомец добавит свой хук в ~/.claude/settings.json (${added} строк, копия сохранится в settings.json.bak). Хук только сообщает питомцу о событиях и ничего не блокирует.`, `To see terminal sessions, the pet will add its hook to ~/.claude/settings.json (${added} lines, a copy is kept in settings.json.bak). The hook only tells the pet about events and blocks nothing.`)}\n\n${m.diff.split('\n').slice(0, 14).join('\n')}\n…`,
+      type: 'question', action: L('Подключить', 'Connect', '连接'), cancel: L('Не сейчас', 'Not now', '暂不'),
+      message: L('Подключить хуки Claude Code?', 'Connect Claude Code hooks?', '连接 Claude Code 钩子？'),
+      detail: `${L(`Чтобы видеть сессии из терминала, питомец добавит свой хук в ~/.claude/settings.json (${added} строк, копия сохранится в settings.json.bak). Хук только сообщает питомцу о событиях и ничего не блокирует.`, `To see terminal sessions, the pet will add its hook to ~/.claude/settings.json (${added} lines, a copy is kept in settings.json.bak). The hook only tells the pet about events and blocks nothing.`, `为了显示终端会话，宠物会把它的钩子添加到 ~/.claude/settings.json（${added} 行，备份保存在 settings.json.bak）。该钩子只向宠物通知事件，不会阻止任何操作。`)}\n\n${m.diff.split('\n').slice(0, 14).join('\n')}\n…`,
     }));
     if (isConfirmed(r)) toBridge({ type: 'hooks', apply: true });
   };
@@ -99,7 +99,7 @@ if (primary) app.whenReady().then(async () => {
     if (m.type === 'ready') {
       backoff = 1000; setUp(true); log(`bridge ready (claude=${m.claude}, distro=${m.distro})`);
       wsl = { distro: String(m.distro ?? ''), claude: String(m.claude ?? '') };
-      if (!m.claude) void info(L('Claude Code не найден в WSL', 'Claude Code not found in WSL'), L('Установи Claude Code в WSL, чтобы питомец мог запускать сессии.', 'Install Claude Code in WSL so the pet can start sessions.'));
+      if (!m.claude) void info(L('Claude Code не найден в WSL', 'Claude Code not found in WSL', '在 WSL 中未找到 Claude Code'), L('Установи Claude Code в WSL, чтобы питомец мог запускать сессии.', 'Install Claude Code in WSL so the pet can start sessions.', '请在 WSL 中安装 Claude Code，宠物才能启动会话。'));
       hooksManual = false;
       toBridge({ type: 'language', lang: getLang() });
       toBridge({ type: 'permission-mode', mode: settings.permissions });
@@ -141,7 +141,7 @@ if (primary) app.whenReady().then(async () => {
     catch (e) { log(`hotkey: invalid accelerator ${settings.hotkey}: ${(e as Error).message}`); }
     log(`hotkey: ${settings.hotkey} registered=${ok}`);
     if (!ok && Notification.isSupported())
-      new Notification({ title: 'Claude Pet', body: L(`Горячая клавиша ${settings.hotkey} недоступна (занята другим приложением)`, `The hotkey ${settings.hotkey} is unavailable (taken by another app)`) }).show();
+      new Notification({ title: 'Claude Pet', body: L(`Горячая клавиша ${settings.hotkey} недоступна (занята другим приложением)`, `The hotkey ${settings.hotkey} is unavailable (taken by another app)`, `快捷键 ${settings.hotkey} 不可用（已被其他应用占用）`) }).show();
   };
   const toggleWindow = () => (win.isVisible() ? win.hide() : (win.showInactive(), win.setAlwaysOnTop(true, 'floating')));
   /** Guided terminal setup: shows the one command to run in WSL (it asks before changing ~/.bashrc, backs it up, can be undone). */
@@ -149,28 +149,28 @@ if (primary) app.whenReady().then(async () => {
     const script = app.isPackaged ? join(process.resourcesPath, 'scripts', 'install-shell-integration.sh') : join(__dirname, '../..', 'scripts', 'install-shell-integration.sh');
     const cmd = `bash '${toWslPath(script).replace(/'/g, `'\\''`)}'`;
     const r = await dialog.showMessageBox(win, confirmOptions({
-      type: 'question', action: L('Копировать команду', 'Copy command'), cancel: L('Закрыть', 'Close'), message: L('Подключить терминал (WSL)', 'Connect the terminal (WSL)'),
-      detail: L('Чтобы обычная команда `claude` запускалась через Claude Pet (общая сессия с питомцем), выполните в окне WSL-терминала:', 'To make the plain `claude` command run through Claude Pet (one shared session with the pet), run this in a WSL terminal:') + '\n\n' + cmd +
-        L('\n\nСкрипт покажет изменение, спросит подтверждение, сохранит копию ~/.bashrc и его можно отменить: добавьте --uninstall. Без этого питомец тоже работает, но писать в терминальную сессию сможет только через запасной путь.', '\n\nThe script shows the change, asks for confirmation, keeps a copy of ~/.bashrc and can be undone with --uninstall. The pet works without it too, but can write into a terminal session only through a fallback path.'),
+      type: 'question', action: L('Копировать команду', 'Copy command', '复制命令'), cancel: L('Закрыть', 'Close', '关闭'), message: L('Подключить терминал (WSL)', 'Connect the terminal (WSL)', '连接终端（WSL）'),
+      detail: L('Чтобы обычная команда `claude` запускалась через Claude Pet (общая сессия с питомцем), выполните в окне WSL-терминала:', 'To make the plain `claude` command run through Claude Pet (one shared session with the pet), run this in a WSL terminal:', '要让普通的 `claude` 命令通过 Claude Pet 运行（与宠物共用一个会话），请在 WSL 终端中运行：') + '\n\n' + cmd +
+        L('\n\nСкрипт покажет изменение, спросит подтверждение, сохранит копию ~/.bashrc и его можно отменить: добавьте --uninstall. Без этого питомец тоже работает, но писать в терминальную сессию сможет только через запасной путь.', '\n\nThe script shows the change, asks for confirmation, keeps a copy of ~/.bashrc and can be undone with --uninstall. The pet works without it too, but can write into a terminal session only through a fallback path.', '\n\n脚本会显示改动并请求确认，保留 ~/.bashrc 的备份，可用 --uninstall 撤销。没有它宠物也能工作，但只能通过备用途径向终端会话写入。'),
     }));
     if (isConfirmed(r)) clipboard.writeText(cmd);
   };
   const trayMenu = () => Menu.buildFromTemplate([
-    { label: win.isVisible() ? L('Скрыть питомца', 'Hide the pet') : L('Показать питомца', 'Show the pet'), click: toggleWindow },
-    { label: `${L('Вызов питомца', 'Summon the pet')}: ${settings.hotkey || L('выключен', 'off')}`, enabled: false },
+    { label: win.isVisible() ? L('Скрыть питомца', 'Hide the pet', '隐藏宠物') : L('Показать питомца', 'Show the pet', '显示宠物'), click: toggleWindow },
+    { label: `${L('Вызов питомца', 'Summon the pet', '唤出宠物')}: ${settings.hotkey || L('выключен', 'off', '关')}`, enabled: false },
     { type: 'separator' },
-    { label: L('Настройки…', 'Settings…'), click: () => { win.show(); win.setAlwaysOnTop(true, 'floating'); win.webContents.send('pet:open-settings'); } },
-    { label: L('Подключить терминал (WSL)…', 'Connect the terminal (WSL)…'), click: () => void showTerminalSetup() },
-    { label: L('Подключить хуки Claude Code…', 'Connect Claude Code hooks…'), enabled: up, click: () => { hooksManual = true; toBridge({ type: 'hooks', apply: false }); } },
-    { label: L('Уведомлять, когда нужно разрешение', 'Notify when permission is needed'), type: 'checkbox', checked: settings.notify,
+    { label: L('Настройки…', 'Settings…', '设置…'), click: () => { win.show(); win.setAlwaysOnTop(true, 'floating'); win.webContents.send('pet:open-settings'); } },
+    { label: L('Подключить терминал (WSL)…', 'Connect the terminal (WSL)…', '连接终端（WSL）…'), click: () => void showTerminalSetup() },
+    { label: L('Подключить хуки Claude Code…', 'Connect Claude Code hooks…', '连接 Claude Code 钩子…'), enabled: up, click: () => { hooksManual = true; toBridge({ type: 'hooks', apply: false }); } },
+    { label: L('Уведомлять, когда нужно разрешение', 'Notify when permission is needed', '需要权限时通知'), type: 'checkbox', checked: settings.notify,
       click: (i) => { settings = { ...settings, notify: i.checked }; applySettings(); } },
-    { label: L('Размер питомца', 'Pet size'), submenu: [0.75, 1, 1.25, 1.5, 1.8].filter((v) => v >= PET_SCALE_MIN && v <= PET_SCALE_MAX).map((v) => ({
+    { label: L('Размер питомца', 'Pet size', '宠物大小'), submenu: [0.75, 1, 1.25, 1.5, 1.8].filter((v) => v >= PET_SCALE_MIN && v <= PET_SCALE_MAX).map((v) => ({
       label: `${Math.round(v * 100)}%`, type: 'radio' as const, checked: Math.abs(settings.petScale - v) < 0.03,
       click: () => { settings = { ...settings, petScale: v }; applySettings(); win.webContents.send('pet:scale', v); } })) },
-    { label: L('Запускать вместе с Windows', 'Start with Windows'), type: 'checkbox', checked: settings.autostart, enabled: app.isPackaged,
+    { label: L('Запускать вместе с Windows', 'Start with Windows', '随 Windows 启动'), type: 'checkbox', checked: settings.autostart, enabled: app.isPackaged,
       click: (i) => { settings = { ...settings, autostart: i.checked }; applySettings(); } },
     { type: 'separator' },
-    { label: L('Выйти', 'Quit'), click: () => app.quit() },
+    { label: L('Выйти', 'Quit', '退出'), click: () => app.quit() },
   ]);
   const tray = new Tray(nativeImage.createFromPath(join(__dirname, 'icon.png')).resize({ width: 32, height: 32 }));
   tray.setToolTip('Claude Pet');
@@ -192,20 +192,20 @@ if (primary) app.whenReady().then(async () => {
   const modelOpts = (onProgress?: (p: unknown) => void) => ({ userDir: userModelsDir, bundledDir: bundledModelsDir, onProgress: onProgress as any });
   const listForUi = () => { const a = activeModel(); return listModels(bundledModelsDir, userModelsDir).map((m) => ({ id: m.id, name: m.name, description: m.description, source: m.source, bundled: m.bundled, active: m.id === a?.id })); };
   const findModel = (id: unknown) => (typeof id === 'string' && MODEL_ID.test(id) ? listModels(bundledModelsDir, userModelsDir).find((m) => m.id === id) : undefined);
-  const failText = (e: unknown) => { if (e instanceof ModelError) return e.message; log(`models: ${(e as Error)?.stack ?? e}`); return L('Не удалось выполнить операцию с моделью. Подробности в журнале приложения.', 'The model operation failed. See the app log for details.'); };
+  const failText = (e: unknown) => { if (e instanceof ModelError) return e.message; log(`models: ${(e as Error)?.stack ?? e}`); return L('Не удалось выполнить операцию с моделью. Подробности в журнале приложения.', 'The model operation failed. See the app log for details.', '模型操作失败。详情见应用日志。'); };
   const codexDir = join(homedir(), '.codex', 'pets');
   ipcMain.handle('pet:models:list', () => listForUi());
   ipcMain.handle('pet:models:data', async (_e, id) => { const m = findModel(id); if (!m) return null; try { return petPayload(await loadPet(m.dir)); } catch { return null; } });
   ipcMain.handle('pet:models:use', async (_e, id) => {
     const m = findModel(id);
-    if (!m) return { ok: false, error: L('Такой модели нет.', 'There is no such model.') };
+    if (!m) return { ok: false, error: L('Такой модели нет.', 'There is no such model.', '没有这个模型。') };
     try { const payload = petPayload(await loadPet(m.dir)); settings = { ...settings, model: m.id }; applySettings(); return { ok: true, pet: payload, models: listForUi() }; }
     catch (e) { return { ok: false, error: failText(e) }; }
   });
   ipcMain.handle('pet:models:install-zip', async (_e, given?: string) => {
     let file = typeof given === 'string' && given ? given : null;
     if (!file) {
-      const r = await dialog.showOpenDialog(win, { title: L('Установить модель питомца', 'Install a pet model'), properties: ['openFile'], filters: [{ name: L('Модель питомца (ZIP)', 'Pet model (ZIP)'), extensions: ['zip'] }] });
+      const r = await dialog.showOpenDialog(win, { title: L('Установить модель питомца', 'Install a pet model', '安装宠物模型'), properties: ['openFile'], filters: [{ name: L('Модель питомца (ZIP)', 'Pet model (ZIP)', '宠物模型 (ZIP)'), extensions: ['zip'] }] });
       if (r.canceled || !r.filePaths[0]) return { ok: false, canceled: true };
       file = r.filePaths[0];
     }
@@ -216,10 +216,10 @@ if (primary) app.whenReady().then(async () => {
   });
   ipcMain.handle('pet:models:remove', async (_e, id) => {
     const m = findModel(id);
-    if (!m || m.bundled) return { ok: false, error: m ? L('Встроенную модель удалить нельзя.', 'A built-in model cannot be removed.') : L('Такой модели нет.', 'There is no such model.') };
+    if (!m || m.bundled) return { ok: false, error: m ? L('Встроенную модель удалить нельзя.', 'A built-in model cannot be removed.', '内置模型无法删除。') : L('Такой модели нет.', 'There is no such model.', '没有这个模型。') };
     const r = await dialog.showMessageBox(win, confirmOptions({
-      type: 'warning', action: L('Удалить', 'Delete'), cancel: L('Отмена', 'Cancel'), message: L(`Удалить модель «${m.name}»?`, `Delete the model “${m.name}”?`),
-      detail: L('Файлы модели будут удалены с компьютера. Встроенные модели и настройки не затрагиваются.', 'The model files will be deleted from this computer. Built-in models and settings are not affected.'),
+      type: 'warning', action: L('Удалить', 'Delete', '删除'), cancel: L('Отмена', 'Cancel', '取消'), message: L(`Удалить модель «${m.name}»?`, `Delete the model “${m.name}”?`, `删除模型“${m.name}”？`),
+      detail: L('Файлы модели будут удалены с компьютера. Встроенные модели и настройки не затрагиваются.', 'The model files will be deleted from this computer. Built-in models and settings are not affected.', '模型文件将从此电脑删除。内置模型和设置不受影响。'),
     }));
     if (!isConfirmed(r)) return { ok: false, canceled: true };
     try {
@@ -238,7 +238,7 @@ if (primary) app.whenReady().then(async () => {
   });
   ipcMain.handle('pet:models:codex-import', (_e, id) => {
     const f = scanPetFolder(codexDir).find((x) => x.id === id); // only folders that the scan itself found
-    if (!f) return { ok: false, error: L('Папка модели не найдена.', 'Model folder not found.') };
+    if (!f) return { ok: false, error: L('Папка модели не найдена.', 'Model folder not found.', '未找到模型文件夹。') };
     try { const m = installModelFromDir(f.dir, modelOpts((p) => win.webContents.send('pet:models:progress', p))); return { ok: true, model: { id: m.id, name: m.name }, models: listForUi() }; }
     catch (e) { return { ok: false, error: failText(e) }; }
   });
@@ -268,9 +268,9 @@ if (primary) app.whenReady().then(async () => {
       const s = sessionById(String(cmd.sessionId));
       if (s && !s.owned && !s.pty && !warnedTerminal.has(s.id)) {
         const r = await dialog.showMessageBox(win, confirmOptions({
-          type: 'warning', action: L('Отправить', 'Send'), cancel: L('Отмена', 'Cancel'),
-          message: L(`«${s.project}» открыта в терминале`, `“${s.project}” is open in a terminal`),
-          detail: L('Ответ запишется в тот же диалог, но в уже открытом окне терминала он не появится, пока сессию не откроют заново (кнопка «в терминал» в чате питомца). Писать в обе стороны одновременно не стоит.\n\nСовет: нажми «в терминал» в чате, и питомец продолжит эту сессию в новом окне.', 'The reply is written to the same conversation, but it will not appear in the terminal window that is already open until the session is reopened (the “terminal” button in the pet chat). Do not write from both sides at once.\n\nTip: press “terminal” in the chat and the pet will continue this session in a new window.'),
+          type: 'warning', action: L('Отправить', 'Send', '发送'), cancel: L('Отмена', 'Cancel', '取消'),
+          message: L(`«${s.project}» открыта в терминале`, `“${s.project}” is open in a terminal`, `“${s.project}”已在终端中打开`),
+          detail: L('Ответ запишется в тот же диалог, но в уже открытом окне терминала он не появится, пока сессию не откроют заново (кнопка «в терминал» в чате питомца). Писать в обе стороны одновременно не стоит.\n\nСовет: нажми «в терминал» в чате, и питомец продолжит эту сессию в новом окне.', 'The reply is written to the same conversation, but it will not appear in the terminal window that is already open until the session is reopened (the “terminal” button in the pet chat). Do not write from both sides at once.\n\nTip: press “terminal” in the chat and the pet will continue this session in a new window.', '回复会写入同一个对话，但在重新打开会话之前，不会显示在已打开的终端窗口中（宠物聊天中的“终端”按钮）。请勿同时从两边写入。\n\n提示：在聊天中点“终端”，宠物会在新窗口中继续此会话。'),
         }));
         if (!isConfirmed(r)) return;
         warnedTerminal.add(s.id);
@@ -279,11 +279,11 @@ if (primary) app.whenReady().then(async () => {
     if (cmd.type === 'end') {
       const s = sessionById(String(cmd.sessionId));
       const r = await dialog.showMessageBox(win, confirmOptions({
-        type: 'warning', action: L('Завершить', 'End'), cancel: L('Отмена', 'Cancel'),
-        message: L(`Завершить сессию «${s?.project ?? cmd.sessionId}»?`, `End the session “${s?.project ?? cmd.sessionId}”?`),
+        type: 'warning', action: L('Завершить', 'End', '结束'), cancel: L('Отмена', 'Cancel', '取消'),
+        message: L(`Завершить сессию «${s?.project ?? cmd.sessionId}»?`, `End the session “${s?.project ?? cmd.sessionId}”?`, `结束会话“${s?.project ?? cmd.sessionId}”？`),
         detail: s?.owned
-          ? L('Питомец закроет её процесс Claude Code. Переписка сохранится: её можно продолжить позже в терминале.', 'The pet will close its Claude Code process. The conversation is kept: you can continue it later in a terminal.')
-          : L('Процесс claude этой сессии будет остановлен (окно терминала останется). Если Claude сейчас работает, текущий шаг прервётся.', 'The claude process of this session will be stopped (the terminal window stays). If Claude is working right now, the current step is interrupted.'),
+          ? L('Питомец закроет её процесс Claude Code. Переписка сохранится: её можно продолжить позже в терминале.', 'The pet will close its Claude Code process. The conversation is kept: you can continue it later in a terminal.', '宠物将关闭它的 Claude Code 进程。对话会保留：稍后可在终端中继续。')
+          : L('Процесс claude этой сессии будет остановлен (окно терминала останется). Если Claude сейчас работает, текущий шаг прервётся.', 'The claude process of this session will be stopped (the terminal window stays). If Claude is working right now, the current step is interrupted.', '此会话的 claude 进程将被停止（终端窗口保留）。如果 Claude 正在工作，当前步骤会被中断。'),
       }));
       if (!isConfirmed(r)) return;
     }
@@ -303,7 +303,7 @@ if (primary) app.whenReady().then(async () => {
     setTimeout(() => launch(true), s.owned ? 500 : 0);
   });
   ipcMain.handle('pet:pick-folder', async () => {
-    const r = await dialog.showOpenDialog(win, { properties: ['openDirectory'], title: L('Папка для Claude Code', 'Folder for Claude Code') });
+    const r = await dialog.showOpenDialog(win, { properties: ['openDirectory'], title: L('Папка для Claude Code', 'Folder for Claude Code', 'Claude Code 的文件夹') });
     return r.canceled ? null : r.filePaths[0];
   });
   ipcMain.on('pet:focus', () => { if (process.env.CLAUDE_PET_DEBUG) log('focus requested'); win.focus(); });

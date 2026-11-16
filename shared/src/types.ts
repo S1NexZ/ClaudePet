@@ -52,7 +52,7 @@ export type PermissionPolicy = 'ask' | 'edits' | 'all';
 export const PERMISSION_POLICIES: readonly PermissionPolicy[] = ['ask', 'edits', 'all'];
 
 export type AppCommand =
-  | { type: 'language'; lang: 'ru' | 'en' }
+  | { type: 'language'; lang: 'ru' | 'en' | 'zh' }
   | { type: 'permission-mode'; mode: PermissionPolicy }
   | { type: 'start'; cwd: string; prompt: string }
   | { type: 'send'; sessionId: string; text: string }

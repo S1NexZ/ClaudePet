@@ -110,7 +110,7 @@ export function createBridge(o: {
             const s = o.store.get(id);
             if (s?.pty && !s.owned) {
               // the session runs under pet-claude.py: type into that very process (no second claude)
-              if (WORKING.has(s.state)) throw new Error(L('Claude занят', 'Claude is busy'));
+              if (WORKING.has(s.state)) throw new Error(L('Claude занят', 'Claude is busy', 'Claude 正忙'));
               try { await pty.sendPrompt(s.pty, String(cmd.text)); break; }
               catch (e) {
                 if (!(e instanceof PtyGoneError)) throw e;
@@ -128,7 +128,7 @@ export function createBridge(o: {
             await o.runner.interrupt(id);
             break;
           }
-          case 'language': if (cmd.lang === 'ru' || cmd.lang === 'en') setLang(cmd.lang); break;
+          case 'language': if (cmd.lang === 'ru' || cmd.lang === 'en' || cmd.lang === 'zh') setLang(cmd.lang); break;
           case 'permission-mode': if (cmd.mode === 'ask' || cmd.mode === 'edits' || cmd.mode === 'all') o.runner.setPermissionPolicy(cmd.mode); break;
           case 'permission': o.runner.respondPermission(String(cmd.id), cmd.allow === true); break;
           case 'history': await history(String(cmd.sessionId)); return;
@@ -146,7 +146,7 @@ export function createBridge(o: {
             const id = String(cmd.sessionId);
             if (!o.runner.release(id)) {
               const pid = pids.get(id);
-              if (!pid || proc.name(pid) !== 'claude') throw new Error(L('Не нашёл процесс этой сессии: возможно, она уже закрыта', 'Could not find this session’s process: it may already be closed'));
+              if (!pid || proc.name(pid) !== 'claude') throw new Error(L('Не нашёл процесс этой сессии: возможно, она уже закрыта', 'Could not find this session’s process: it may already be closed', '找不到此会话的进程：可能已关闭'));
               proc.kill(pid);
             }
             o.store.remove(id);
@@ -162,7 +162,7 @@ export function createBridge(o: {
               o.out({ type: 'hooks', ...hooksPlan(), applied: false });
             }
             return;
-          default: throw new Error(L('Неизвестная команда', 'Unknown command'));
+          default: throw new Error(L('Неизвестная команда', 'Unknown command', '未知命令'));
         }
         snapshot();
       } catch (e) {

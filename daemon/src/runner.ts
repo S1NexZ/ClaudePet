@@ -16,7 +16,7 @@ export type QueryFn = (a: { prompt: AsyncIterable<any> | string; options: Record
 export interface ModelChoice { value: string; displayName: string; description: string }
 
 export class SessionBusyError extends Error {
-  constructor() { super(L('Claude занят', 'Claude is busy')); this.name = 'SessionBusyError'; }
+  constructor() { super(L('Claude занят', 'Claude is busy', 'Claude 正忙')); this.name = 'SessionBusyError'; }
 }
 
 interface Pending { sid: string; input: Record<string, unknown>; resolve: (r: any) => void }
@@ -85,13 +85,13 @@ export class SessionRunner {
   async start(a: { cwd: string; prompt: string }): Promise<string> {
     let ok = false;
     try { ok = (await stat(a.cwd)).isDirectory(); } catch { /* falls through */ }
-    if (!ok) throw new Error(L(`Папка не существует: ${a.cwd}`, `The folder does not exist: ${a.cwd}`));
+    if (!ok) throw new Error(L(`Папка не существует: ${a.cwd}`, `The folder does not exist: ${a.cwd}`, `文件夹不存在：${a.cwd}`));
     return this.open(a.cwd, a.prompt);
   }
 
   async send(sessionId: string, text: string): Promise<void> {
     const s = this.o.store.get(sessionId);
-    if (!s) throw new Error(L(`Неизвестная сессия: ${sessionId}`, `Unknown session: ${sessionId}`));
+    if (!s) throw new Error(L(`Неизвестная сессия: ${sessionId}`, `Unknown session: ${sessionId}`, `未知会话：${sessionId}`));
     // Collision rule: never write into a session that is mid-work or waiting on the user.
     if (s.state !== 'idle' && s.state !== 'done' && s.state !== 'sleeping' && s.state !== 'error') throw new SessionBusyError();
     const live = this.live.get(sessionId);
@@ -135,25 +135,25 @@ export class SessionRunner {
   /** /btw: a side question answered in a throwaway fork of the session; works while it is busy. */
   async btw(sessionId: string, question: string): Promise<void> {
     const s = this.o.store.get(sessionId);
-    if (!s) throw new Error(L(`Неизвестная сессия: ${sessionId}`, `Unknown session: ${sessionId}`));
+    if (!s) throw new Error(L(`Неизвестная сессия: ${sessionId}`, `Unknown session: ${sessionId}`, `未知会话：${sessionId}`));
     this.o.onChat?.(sessionId, { kind: 'user', text: `/btw ${question}` });
     const options: Record<string, any> = {
       cwd: s.cwd, resume: sessionId, forkSession: true, permissionMode: 'default',
-      canUseTool: async () => ({ behavior: 'deny', message: L('В /btw инструменты не используются', 'Tools are not used in /btw') }),
+      canUseTool: async () => ({ behavior: 'deny', message: L('В /btw инструменты не используются', 'Tools are not used in /btw', '/btw 中不使用工具') }),
     };
     const model = this.sessionModel.get(sessionId) ?? this.defaultModel;
     if (model) options.model = model;
     if (this.o.claudePath) options.pathToClaudeCodeExecutable = this.o.claudePath;
     let answer = '';
     try {
-      for await (const m of this.queryFn({ prompt: `${L('[Побочный вопрос /btw: ответь коротко и только текстом, не используй инструменты и не продолжай основную задачу]', '[Side question /btw: answer briefly and in plain text only, do not use tools and do not continue the main task]')}\n${question}`, options })) {
+      for await (const m of this.queryFn({ prompt: `${L('[Побочный вопрос /btw: ответь коротко и только текстом, не используй инструменты и не продолжай основную задачу]', '[Side question /btw: answer briefly and in plain text only, do not use tools and do not continue the main task]', '[旁白提问 /btw：请只用简短的纯文本回答，不要使用工具，也不要继续主任务]')}\n${question}`, options })) {
         if (m.type === 'assistant' && m.parent_tool_use_id == null)
           answer += (m.message?.content ?? []).filter((b: any) => b.type === 'text').map((b: any) => b.text).join('\n');
       }
     } catch (e) {
       answer ||= `⚠ ${(e as Error).message}`;
     }
-    this.o.onChat?.(sessionId, { kind: 'note', text: answer.trim() || L('(пустой ответ)', '(empty answer)') });
+    this.o.onChat?.(sessionId, { kind: 'note', text: answer.trim() || L('(пустой ответ)', '(empty answer)', '（空回答）') });
   }
 
   /** Lets go of a pet-owned session (its process ends) so another client, e.g. a terminal, can resume it. */
@@ -181,7 +181,7 @@ export class SessionRunner {
     this.emit(p.sid, 'PostToolUse', { tool_response: {} });
     p.resolve(allow
       ? { behavior: 'allow', updatedInput: p.input }
-      : { behavior: 'deny', message: L('Отклонено в Claude Pet', 'Denied in Claude Pet') });
+      : { behavior: 'deny', message: L('Отклонено в Claude Pet', 'Denied in Claude Pet', '已在 Claude Pet 中拒绝') });
     this.o.onChange?.();
   }
 
@@ -232,7 +232,7 @@ export class SessionRunner {
         try { void (live.q as any)?.interrupt?.(); } catch { /* already gone */ }
         try { (live.q as any)?.close?.(); } catch { /* not supported */ }
         if (resume && prev) this.o.store.restore(resume, prev);
-        if (resume) this.o.onChat?.(resume, { kind: 'end', error: L(`Claude Code создал копию сессии (новый ID ${newId.slice(0, 8)}…) вместо продолжения: отправка отменена, процесс закрыт. Исходная сессия не тронута.`, `Claude Code created a copy of the session (new ID ${newId.slice(0, 8)}…) instead of continuing it: the send was cancelled and the process closed. The original session is untouched.`) });
+        if (resume) this.o.onChat?.(resume, { kind: 'end', error: L(`Claude Code создал копию сессии (новый ID ${newId.slice(0, 8)}…) вместо продолжения: отправка отменена, процесс закрыт. Исходная сессия не тронута.`, `Claude Code created a copy of the session (new ID ${newId.slice(0, 8)}…) instead of continuing it: the send was cancelled and the process closed. The original session is untouched.`, `Claude Code 创建了该会话的副本（新 ID ${newId.slice(0, 8)}…），而没有继续原会话：发送已取消，进程已关闭。原会话未受影响。`) });
         this.o.onChange?.();
       };
 
@@ -283,7 +283,7 @@ export class SessionRunner {
         } finally {
           clearTimeout(live.idleTimer);
           if (live.sid && this.live.get(live.sid) === live) this.live.delete(live.sid);
-          if (!settled) { settled = true; reject(new Error(L('Claude Code завершился, не начав сессию', 'Claude Code exited without starting a session'))); }
+          if (!settled) { settled = true; reject(new Error(L('Claude Code завершился, не начав сессию', 'Claude Code exited without starting a session', 'Claude Code 退出，未能启动会话'))); }
         }
       })();
     });
@@ -311,7 +311,7 @@ export class SessionRunner {
         this.o.onChat?.(sid, { kind: 'end' });
       } else {
         this.emit(sid, 'PostToolUse', { tool_response: { is_error: true } });
-        this.o.onChat?.(sid, { kind: 'end', error: L(`Claude остановился: ${m.subtype}`, `Claude stopped: ${m.subtype}`) });
+        this.o.onChat?.(sid, { kind: 'end', error: L(`Claude остановился: ${m.subtype}`, `Claude stopped: ${m.subtype}`, `Claude 已停止：${m.subtype}`) });
       }
       live.interrupted = false;
       // an idle live process is closed after a while; the session can still be resumed later

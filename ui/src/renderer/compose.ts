@@ -42,11 +42,11 @@ export function decideSend(text: string, snap: Snapshot | null, folder: string |
 }
 
 export function placeholderFor(snap: Snapshot | null, folder: string | null, mode: Mode): string {
-  if (isBusyReply(snap, mode)) return L('Claude занят…', 'Claude is busy…');
+  if (isBusyReply(snap, mode)) return L('Claude занят…', 'Claude is busy…', 'Claude 正忙…');
   const target = mode === 'reply' ? replyTarget(snap) : null;
-  if (target) return L(`Ответить в ${target.project}…`, `Reply in ${target.project}…`);
-  if (folder) return L(`Новая задача в «${folderName(folder)}»…`, `New task in “${folderName(folder)}”…`);
-  return L('Начать новый чат', 'Start a new chat');
+  if (target) return L(`Ответить в ${target.project}…`, `Reply in ${target.project}…`, `在 ${target.project} 中回复…`);
+  if (folder) return L(`Новая задача в «${folderName(folder)}»…`, `New task in “${folderName(folder)}”…`, `在“${folderName(folder)}”中新建任务…`);
+  return L('Начать новый чат', 'Start a new chat', '开始新聊天');
 }
 
 /** "/name args" -> {name, args}; anything else (plain text, a lone "/") -> null. */

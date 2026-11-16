@@ -19,7 +19,7 @@
 }
 * { box-sizing: border-box; margin: 0; }
 html, body { width: 100%; height: 100%; background: transparent; overflow: hidden; user-select: none; }
-body { font-family: "Segoe UI", system-ui, sans-serif; color: var(--text); }
+body { font-family: "Segoe UI", "Microsoft YaHei UI", system-ui, sans-serif; color: var(--text); }
 #stage { width: 100%; height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: flex-end; gap: 6px; padding-bottom: 8px; }
 #sprite { width: 100%; height: 100%; display: block; -webkit-app-region: drag; transform-origin: 50% 100%; }
 /* a calm pet breathes: a slow, tiny rise and settle */
@@ -28,7 +28,7 @@ body { font-family: "Segoe UI", system-ui, sans-serif; color: var(--text); }
 #chip {
   display: flex; align-items: center; gap: 8px; max-width: 400px; padding: 7px 14px;
   background: var(--glass); border: 1px solid var(--glass-line); border-radius: 18px;
-  font-family: "Source Serif 4", Georgia, "Times New Roman", serif; font-size: 14px; white-space: nowrap;
+  font-family: "Source Serif 4", Georgia, "Microsoft YaHei UI", "Times New Roman", serif; font-size: 14px; white-space: nowrap;
 }
 #label { transition: font-size .3s, opacity .3s; }
 #detail { max-width: 260px; transition: max-width .38s cubic-bezier(.25, .8, .3, 1), opacity .25s .05s; }
@@ -62,7 +62,7 @@ body { font-family: "Segoe UI", system-ui, sans-serif; color: var(--text); }
 #compose { display: flex; align-items: center; }
 #compose { width: 384px; gap: 2px; }
 #input {
-  flex: 1; min-width: 0; padding: 0 8px; height: 36px; color: var(--text); font: 14px "Segoe UI", system-ui, sans-serif;
+  flex: 1; min-width: 0; padding: 0 8px; height: 36px; color: var(--text); font: 14px "Segoe UI", "Microsoft YaHei UI", system-ui, sans-serif;
   background: transparent; border: 0; outline: 0;
 }
 #input::placeholder { color: var(--muted); opacity: 1; }
@@ -80,20 +80,20 @@ body { font-family: "Segoe UI", system-ui, sans-serif; color: var(--text); }
 #notice { max-width: 400px; padding: 5px 12px; border-radius: 14px; background: color-mix(in srgb, var(--alert) 22%, var(--glass)); font-size: 12.5px; }
 
 #sessions { display: flex; flex-direction: column; gap: 2px; width: 400px; padding: 6px; background: var(--glass); border: 1px solid var(--glass-line); border-radius: 18px; }
-#sessions .row { all: unset; display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-radius: 12px; cursor: pointer; font-size: 13px; }
+#sessions .row { all: unset; display: flex; align-items: center; gap: 8px; padding: 4px 8px; border-radius: 12px; cursor: pointer; font-size: 13px; }
 #sessions .row:hover { background: var(--hover); }
 #sessions .row.current { background: var(--hover2); }
 #sessions .row:focus-visible { outline: 2px solid var(--teal); }
 #sessions .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--teal); flex: none; }
 #sessions .dot.alert { background: var(--alert); }
 #sessions .dot.quiet { background: var(--muted); }
-#sessions .name { font-family: "Source Serif 4", Georgia, serif; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#sessions .name { font-family: "Source Serif 4", Georgia, "Microsoft YaHei UI", serif; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 #sessions .meta { color: var(--muted); font-size: 12px; white-space: nowrap; }
 #sessions .empty { color: var(--muted); font-size: 13px; padding: 6px 8px; }
 
 /* ---- chat ---- */
-#chat { display: flex; flex-direction: column; width: 400px; max-height: 330px; background: var(--glass); border: 1px solid var(--glass-line); border-radius: 18px; overflow: hidden; }
-#chat-head { display: flex; align-items: center; padding: 6px 6px 4px 14px; font-family: "Source Serif 4", Georgia, serif; font-size: 13px; color: var(--muted); flex: none; }
+#chat { display: flex; flex-direction: column; width: 400px; max-height: 280px; background: var(--glass); border: 1px solid var(--glass-line); border-radius: 18px; overflow: hidden; }
+#chat-head { display: flex; align-items: center; padding: 6px 6px 4px 14px; font-family: "Source Serif 4", Georgia, "Microsoft YaHei UI", serif; font-size: 13px; color: var(--muted); flex: none; }
 #chat-switch { all: unset; flex: 1; min-width: 0; display: flex; align-items: center; gap: 6px; cursor: pointer; padding: 2px 6px; margin-left: -6px; border-radius: 8px; color: inherit; font: inherit; }
 #chat-switch:hover, #chat-switch[aria-expanded="true"] { background: var(--hover); color: var(--text); }
 #chat-switch:focus-visible { outline: 2px solid var(--teal); }
@@ -107,7 +107,7 @@ body { font-family: "Segoe UI", system-ui, sans-serif; color: var(--text); }
 #chat-menu .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--teal); flex: none; }
 #chat-menu .dot.alert { background: var(--alert); }
 #chat-menu .dot.quiet { background: var(--muted); }
-#chat-menu .name { font-family: "Source Serif 4", Georgia, serif; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#chat-menu .name { font-family: "Source Serif 4", Georgia, "Microsoft YaHei UI", serif; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 #chat-menu .meta { color: var(--muted); font-size: 12px; white-space: nowrap; }
 #chat-head .head-btn { all: unset; display: grid; place-items: center; width: 26px; height: 22px; border-radius: 8px; cursor: pointer; color: var(--muted); }
 #chat-head .head-btn:hover { background: var(--hover); color: var(--text); }
@@ -165,9 +165,9 @@ body { font-family: "Segoe UI", system-ui, sans-serif; color: var(--text); }
 @media (prefers-reduced-motion: reduce) { #usage-ring[data-level="full"] { animation: none; box-shadow: 0 0 6px color-mix(in srgb, var(--alert) 60%, transparent); } }
 #usage-ring[data-level="none"] .arc { stroke-dasharray: 0 100; }
 #usage-ring.stale svg { opacity: 0.55; }
-#usage-ring-text { position: relative; font: 600 8.5px "Segoe UI", system-ui, sans-serif; color: var(--text); }
+#usage-ring-text { position: relative; font: 600 8.5px "Segoe UI", "Microsoft YaHei UI", system-ui, sans-serif; color: var(--text); }
 #usage-ring[data-level="none"] #usage-ring-text, #usage-ring.stale #usage-ring-text { color: var(--muted); }
-#usage { display: flex; flex-direction: column; gap: 10px; width: 300px; padding: 12px 14px 10px; background: var(--glass); border: 1px solid var(--glass-line); border-radius: 18px; }
+#usage { display: flex; flex-direction: column; gap: 7px; width: 290px; padding: 9px 12px 8px; background: var(--glass); border: 1px solid var(--glass-line); border-radius: 18px; }
 #usage .u-head { font-size: 12.5px; color: var(--muted); }
 #usage .u-row { display: flex; flex-direction: column; gap: 4px; }
 #usage .u-label { font-size: 13px; }
@@ -183,36 +183,36 @@ body { font-family: "Segoe UI", system-ui, sans-serif; color: var(--text); }
 #usage .u-note { font-size: 11.5px; color: var(--alert); }
 
 /* ---- settings panel ---- */
-#settings { display: flex; flex-direction: column; width: 400px; max-height: 420px; background: var(--glass); border: 1px solid var(--glass-line); border-radius: 18px; overflow: hidden; }
-#settings .s-head { display: flex; align-items: center; padding: 6px 8px 0 10px; border-bottom: 1px solid var(--glass-line); flex: none; }
+#settings { display: flex; flex-direction: column; width: 400px; max-height: 250px; background: var(--glass); border: 1px solid var(--glass-line); border-radius: 18px; overflow: hidden; }
+#settings .s-head { display: flex; align-items: center; padding: 2px 6px 0 6px; border-bottom: 1px solid var(--glass-line); flex: none; }
 #settings .s-tabs { display: flex; gap: 2px; flex: 1; }
-#settings .s-tab { all: unset; cursor: pointer; padding: 8px 12px; font-size: 13px; color: var(--muted); border-bottom: 2px solid transparent; margin-bottom: -1px; }
+#settings .s-tab { all: unset; cursor: pointer; padding: 6px 9px; font-size: 12.5px; color: var(--muted); border-bottom: 2px solid transparent; white-space: nowrap; margin-bottom: -1px; }
 #settings .s-tab:hover { color: var(--text); }
 #settings .s-tab.on { color: var(--text); border-bottom-color: var(--teal); }
 #settings .s-tab:focus-visible, #settings .s-close:focus-visible, #settings .s-btn:focus-visible, #settings .s-link:focus-visible, #settings .s-swatch:focus-visible { outline: 2px solid var(--teal); }
 #settings .s-close { all: unset; cursor: pointer; width: 26px; height: 26px; display: grid; place-items: center; border-radius: 8px; color: var(--muted); font-size: 18px; }
 #settings .s-close:hover { background: var(--hover); color: var(--text); }
-#settings .s-body { display: flex; flex-direction: column; gap: 14px; padding: 12px 14px 14px; overflow-y: auto; scrollbar-width: thin; }
-#settings .s-section { display: flex; flex-direction: column; gap: 6px; }
-#settings .s-title { font-size: 13px; }
-#settings .s-hint { font-size: 12px; color: var(--muted); }
+#settings .s-body { display: flex; flex-direction: column; gap: 8px; padding: 8px 12px 10px; overflow-y: auto; scrollbar-width: thin; }
+#settings .s-section { display: flex; flex-direction: column; gap: 4px; }
+#settings .s-title { font-size: 12.5px; }
+#settings .s-hint { font-size: 11.5px; line-height: 1.3; color: var(--muted); }
 #settings .s-range { accent-color: var(--teal); width: 150px; }
 #settings .s-swatches { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-#settings .s-swatch { all: unset; cursor: pointer; width: 24px; height: 24px; border-radius: 50%; border: 2px solid transparent; box-shadow: 0 0 0 1px var(--glass-line); }
+#settings .s-swatch { all: unset; cursor: pointer; width: 20px; height: 20px; border-radius: 50%; border: 2px solid transparent; box-shadow: 0 0 0 1px var(--glass-line); }
 #settings .s-swatch.on { border-color: var(--text); }
 #settings .s-color { width: 30px; height: 26px; padding: 0; border: 1px solid var(--glass-line); border-radius: 8px; background: transparent; cursor: pointer; }
 #settings .s-link { all: unset; cursor: pointer; font-size: 12px; color: var(--teal); padding: 2px 4px; }
 #settings .s-link:disabled { color: var(--muted); cursor: default; }
-#settings .s-btn { all: unset; cursor: pointer; align-self: flex-start; padding: 6px 12px; border-radius: 12px; font-size: 12.5px; background: var(--hover2); color: var(--text); }
+#settings .s-btn { all: unset; cursor: pointer; align-self: flex-start; padding: 4px 10px; border-radius: 12px; font-size: 12.5px; background: var(--hover2); color: var(--text); }
 #settings .s-btn:hover { background: var(--hover); }
 #settings .s-btn:disabled { color: var(--muted); cursor: default; }
 #settings .s-btn.primary { background: var(--teal); color: var(--accent-ink); }
 
 /* ---- model manager ---- */
 #settings .m-list { display: flex; flex-direction: column; gap: 4px; }
-#settings .m-row { display: flex; align-items: center; gap: 10px; padding: 6px 8px; border-radius: 12px; border: 1px solid transparent; }
+#settings .m-row { display: flex; align-items: center; gap: 8px; padding: 3px 6px; border-radius: 12px; border: 1px solid transparent; }
 #settings .m-row.on { background: var(--hover2); border-color: color-mix(in srgb, var(--teal) 55%, transparent); }
-#settings .m-thumb { width: 36px; height: 39px; object-fit: contain; image-rendering: pixelated; flex: none; background: var(--hover); border-radius: 8px; }
+#settings .m-thumb { width: 28px; height: 30px; object-fit: contain; image-rendering: pixelated; flex: none; background: var(--hover); border-radius: 8px; }
 #settings .m-info { flex: 1; min-width: 0; }
 #settings .m-name { font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 #settings .m-acts { display: flex; gap: 4px; align-items: center; flex: none; }
@@ -227,7 +227,7 @@ body { font-family: "Segoe UI", system-ui, sans-serif; color: var(--text); }
 #settings .m-code { display: flex; align-items: center; gap: 8px; padding: 8px 10px; border-radius: 10px; background: rgba(0, 0, 0, 0.28); }
 #settings .m-code code { flex: 1; min-width: 0; font: 12.5px ui-monospace, Consolas, monospace; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; user-select: text; }
 #settings .m-line { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-#settings .m-drop { display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 14px; border: 1.5px dashed var(--glass-line); border-radius: 12px; font-size: 12.5px; color: var(--muted); }
+#settings .m-drop { display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 8px; border: 1.5px dashed var(--glass-line); border-radius: 12px; font-size: 12.5px; color: var(--muted); }
 #settings .m-drop.over { border-color: var(--teal); background: color-mix(in srgb, var(--teal) 10%, transparent); }
 #settings .m-progress { height: 6px; border-radius: 3px; background: var(--hover2); overflow: hidden; }
 #settings .m-progress i { display: block; height: 100%; background: var(--teal); transition: width .15s; }

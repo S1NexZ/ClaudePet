@@ -135,7 +135,7 @@ async function main() {
     const box = $('models');
     box.replaceChildren();
     const hint = document.createElement('div'); hint.className = 'hint';
-    hint.textContent = pickerFor ? L('Выбери модель для этого чата', 'Pick a model for this chat') : L('Выбери модель для новых чатов', 'Pick a model for new chats');
+    hint.textContent = pickerFor ? L('Выбери модель для этого чата', 'Pick a model for this chat', '为此聊天选择模型') : L('Выбери модель для новых чатов', 'Pick a model for new chats', '为新聊天选择模型');
     box.append(hint);
     for (const m of models) {
       const b = document.createElement('button'); b.className = 'm';
@@ -206,7 +206,7 @@ async function main() {
     else if (m.type === 'history') chats.set(m.sessionId, mergeHistory(chats.get(m.sessionId), m.items));
     else if (m.type === 'started') { pinnedId = m.sessionId; chatId = m.sessionId; mode = 'reply'; }
     else if (m.type === 'models') showModels(m.models);
-    else if (m.type === 'modelSet') { hideModels(); notify(`${L('Модель', 'Model')}: ${m.model}${m.sessionId ? '' : L(' (для новых чатов)', ' (for new chats)')}`); }
+    else if (m.type === 'modelSet') { hideModels(); notify(`${L('Модель', 'Model', '模型')}: ${m.model}${m.sessionId ? '' : L(' (для новых чатов)', ' (for new chats)', ' （用于新聊天）')}`); }
     else if (m.type === 'usage') { usage = m.usage; renderUsage(); }
     else if (m.type === 'error') notify(m.message);
   });
@@ -342,20 +342,20 @@ async function main() {
     return true;
   };
   const submit = async () => {
-    if (!connected) { notify(L('Нет связи с Claude Code в WSL', 'No connection to Claude Code in WSL')); return; }
+    if (!connected) { notify(L('Нет связи с Claude Code в WSL', 'No connection to Claude Code in WSL', '无法连接 WSL 中的 Claude Code')); return; }
     // commands the pet handles itself; every other /command goes to Claude Code as typed
     const sl = parseSlash(input.value);
     const target = mode === 'reply' ? chatSession() : null;
     if (sl?.name === 'model') {
       pickerFor = target?.id ?? null;
       if (sl.args) host.send({ type: 'setModel', sessionId: pickerFor, model: sl.args });
-      else { const box = $('models'); box.replaceChildren(Object.assign(document.createElement('div'), { className: 'hint', textContent: L('Загружаю список моделей…', 'Loading the model list…') })); box.hidden = false; host.send({ type: 'models' }); }
+      else { const box = $('models'); box.replaceChildren(Object.assign(document.createElement('div'), { className: 'hint', textContent: L('Загружаю список моделей…', 'Loading the model list…', '正在加载模型列表…') })); box.hidden = false; host.send({ type: 'models' }); }
       input.value = '';
       return;
     }
     if (sl?.name === 'btw') {
-      if (!target) { notify(L('/btw задаёт вопрос по открытому чату: сначала выбери сессию', '/btw asks about the open chat: pick a session first')); return; }
-      if (!sl.args) { notify(L('Напиши вопрос после /btw', 'Type your question after /btw')); return; }
+      if (!target) { notify(L('/btw задаёт вопрос по открытому чату: сначала выбери сессию', '/btw asks about the open chat: pick a session first', '/btw 针对已打开的聊天提问：请先选择会话')); return; }
+      if (!sl.args) { notify(L('Напиши вопрос после /btw', 'Type your question after /btw', '请在 /btw 后输入你的问题')); return; }
       host.send({ type: 'btw', sessionId: target.id, text: sl.args });
       input.value = '';
       return;
@@ -365,7 +365,7 @@ async function main() {
       if (!(await chooseFolder())) return;
       d = decideSend(input.value, chatSnap(), folder, mode);
     }
-    if (d.kind === 'busy') { notify(L('Claude занят. Нажми «стоп» или «+», чтобы начать новый чат', 'Claude is busy. Press Stop or “+” to start a new chat')); return; }
+    if (d.kind === 'busy') { notify(L('Claude занят. Нажми «стоп» или «+», чтобы начать новый чат', 'Claude is busy. Press Stop or “+” to start a new chat', 'Claude 正忙。点“停止”或“+”开始新聊天')); return; }
     if (d.kind === 'empty' || d.kind === 'needFolder') return;
     if (d.kind === 'start') { pinnedId = null; chatId = null; host.send({ type: 'start', cwd: d.cwd, prompt: d.prompt }); }
     else host.send({ type: 'send', sessionId: d.sessionId, text: d.text });
@@ -398,7 +398,7 @@ async function main() {
     if (!expanded) return;
     const newChat = mode === 'new' && !!folder;
     const sid = newChat ? null : s?.id ?? null;
-    const title = newChat ? `${L('Новый чат', 'New chat')} · ${folder!.replace(/[\\/]+$/, '').split(/[\\/]/).pop()}` : s ? `${s.project} · ${STATE_LABEL[s.state]}` : L('Чат', 'Chat');
+    const title = newChat ? `${L('Новый чат', 'New chat', '新聊天')} · ${folder!.replace(/[\\/]+$/, '').split(/[\\/]/).pop()}` : s ? `${s.project} · ${STATE_LABEL[s.state]}` : L('Чат', 'Chat', '聊天');
     if ($('chat-title').textContent !== title) $('chat-title').textContent = title;
     $('btn-term').hidden = !sid; $('btn-end').hidden = !sid;
     // ask for the transcript once per opening of this chat (even if /btw already put messages there)
@@ -413,7 +413,7 @@ async function main() {
     for (let k = i; k < items.length; k++) list.append(messageNode(items[k]));
     if (items.length === 0) {
       const e = document.createElement('div'); e.className = 'msg empty';
-      e.textContent = newChat || !s ? L('Напиши задачу, Claude ответит здесь', 'Write a task, Claude will answer here') : L('Переписка появится здесь', 'The conversation will appear here');
+      e.textContent = newChat || !s ? L('Напиши задачу, Claude ответит здесь', 'Write a task, Claude will answer here', '写下任务，Claude 会在这里回答') : L('Переписка появится здесь', 'The conversation will appear here', '对话将显示在这里');
       list.append(e);
     }
     shown = items.slice();
@@ -442,7 +442,7 @@ async function main() {
       chatMenu.append(row);
     };
     for (const r of rows) mk(r.current ? 'current' : '', r.tone === 'busy' ? '' : r.tone, r.title, r.meta, r.cwd, () => openChat(r.id));
-    mk('new', '', L('+ Новый чат…', '+ New chat…'), '', L('Выбрать папку и начать новую задачу', 'Pick a folder and start a new task'), async () => {
+    mk('new', '', L('+ Новый чат…', '+ New chat…', '+ 新聊天…'), '', L('Выбрать папку и начать новую задачу', 'Pick a folder and start a new task', '选择文件夹并开始新任务'), async () => {
       if (await chooseFolder()) { chatId = null; pinnedId = null; mode = 'new'; input.focus(); }
     });
   };
@@ -468,7 +468,7 @@ async function main() {
     panelKey = key;
     panel.replaceChildren();
     if (rows.length === 0) {
-      const e = document.createElement('div'); e.className = 'empty'; e.textContent = L('Сессий пока нет', 'No sessions yet');
+      const e = document.createElement('div'); e.className = 'empty'; e.textContent = L('Сессий пока нет', 'No sessions yet', '还没有会话');
       panel.append(e); return;
     }
     for (const x of rows) {
@@ -557,7 +557,7 @@ async function main() {
     $('perm').hidden = !pp;
     if (pp) {
       $('perm-text').textContent = `${pp.tool}: ${pp.summary}`;
-      if (pp.id !== lastNotified) { lastNotified = pp.id; host.notify(L('Claude ждёт разрешения', 'Claude needs permission'), `${s!.project}: ${pp.tool} ${pp.summary}`); }
+      if (pp.id !== lastNotified) { lastNotified = pp.id; host.notify(L('Claude ждёт разрешения', 'Claude needs permission', 'Claude 需要权限'), `${s!.project}: ${pp.tool} ${pp.summary}`); }
     }
     // a chat opened before any session was known follows the first one that appears
     if (expanded && !chatId && !newChatChosen) { const c = current(); if (c) { chatId = c.id; mode = 'reply'; } }
