@@ -516,7 +516,10 @@ async function main() {
     ctx.drawImage(atlas, c * cw, r * ch, cw, ch, 0, 0, sprite.width, sprite.height);
     ctx.globalAlpha = 1;
   };
+  let lastTick = 0;
   const tick = (t: number) => {
+    if (t - lastTick < 15) { requestAnimationFrame(tick); return; } // high-refresh displays (144 Hz+): ~60 updates a second are plenty
+    lastTick = t;
     const snap = eff();
     const s = snap?.sessions.find((x) => x.id === snap.attention) ?? null;
     const v = statusView(snap, connected, Date.now());

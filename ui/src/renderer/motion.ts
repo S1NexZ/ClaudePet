@@ -8,6 +8,7 @@ import { gsap } from 'gsap';
 export interface MotionParts { sprite: HTMLElement; dockPill: HTMLElement; chip: HTMLElement; ring: HTMLElement }
 
 export function createMotion(p: MotionParts, reduce: boolean) {
+  gsap.ticker.fps(60); // on 144 Hz displays GSAP would otherwise re-style everything 144 times a second
   const dockButtons = Array.from(p.dockPill.querySelectorAll<HTMLElement>('button, .sep'));
   const label = p.chip.querySelector<HTMLElement>('#label')!;
   const detail = p.chip.querySelector<HTMLElement>('#detail')!;
