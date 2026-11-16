@@ -310,9 +310,8 @@ async function main() {
   let sizeSent = '';
   const fitWindow = () => {
     const kids = Array.from($('stage').children).filter((e) => !(e as HTMLElement).hidden) as HTMLElement[];
-    // the status chip animates its width: reserve its expanded width so the window doesn't resize on every frame of the animation
-    const chipFull = Math.min(400, 8 + 16 + 28 + 2 + $('label').offsetWidth + $('detail').scrollWidth + 8);
-    const w = Math.max(...kids.map((e) => (e.id === 'chip' ? chipFull : e.offsetWidth))) + 16;
+    // the width never changes (the window is a transparent, click-through strip): only the height follows the content
+    const w = 424;
     const h = kids.reduce((a, e) => a + e.offsetHeight, 0) + 6 * (kids.length - 1) + 16;
     const key = `${w}x${h}`;
     if (key !== sizeSent) { sizeSent = key; host.resize(w, h); }

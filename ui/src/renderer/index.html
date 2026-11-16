@@ -36,10 +36,6 @@
     </div>
     <div id="sprite-wrap">
       <canvas id="sprite" class="hit"></canvas>
-      <button id="usage-ring" class="hit" type="button" aria-haspopup="dialog" aria-expanded="false" title="Лимиты плана: данных нет" data-level="none">
-        <svg viewBox="0 0 36 36" width="26" height="26" aria-hidden="true"><circle class="track" cx="18" cy="18" r="15.9155" /><circle class="arc" cx="18" cy="18" r="15.9155" stroke-dasharray="0 100" /></svg>
-        <span id="usage-ring-text">—</span>
-      </button>
     </div>
     <div id="dock"><div id="dock-pill" class="hit rest">
         <button id="btn-new" title="Чат" aria-label="Чат">
@@ -67,7 +63,12 @@
         </button>
       </div>
     </div>
-    <div id="chip" class="hit"><span id="dot"></span><span id="label"></span><span id="detail"></span></div>
+    <div id="chip" class="hit"><span id="dot"></span><span id="label"></span><span id="detail"></span>
+      <button id="usage-ring" class="hit" type="button" aria-haspopup="dialog" aria-expanded="false" title="Лимиты плана: данных нет" data-level="none">
+        <svg viewBox="0 0 36 36" width="26" height="26" aria-hidden="true"><circle class="track" cx="18" cy="18" r="15.9155" /><circle class="arc" cx="18" cy="18" r="15.9155" stroke-dasharray="0 100" /></svg>
+        <span id="usage-ring-text">—</span>
+      </button>
+    </div>
   </div>
   <script src="renderer.js"></script>
 </body>

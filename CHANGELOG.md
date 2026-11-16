@@ -4,6 +4,8 @@
 
 ## Unreleased
 
+- The usage ring lives in the status chip: a small arc next to the status dot that settles at the end of the row when the chip unfolds.
+- The window has a constant width and the UI hangs from its bottom edge, so opening or closing panels never moves or shakes the pet.
 - Panels (settings, chat, sessions, limits, notices) slide out of the pet and fold back with GSAP; they open upwards so the pet never moves.
 - The status chip rests as a colored dot (green ready, blue thinking, cyan reading, violet writing, orange running, yellow testing, red permission/error, pink subagent, lime done, grey asleep); the word and details unfold on hover. A legend is in Settings.
 - Settings: the RGB editor (sliders + HEX) stays open until closed instead of resetting after one click.

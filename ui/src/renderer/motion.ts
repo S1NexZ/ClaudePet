@@ -38,7 +38,7 @@ export function createMotion(p: MotionParts, reduce: boolean) {
   chip.timeScale(speed).progress(0);
 
   // ---- the usage ring: a small quiet arc by the pet; it grows and shows its number when awake ----
-  gsap.set(p.ring, { scale: 0.62, opacity: 0.6, transformOrigin: '50% 50%' });
+  gsap.set(p.ring, { scale: 0.7, opacity: 0.7, transformOrigin: '50% 50%' });
   gsap.set(ringText, { opacity: 0 });
   const ring = gsap.timeline({ paused: true, defaults: { ease: EASE } })
     .to(p.ring, { scale: 1, opacity: 1, duration: 0.4, ease: 'back.out(1.4)' }, 0)
@@ -113,7 +113,7 @@ export function animatePanels(els: Array<HTMLElement | null>, reduce: boolean): 
         if (!v) {
           if (!cur && !leaving) return; // already shown
           leaving = false; gsap.killTweensOf(el); real(false);
-          gsap.fromTo(el, { opacity: 0, y: 14, scale: 0.97, transformOrigin: '50% 100%' }, { opacity: 1, y: 0, scale: 1, duration: 0.34, ease: 'power3.out', clearProps: 'opacity,transform' });
+          gsap.fromTo(el, { opacity: 0, y: 14, scale: 0.97, transformOrigin: '50% 100%' }, { opacity: 1, y: 0, scale: 1, duration: 0.38, delay: 0.06, ease: 'power3.out', clearProps: 'opacity,transform' });
         } else {
           if (cur || leaving) return; // already hidden / on the way out
           leaving = true; gsap.killTweensOf(el);

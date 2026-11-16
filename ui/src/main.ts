@@ -20,7 +20,7 @@ import { PERMISSION_POLICIES, type PermissionPolicy } from '../../shared/src/typ
 import { L, setLang, getLang, resolveLang, LANG_PREFS, type LangPref } from '../../shared/src/i18n.js';
 
 /** Initial size; the renderer then sizes the window to its content (see pet:resize). */
-const W0 = 240, H0 = 240, MAX_W = 440, MAX_H = 860;
+const W0 = 240, H0 = 240, MAX_W = 424, MAX_H = 860;
 // Packaged: everything ships under resources/. Dev: bridge is built into <repo>/build, bundled pet models live in <repo>/models.
 const res = (...p: string[]) => (app.isPackaged ? join(process.resourcesPath, ...p) : join(__dirname, '../..', ...(p[0] === 'models' ? p : ['build', ...p])));
 const bridgePath = process.env.CLAUDE_PET_BRIDGE ?? res('bridge', 'bridge.cjs');
