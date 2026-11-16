@@ -38,7 +38,7 @@ export function createMotion(p: MotionParts, reduce: boolean) {
   chip.timeScale(speed).progress(0);
 
   // ---- the usage ring: a small quiet arc by the pet; it grows and shows its number when awake ----
-  gsap.set(p.ring, { scale: 0.7, opacity: 0.92, transformOrigin: '50% 50%' });
+  gsap.set(p.ring, { scale: 0.7, opacity: 1, transformOrigin: '50% 50%' });
   gsap.set(ringText, { opacity: 0 });
   const ring = gsap.timeline({ paused: true, defaults: { ease: EASE } })
     .to(p.ring, { scale: 1, opacity: 1, duration: 0.4, ease: 'back.out(1.4)' }, 0)
