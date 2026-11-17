@@ -94,8 +94,10 @@ describe('panel', () => {
 });
 
 describe('ring', () => {
-  it('uses the 5 h window, falls back to weekly, colours by level', () => {
-    expect(ringModel(info(), NOW)).toMatchObject({ text: '24', level: 'ok', stale: false });
+  it('shows the fuller window (the one that stops work first), colours by level', () => {
+    expect(ringModel(info(), NOW)).toMatchObject({ text: '41', level: 'ok', stale: false });
+    // a nearly used-up week with a fresh 5 h window: the ring warns about the week
+    expect(ringModel(info({ fiveHour: { usedPct: 14, resetsAt: sec(NOW + 1e6) }, sevenDay: { usedPct: 94, resetsAt: sec(NOW + 1e6) } }), NOW)).toMatchObject({ text: '94', level: 'high' });
     expect(ringModel(info({ fiveHour: { usedPct: 80, resetsAt: sec(NOW + 1e6) } }), NOW).level).toBe('warn');
     expect(ringModel(info({ fiveHour: { usedPct: 95, resetsAt: sec(NOW + 1e6) } }), NOW).level).toBe('high');
     expect(ringModel(info({ fiveHour: null }), NOW).text).toBe('41');

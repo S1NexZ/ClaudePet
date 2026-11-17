@@ -11,6 +11,7 @@ import { installModelFromZip, installModelFromDir, removeModel, scanPetFolder, M
 import { loadSettings, saveSettings } from './settings.js';
 import { focusByTitle, focusDesktopApp } from './focusWindow.js';
 import { formatDiagnostics, lastEventByHost } from './diagnostics.js';
+import { syncHelper } from './stableHelper.js';
 import { planProfile, removeFromProfile, profileState, profilePaths, readProfile, applyProfile } from './psProfile.js';
 import { overAny, type Rect } from './hitTest.js';
 import { placeStage, restoreAnchor, IDLE_H, type Anchor } from './placement.js';
@@ -123,7 +124,14 @@ if (primary) app.whenReady().then(async () => {
     win.webContents.send('pet:msg', lastSnapshot);
   };
   const sendUp = () => { up = winUp || [...hostUp.values()].some(Boolean); win.webContents.send('pet:bridge', up); };
-  const helperPath = (() => { const p = app.isPackaged ? join(process.resourcesPath, 'helper', 'pet-helper.exe') : join(__dirname, '..', 'helper', 'pet-helper.exe'); return existsSync(p) ? p : undefined; })();
+  // hooks, the status line and the PowerShell wrapper use a stable copy of pet-helper.exe (it is in use for as long as sessions live;
+  // the install folder must stay replaceable by the next installer). A busy copy is refreshed later.
+  const installedHelper = app.isPackaged ? join(process.resourcesPath, 'helper', 'pet-helper.exe') : join(__dirname, '..', 'helper', 'pet-helper.exe');
+  const helperDir = join(process.env.LOCALAPPDATA ?? app.getPath('userData'), 'ccPet', 'bin');
+  const firstSync = syncHelper(installedHelper, helperDir);
+  if (firstSync.error) log(`pet-helper copy: ${firstSync.error}`);
+  const helperPath = firstSync.path;
+  if (firstSync.error && helperPath !== installedHelper) setInterval(() => { const r = syncHelper(installedHelper, helperDir); if (r.updated) log('pet-helper copy updated'); }, 10 * 60_000).unref();
   const winHost = createWindowsHost({
     dataDir: app.getPath('userData'), claudeHome: join(homedir(), '.claude'), port: WINDOWS_HOST_PORT, helperPath,
     permissionsFromPet: () => settings.answerPermissions,
