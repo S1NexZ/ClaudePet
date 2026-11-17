@@ -34,6 +34,18 @@ describe('parseTranscript', () => {
 });
 
 describe('readTranscript', () => {
+  it('reads only the tail of a long file and widens it until it has enough items (same result as a full read)', async () => {
+    const d = mkdtempSync(join(tmpdir(), 'tr-'));
+    const line = (i: number) => JSON.stringify({ type: 'user', message: { content: `message number ${i} ${'x'.repeat(200)}` } });
+    const text = Array.from({ length: 300 }, (_, i) => line(i)).join('\n') + '\n';
+    writeFileSync(join(d, 'long.jsonl'), text);
+    for (const chunk of [100, 1000, 5000, 1 << 20]) {
+      const r = await readTranscript(join(d, 'long.jsonl'), 40, chunk);
+      expect(r).toEqual(parseTranscript(text, 40));
+      expect(r[0].text).toContain('message number 260 ');
+    }
+    expect(await readTranscript(join(d, 'long.jsonl'), 1000, 100)).toHaveLength(300); // fewer items than asked: the whole file
+  });
   it('reads a .jsonl file; missing file or wrong extension gives []', async () => {
     const d = mkdtempSync(join(tmpdir(), 'tr-'));
     writeFileSync(join(d, 's.jsonl'), lines.join('\n'));

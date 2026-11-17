@@ -1,5 +1,5 @@
 import { join, dirname } from 'node:path';
-import { readFileSync, existsSync, readlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, writeFileSync } from 'node:fs';
 import type { SessionStore } from './sessionStore.js';
 import type { HookPayload } from './hookSocket.js';
 import { toWslPath } from './paths.js';
@@ -26,6 +26,9 @@ export interface RunnerLike {
   interrupt(sessionId: string): Promise<void>;
   respondPermission(id: string, allow: boolean): void;
 }
+
+/** hook events that can only come after a pending permission question was settled */
+const SETTLES_ASK = new Set(['PostToolUse', 'PostToolUseFailure', 'Stop', 'StopFailure', 'UserPromptSubmit', 'SessionEnd']);
 
 export function snapshotOf(store: SessionStore): Snapshot {
   return { type: 'snapshot', sessions: store.list(), attention: store.attention()?.id ?? null };
@@ -94,7 +97,9 @@ export function createBridge(o: {
   const ended = new Set<string>();
   let permOn = false;
   const permissionsOn = () => (o.permissionsFromPet ? o.permissionsFromPet() : permOn);
-  const asks = new Map<string, { sessionId: string; resolve: (d: 'allow' | 'deny' | null) => void; timer: ReturnType<typeof setTimeout> }>();
+  const asks = new Map<string, { sessionId: string; tool: string; resolve: (d: 'allow' | 'deny' | null) => void; timer: ReturnType<typeof setTimeout> }>();
+  /** tool name + input: a PostToolUse of this very call (tools can run in parallel, another tool finishing settles nothing) */
+  const toolKey = (e: HookPayload) => `${String(e.tool_name ?? '')}\u0000${JSON.stringify(e.tool_input ?? null)}`;
   let askSeq = 0;
   let lastSnap = '';
   const snapshot = (onlyIfChanged = false) => {
@@ -276,6 +281,12 @@ export function createBridge(o: {
     },
     onHook(e: HookPayload): void {
       if (e.hook_event_name !== 'SessionStart') hooked.add(e.session_id);
+      // the question was answered somewhere else (in the terminal or the app): the tool ran, the turn moved on or ended. Drop the pet's
+      // Allow / Deny at once instead of showing it until the 30 s timeout
+      if (SETTLES_ASK.has(e.hook_event_name)) {
+        const post = e.hook_event_name === 'PostToolUse' || e.hook_event_name === 'PostToolUseFailure';
+        for (const [id, a] of asks) if (a.sessionId === e.session_id && (!post || a.tool === toolKey(e))) { clearTimeout(a.timer); asks.delete(id); o.store.setPending(a.sessionId, undefined); a.resolve(null); }
+      }
       if (ended.has(e.session_id)) {
         if (e.hook_event_name !== 'UserPromptSubmit' && e.hook_event_name !== 'SessionStart') return;
         ended.delete(e.session_id); // resumed by the user
@@ -307,7 +318,7 @@ export function createBridge(o: {
       return new Promise((resolve) => {
         const timer = setTimeout(() => { asks.delete(id); o.store.setPending(e.session_id, undefined); snapshot(); resolve(null); }, o.permissionTimeoutMs ?? 30_000);
         timer.unref?.();
-        asks.set(id, { sessionId: e.session_id, resolve, timer });
+        asks.set(id, { sessionId: e.session_id, tool: toolKey(e), resolve, timer });
       });
     },
     onChat(sessionId: string, event: ChatEvent): void {

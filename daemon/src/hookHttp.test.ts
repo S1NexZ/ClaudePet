@@ -21,6 +21,13 @@ describe('hook http receiver', () => {
     expect(r.status).toBe(200);
     expect(events).toEqual([{ hook_event_name: 'Stop', session_id: 's1', cwd: 'C:\\x\\p' }]);
   });
+  it('a malformed %-escape in the path is refused, not thrown (the receiver keeps running)', async () => {
+    const { base, events } = await boot();
+    expect((await fetch(`${base}/mailbox/tok/%E0%A4%A`)).status).toBe(400);
+    await post(`${base}/hook/tok/%E0%A4%A`, { session_id: 's1' });
+    expect((await post(`${base}/hook/tok/Stop`, { hook_event_name: 'Stop', session_id: 's2' })).status).toBe(200);
+    expect(events.map((e) => e.session_id)).toEqual(['s1', 's2']);
+  });
   it('takes the event name from the path when the body has none', async () => {
     const { base, events } = await boot();
     await post(`${base}/hook/tok/SessionStart`, { session_id: 's1' });

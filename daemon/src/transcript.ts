@@ -1,4 +1,4 @@
-import { readFile, open } from 'node:fs/promises';
+import { open } from 'node:fs/promises';
 import { summarize } from './summary.js';
 import type { ChatItem } from '../../shared/src/types.js';
 
@@ -60,10 +60,26 @@ export function parseTranscript(jsonl: string, limit = 40): ChatItem[] {
   return out.slice(-limit);
 }
 
-/** Reads a transcript file; anything unreadable or not a .jsonl gives an empty list. */
-export async function readTranscript(path: string, limit = 40): Promise<ChatItem[]> {
+/**
+ * Reads the end of a transcript file; anything unreadable or not a .jsonl gives an empty list. Long sessions grow to tens of MB and only
+ * the last `limit` items are shown: the tail is read first (256 KB) and widened only while it holds too few items.
+ */
+export async function readTranscript(path: string, limit = 40, firstChunk = 256 * 1024): Promise<ChatItem[]> {
   if (!path.endsWith('.jsonl')) return [];
-  try { return parseTranscript(await readFile(path, 'utf8'), limit); } catch { return []; }
+  try {
+    const fh = await open(path, 'r');
+    try {
+      const { size } = await fh.stat();
+      for (let len = Math.min(size, firstChunk); ; len = Math.min(size, len * 4)) {
+        const buf = Buffer.alloc(len);
+        await fh.read(buf, 0, len, size - len);
+        let text = buf.toString('utf8');
+        if (len < size) text = text.slice(text.indexOf('\n') + 1); // the first line of a tail is usually cut
+        const items = parseTranscript(text, limit);
+        if (items.length >= limit || len >= size) return items;
+      }
+    } finally { await fh.close(); }
+  } catch { return []; }
 }
 
 /** True if the transcript text has an "[Request interrupted by user...]" entry written at or after `sinceMs` (Esc/Ctrl+C leave no hook, only this line). */

@@ -24,6 +24,8 @@ export interface HookServerOpts {
 
 const MAX_BODY = 1_000_000;
 const SAFE_ID = /^[A-Za-z0-9_-]{1,100}$/;
+/** a malformed %-escape must not throw inside the request handler (that would take the whole process down) */
+const decode = (s: string): string | null => { try { return decodeURIComponent(s); } catch { return null; } };
 
 /**
  * HTTP receiver for Claude Code `http` hooks (and the mailbox long-poll of the `asyncRewake` waiter), loopback only.
@@ -40,8 +42,8 @@ export async function startHookServer(o: HookServerOpts): Promise<{ port: number
     if (token !== o.token || (kind !== 'hook' && kind !== 'mailbox') || !rest) { res.writeHead(404).end(); return; }
 
     if (kind === 'mailbox' && req.method === 'GET') {
-      const sid = decodeURIComponent(rest);
-      if (!SAFE_ID.test(sid)) { res.writeHead(400).end(); return; }
+      const sid = decode(rest);
+      if (sid === null || !SAFE_ID.test(sid)) { res.writeHead(400).end(); return; }
       const pty = url.searchParams.get('pty');
       const cwd = url.searchParams.get('cwd');
       const src = url.searchParams.get('src'); // the front end that started claude (CLAUDE_CODE_ENTRYPOINT: cli, claude-vscode, claude-desktop, ...)
@@ -68,7 +70,7 @@ export async function startHookServer(o: HookServerOpts): Promise<{ port: number
         let e: any;
         try { e = JSON.parse(body); } catch { res.writeHead(400).end(); return; }
         if (!e || typeof e.session_id !== 'string') { res.writeHead(400).end(); return; }
-        const ev: HookPayload = { ...e, hook_event_name: typeof e.hook_event_name === 'string' ? e.hook_event_name : decodeURIComponent(rest), cwd: typeof e.cwd === 'string' ? e.cwd : '' };
+        const ev: HookPayload = { ...e, hook_event_name: typeof e.hook_event_name === 'string' ? e.hook_event_name : decode(rest) ?? '', cwd: typeof e.cwd === 'string' ? e.cwd : '' };
         if (ev.hook_event_name === 'PermissionRequest') {
           const answer = o.onPermission ? o.onPermission(ev).catch(() => null) : Promise.resolve(null);
           void answer.then((d) => {

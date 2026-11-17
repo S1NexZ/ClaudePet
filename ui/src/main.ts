@@ -296,14 +296,14 @@ if (primary) app.whenReady().then(async () => {
     { label: `${L('Вызов питомца', 'Summon the pet', '唤出宠物')}: ${settings.hotkey || L('выключен', 'off', '关')}`, enabled: false },
     { type: 'separator' },
     { label: L('Настройки…', 'Settings…', '设置…'), click: () => { win.show(); win.setAlwaysOnTop(true, 'floating'); win.webContents.send('pet:open-settings'); } },
-    { label: L('Подключить терминал (WSL)…', 'Connect the terminal (WSL)…', '连接终端（WSL）…'), click: () => void showTerminalSetup() },
+    { label: NATIVE ? L('Подключить терминал…', 'Connect the terminal…', '连接终端…') : L('Подключить терминал (WSL)…', 'Connect the terminal (WSL)…', '连接终端（WSL）…'), click: () => void showTerminalSetup() },
     { label: L('Подключить хуки Claude Code…', 'Connect Claude Code hooks…', '连接 Claude Code 钩子…'), enabled: up, click: () => { hooksManual = true; toBridge({ type: 'hooks', apply: false }); } },
     { label: L('Уведомлять, когда нужно разрешение', 'Notify when permission is needed', '需要权限时通知'), type: 'checkbox', checked: settings.notify,
       click: (i) => { settings = { ...settings, notify: i.checked }; applySettings(); } },
     { label: L('Размер питомца', 'Pet size', '宠物大小'), submenu: [0.75, 1, 1.25, 1.5, 1.8].filter((v) => v >= PET_SCALE_MIN && v <= PET_SCALE_MAX).map((v) => ({
       label: `${Math.round(v * 100)}%`, type: 'radio' as const, checked: Math.abs(settings.petScale - v) < 0.03,
       click: () => { settings = { ...settings, petScale: v }; applySettings(); win.webContents.send('pet:scale', v); } })) },
-    { label: L('Запускать вместе с Windows', 'Start with Windows', '随 Windows 启动'), type: 'checkbox', checked: settings.autostart, enabled: app.isPackaged,
+    { label: NATIVE ? L('Запускать при входе в систему', 'Start at login', '登录时启动') : L('Запускать вместе с Windows', 'Start with Windows', '随 Windows 启动'), type: 'checkbox', checked: settings.autostart, enabled: app.isPackaged,
       click: (i) => { settings = { ...settings, autostart: i.checked }; applySettings(); } },
     { label: L('Проверять обновления (раз в день)', 'Check for updates (daily)', '检查更新（每天）'), type: 'checkbox', checked: settings.checkUpdates,
       click: (i) => { settings = { ...settings, checkUpdates: i.checked }; applySettings(); if (i.checked) void checkUpdates(); } },
@@ -491,6 +491,7 @@ if (primary) app.whenReady().then(async () => {
   });
   // ---- connections: our hooks in each host's settings.json (always with the diff and the user's consent) ----
   const wslRequest = (cmd: object, host: WslHost = primary()): Promise<any> => host.request(cmd);
+  const hostLabel = (h: WslHost) => (NATIVE ? L('этот компьютер', 'this computer', '本机') : h.name() ? `WSL: ${h.name()}` : 'WSL');
   const hostRowState = async (h: WslHost) => {
     const w = await wslRequest({ type: 'hooks', apply: false, permissions: settings.answerPermissions }, h);
     const sl = h.secondary ? null : await h.request({ type: 'statusline' }, 'statusline'); // the limits ring is fed from the default distro's status line
@@ -552,7 +553,7 @@ if (primary) app.whenReady().then(async () => {
     });
     const text = formatDiagnostics({
       version: app.getVersion(), os: `${process.platform} ${process.getSystemVersion()}`, now: Date.now(), user: userInfo().username,
-      hosts: [row('windows', c.windows), row(c.wsl.id, c.wsl), ...(c.others ?? []).map((o) => row(o.id, o))],
+      hosts: [...(NATIVE ? [] : [row('windows', c.windows)]), row(c.wsl.id, c.wsl), ...(c.others ?? []).map((o) => row(o.id, o))],
       helper: !!helperPath, wrapper: c.wrapper?.state ?? null, policy: c.wrapper?.policy ?? null,
       desktopChats: new Set([...desktopEntries().values()].map((e) => e.desktopId)).size, newChatIn: settings.newChatIn, sdkChats: settings.sdkChats,
     });
@@ -589,14 +590,14 @@ if (primary) app.whenReady().then(async () => {
       const off = action === 'statusline-off';
       const p = await h.request({ type: 'statusline', remove: off }, 'statusline');
       if (p?.error) { void info(L('Не удалось прочитать settings.json', 'Could not read settings.json', '无法读取 settings.json'), String(p.error)); return connectionsState(); }
-      const label = h.name() ? `WSL: ${h.name()}` : 'WSL';
+      const label = hostLabel(h);
       if (p?.diff && await confirmHooks(off ? L('Отключить статус-строку от питомца?', 'Disconnect the status line from the pet?', '断开状态栏与宠物的连接？') : L('Подключить статус-строку (лимиты)?', 'Connect the status line (limits)?', '连接状态栏（额度）？'), [{ file: `~/.claude/settings.json (${label})`, diff: String(p.diff) }]))
         await h.request({ type: 'statusline', apply: true, remove: off }, 'statusline');
     } else if (typeof hostId === 'string' && wslHosts.has(hostId)) {
       const h = wslHosts.get(hostId)!;
       const p = await wslRequest({ type: 'hooks', apply: false, remove, permissions: settings.answerPermissions }, h);
       if (p?.error) { void info(L('Не удалось прочитать settings.json', 'Could not read settings.json', '无法读取 settings.json'), String(p.error)); return connectionsState(); }
-      const label = h.name() ? `WSL: ${h.name()}` : 'WSL';
+      const label = hostLabel(h);
       if (p?.diff && await confirmHooks(remove ? L(`Отключить ${label} от питомца?`, `Disconnect ${label} from the pet?`, `断开 ${label} 与宠物的连接？`) : L(`Подключить сессии Claude Code (${label})?`, `Connect Claude Code sessions (${label})?`, `连接 Claude Code 会话（${label}）？`), [{ file: `~/.claude/settings.json (${label})`, diff: String(p.diff) }]))
         await wslRequest({ type: 'hooks', apply: true, remove, permissions: settings.answerPermissions }, h);
     }
@@ -631,7 +632,7 @@ if (primary) app.whenReady().then(async () => {
     if (ws.events && !ws.error && ws.diff) items.push({ file: windowsSettings, diff: ws.diff, apply: () => winHost.apply(wanted) });
     for (const h of wslHosts.values()) {
       const wp = await wslRequest({ type: 'hooks', apply: false, permissions: wanted }, h);
-      if (wp?.events && !wp.error && wp.diff) items.push({ file: `~/.claude/settings.json (WSL${h.name() ? `: ${h.name()}` : ''})`, diff: String(wp.diff), apply: () => wslRequest({ type: 'hooks', apply: true, permissions: wanted }, h) });
+      if (wp?.events && !wp.error && wp.diff) items.push({ file: `~/.claude/settings.json (${hostLabel(h)})`, diff: String(wp.diff), apply: () => wslRequest({ type: 'hooks', apply: true, permissions: wanted }, h) });
     }
     if (items.length && !(await confirmHooks(wanted ? L('Отвечать на разрешения в питомце?', 'Answer permission questions in the pet?', '在宠物中回答权限请求？') : L('Больше не отвечать на разрешения в питомце?', 'Stop answering permission questions in the pet?', '不再在宠物中回答权限请求？'), items))) return connectionsState();
     for (const i of items) { try { await i.apply(); } catch (e) { void info(L('Не удалось записать настройки', 'Could not write the settings', '无法写入设置'), (e as Error).message); } }

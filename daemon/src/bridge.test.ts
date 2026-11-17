@@ -499,6 +499,17 @@ describe('bridge: mailbox and hook permissions', () => {
     expect(store.get('s9')?.pendingPermission).toBeUndefined();
     expect(out.length).toBeGreaterThan(0);
   });
+  it('a question answered in the terminal clears the pet\'s Allow / Deny at once (the tool ran)', async () => {
+    const { bridge, store } = setup({ permissionsFromPet: () => true });
+    start(store);
+    const p = bridge.onPermission({ hook_event_name: 'PermissionRequest', session_id: 's9', cwd: '/p', tool_name: 'Bash', tool_input: { command: 'make' } });
+    bridge.onHook({ hook_event_name: 'PreToolUse', session_id: 's9', cwd: '/p', tool_name: 'Bash', tool_input: { command: 'make' } }); // before the question: no effect
+    bridge.onHook({ hook_event_name: 'PostToolUse', session_id: 's9', cwd: '/p', tool_name: 'Read', tool_input: { file_path: '/a' } }); // a parallel tool finished: no effect
+    expect(store.get('s9')?.pendingPermission).toBeDefined();
+    bridge.onHook({ hook_event_name: 'PostToolUse', session_id: 's9', cwd: '/p', tool_name: 'Bash', tool_input: { command: 'make' } });
+    expect(store.get('s9')?.pendingPermission).toBeUndefined();
+    expect(await p).toBeNull();
+  });
   it('without an answer in time the pet has no opinion (the normal dialog stays); when switched off it never answers', async () => {
     const { bridge, store } = setup({ permissionsFromPet: () => true, permissionTimeoutMs: 20 });
     start(store);

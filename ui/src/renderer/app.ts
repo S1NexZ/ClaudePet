@@ -107,15 +107,12 @@ async function main() {
   const current = (): Session | null => { const s = eff(); return s?.sessions.find((x) => x.id === s.attention) ?? null; };
   // The open chat sticks to the session the user opened it on (status/sprite still follow attention).
   let chatId: string | null = null;
-  let chatMenuKey = '';
   let newChatChosen = false; // the user explicitly asked for a new chat: do not auto-attach to a session
-  let panelKey = '';
   const chatSnap = (): Snapshot | null => focusSnapshot(raw, chatId);
   /** Switch to a session's chat in one step: opens the chat if it is closed, the sprite follows it. */
   const openChat = (id: string | null) => {
     chatId = id; pinnedId = id; mode = id ? 'reply' : 'new'; newChatChosen = false;
     if (id) historyAsked.delete(id); // reopening re-reads the transcript (it may have been unknown or stale)
-    chatMenuKey = ''; panelKey = '';
     if (!expanded) setExpanded(true);
     input.focus();
   };
@@ -158,7 +155,7 @@ async function main() {
   $('models').addEventListener('keydown', (e) => { if (e.key === 'Escape') { hideModels(); input.focus(); } });
 
   // ---- subscription limits (real Claude plan limits fed by Claude Code's statusLine; never invented) ----
-  let lastKey = '', lastText = '', lastNotified = '';
+  let lastText = '', lastNotified = '';
   let usage: UsageInfo | null = null, usageOpen = false;
   const usageRing = $('usage-ring'), usagePanel = $('usage');
   const barLevel = (p: number) => (p >= 90 ? 'high' : p >= 75 ? 'warn' : '');
@@ -247,7 +244,6 @@ async function main() {
   // The sprite sheet of the active model: shown at once raw, cleaned cell by cell in the background. loadSprite can be called
   // again to switch models without restarting; a newer call cancels the cleaning of an older one.
   let atlas = document.createElement('canvas');
-  let actx = atlas.getContext('2d', { willReadFrequently: true })!;
   let baseHue: number | null = null; // the model's body color, for the primary-color tint
   let atlasVersion = 0; // bumped per cleaned cell so the current frame is redrawn
   let spriteToken = 0;
@@ -264,7 +260,7 @@ async function main() {
     a.width = img.naturalWidth; a.height = img.naturalHeight;
     const ax = a.getContext('2d', { willReadFrequently: true })!;
     ax.drawImage(img, 0, 0);
-    atlas = a; actx = ax; petWin.__petAtlas = a; petWin.__petAtlasReady = false;
+    atlas = a; petWin.__petAtlas = a; petWin.__petAtlasReady = false;
     anim.setRowFrames(data.rows.map((r) => r.frames));
     baseHue = dominantHue(ax.getImageData(0, 0, a.width, a.height).data);
     atlasVersion++;
@@ -388,7 +384,7 @@ async function main() {
     else if (e.key === 'Escape') { e.preventDefault(); e.stopImmediatePropagation(); hideCmds(); }
   }, true);
   const submit = async () => {
-    if (!connected) { notify(L('Нет связи с Claude Code в WSL', 'No connection to Claude Code in WSL', '无法连接 WSL 中的 Claude Code')); return; }
+    if (!connected) { notify(L('Нет связи с мостом Claude Code', 'No connection to the Claude Code bridge', '无法连接 Claude Code 桥接')); return; }
     // commands the pet handles itself; every other /command goes to Claude Code as typed
     const sl = parseSlash(input.value);
     const target = mode === 'reply' ? chatSession() : null;
@@ -510,7 +506,7 @@ async function main() {
   };
 
   // ---- chat header switcher: one click on a session switches to its chat ----
-  const setMenu = (open: boolean) => { chatMenu.hidden = !open; switchBtn.setAttribute('aria-expanded', String(open)); chatMenuKey = ''; if (open) hideModels(); };
+  const setMenu = (open: boolean) => { chatMenu.hidden = !open; switchBtn.setAttribute('aria-expanded', String(open)); if (open) hideModels(); };
   switchBtn.addEventListener('click', () => setMenu(chatMenu.hidden));
   // calm sessions are folded into one collapsed group; the arrow unfolds them (shared by both lists)
   let showQuiet = false, lastSnap: Snapshot | null = null;
@@ -550,7 +546,7 @@ async function main() {
   // ---- sessions switcher ----
   const panel = $('sessions');
   if (cfg.panel) panel.hidden = false;
-  $('btn-activity').addEventListener('click', () => { panel.hidden = !panel.hidden; panelKey = ''; });
+  $('btn-activity').addEventListener('click', () => { panel.hidden = !panel.hidden; });
   let panelEmpty: HTMLElement | null = null;
   const renderPanel = (snap: Snapshot | null) => {
     if (panel.hidden) return;

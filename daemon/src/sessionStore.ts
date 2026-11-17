@@ -45,6 +45,8 @@ export class SessionStore {
       this.sessions.set(s.id, s);
     }
     s.lastEventAt = now;
+    // a session first seen without a folder (a bare waiter, an event body without cwd) gets it from the first event that has one
+    if (!s.cwd && ev.cwd) { s.cwd = ev.cwd; s.project = projectName(ev.cwd); }
     const pty = (ev as { pet_pty?: unknown }).pet_pty;
     if (typeof pty === 'string' && pty) s.pty = pty;
     if (ev.hook_event_name === 'SessionEnd') {

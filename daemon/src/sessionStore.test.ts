@@ -205,4 +205,12 @@ describe('Windows hosts', () => {
     expect(pickAttention(list)?.id).toBe('b');
     expect(pickAttention([])).toBeNull();
   });
+  it('a session first seen without a folder takes it from a later event', () => {
+    const st = new SessionStore();
+    st.apply({ hook_event_name: 'SessionStart', session_id: 'x', cwd: '' }, 1);
+    st.apply({ hook_event_name: 'UserPromptSubmit', session_id: 'x', cwd: '/home/u/proj' }, 2);
+    expect(st.get('x')).toMatchObject({ cwd: '/home/u/proj', project: 'proj' });
+    st.apply({ hook_event_name: 'Stop', session_id: 'x', cwd: '/elsewhere' }, 3);
+    expect(st.get('x')?.cwd).toBe('/home/u/proj'); // a known folder is not replaced
+  });
 });

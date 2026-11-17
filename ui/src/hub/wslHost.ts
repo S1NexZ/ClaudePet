@@ -44,11 +44,14 @@ export interface WslHost {
 export function createWslHost(o: WslHostOptions): WslHost {
   let child: ChildProcess | null = null;
   let rest = '', up = false, stopped = false, backoff = 1000, claude = '', name = o.distro;
-  const replyWaiters = new Map<string, (m: any) => void>();
+  // answers come back in the order the commands went out (the bridge handles these synchronously): one FIFO queue per answer type.
+  // A timed-out request keeps its place, so its late answer is dropped instead of being handed to the next caller.
+  const replyWaiters = new Map<string, Array<(m: any) => void>>();
+  const takeWaiter = (type: string) => { const q = replyWaiters.get(type); const w = q?.shift(); if (q && !q.length) replyWaiters.delete(type); return w; };
   const markWaiters = new Map<string, (ok: boolean) => void>();
 
   const send = (cmd: object) => { if (child?.stdin?.writable) child.stdin.write(JSON.stringify(cmd) + '\n'); };
-  const setUp = (v: boolean) => { up = v; if (!v) o.onSnapshot(null); o.onUp(v); };
+  const setUp = (v: boolean) => { up = v; if (!v) { o.onSnapshot(null); for (const q of replyWaiters.values()) for (const w of q) w(null); replyWaiters.clear(); } o.onUp(v); };
 
   const host: WslHost = {
     id: o.id, distro: o.distro, port: o.port, secondary: o.secondary,
@@ -58,8 +61,11 @@ export function createWslHost(o: WslHostOptions): WslHost {
     send,
     request: (cmd, replyType = 'hooks') => new Promise((resolve) => {
       if (!up) { resolve(null); return; }
-      const t = setTimeout(() => { replyWaiters.delete(replyType); resolve(null); }, 4000);
-      replyWaiters.set(replyType, (m) => { clearTimeout(t); resolve(m); });
+      let settled = false;
+      const t = setTimeout(() => { settled = true; resolve(null); }, 4000);
+      const q = replyWaiters.get(replyType) ?? [];
+      q.push((m) => { if (settled) return; settled = true; clearTimeout(t); resolve(m); });
+      replyWaiters.set(replyType, q);
       send(cmd);
     }),
     markTerminal: (sessionId, text) => new Promise((resolve) => {
@@ -80,8 +86,8 @@ export function createWslHost(o: WslHostOptions): WslHost {
       return;
     }
     if (m.type === 'termMark') { const w = markWaiters.get(String(m.sessionId)); if (w) { markWaiters.delete(String(m.sessionId)); w(!!m.ok); } return; }
-    if (m.type === 'statusline') { const w = replyWaiters.get('statusline'); if (w) { replyWaiters.delete('statusline'); w(m); } return; }
-    if (m.type === 'hooks') { const w = replyWaiters.get('hooks'); if (w) { replyWaiters.delete('hooks'); w(m); return; } o.onHooks(host, m); return; }
+    if (m.type === 'statusline') { takeWaiter('statusline')?.(m); return; }
+    if (m.type === 'hooks') { const w = takeWaiter('hooks'); if (w) { w(m); return; } o.onHooks(host, m); return; }
     if (m.type === 'snapshot') { o.onSnapshot(m); return; }
     o.onMessage(m);
   };
