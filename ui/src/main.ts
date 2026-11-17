@@ -2,7 +2,7 @@ import { app, BrowserWindow, clipboard, dialog, globalShortcut, ipcMain, Menu, N
 import { confirmOptions, isConfirmed } from './dialogs.js';
 import { join, dirname } from 'node:path';
 import { homedir, userInfo } from 'node:os';
-import { mkdirSync } from 'node:fs';
+import { mkdirSync, watch, type FSWatcher } from 'node:fs';
 import { spawn, execFile } from 'node:child_process';
 import { appendFileSync, existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { loadPet } from './sprite/loadPet.js';
@@ -10,6 +10,7 @@ import { listModels, pickModel, MODEL_ID, DEFAULT_MODEL } from './models/registr
 import { installModelFromZip, installModelFromDir, removeModel, scanPetFolder, ModelError } from './models/install.js';
 import { loadSettings, saveSettings } from './settings.js';
 import { focusByTitle, focusDesktopApp } from './focusWindow.js';
+import { sendToDesktop, newChatLink } from './desktopSend.js';
 import { formatDiagnostics, lastEventByHost, hostIdOf } from './diagnostics.js';
 import { syncHelper } from './stableHelper.js';
 import { checkLatest } from './updates.js';
@@ -124,6 +125,21 @@ if (primary) app.whenReady().then(async () => {
     lastSnapshot = { ...m, sessions, attention: sessions.some((x) => x.id === m.attention) ? m.attention : pickAttention(sessions)?.id ?? null };
     win.webContents.send('pet:msg', lastSnapshot);
   };
+  // a chat renamed, archived or deleted in the app shows up in the pet at once (the folder is watched; the 5 s re-read above stays as the fallback)
+  const regWatchers = new Map<string, FSWatcher>();
+  let regTimer: NodeJS.Timeout | null = null;
+  const watchRegistry = () => {
+    for (const r of findRegistryRoots(process.env.LOCALAPPDATA ?? '', process.env.APPDATA ?? '')) {
+      if (regWatchers.has(r)) continue;
+      try {
+        const w = watch(r, { recursive: true }, () => { if (!regTimer) regTimer = setTimeout(() => { regTimer = null; desktopAt = 0; pushSnapshot(); }, 400); });
+        w.on('error', () => { regWatchers.delete(r); try { w.close(); } catch { /* gone */ } });
+        regWatchers.set(r, w);
+      } catch (e) { log(`desktop registry watch: ${(e as Error).message}`); }
+    }
+  };
+  watchRegistry();
+  setInterval(watchRegistry, 60_000).unref(); // the app may be installed or first run later
   const sendUp = () => { up = winUp || [...hostUp.values()].some(Boolean); win.webContents.send('pet:bridge', up); };
   // hooks, the status line and the PowerShell wrapper use a stable copy of pet-helper.exe (it is in use for as long as sessions live;
   // the install folder must stay replaceable by the next installer). A busy copy is refreshed later.
@@ -361,6 +377,22 @@ if (primary) app.whenReady().then(async () => {
   const warnedTerminal = new Set<string>();
   ipcMain.on('pet:cmd', async (_e, cmd) => {
     if (!cmd || typeof cmd !== 'object') return;
+    if (cmd.type === 'start' && !settings.sdkChats && settings.newChatIn === 'desktop') { // a new chat inside the Claude desktop app (needs a Windows folder; the app fills the prompt, the pet presses Send)
+      const prompt = String(cmd.prompt ?? '').trim();
+      const link = prompt ? newChatLink(String(cmd.cwd), prompt) : null;
+      if (link) {
+        const r = await sendToDesktop({ text: prompt, prefillLink: link });
+        if (r !== 'ok') {
+          void focusDesktopApp();
+          void info(L('Сообщение не отправлено', 'The message was not sent', '消息未发送'), r === 'needs-trust'
+            ? L('Приложение Claude спрашивает, доверять ли этой папке. Решить это можете только вы: ответьте в приложении и нажмите «Отправить» (текст уже введён).', 'The Claude app asks whether to trust this folder. Only you can decide that: answer in the app and press Send (the text is already filled in).', 'Claude 应用正在询问是否信任此文件夹。只有您能决定：请在应用中回答并点击“发送”（文本已填好）。')
+            : L('Чат открыт в приложении Claude, но питомец не смог нажать «Отправить» (' + r + '). Отправьте сообщение там сами.', 'The chat is open in the Claude app, but the pet could not press Send (' + r + '). Send the message there yourself.', '聊天已在 Claude 应用中打开，但宠物无法点击“发送”（' + r + '）。请在那里自行发送。'));
+        }
+        return;
+      }
+      if (!prompt) { void shell.openExternal(`claude://code/new?folder=${encodeURIComponent(String(cmd.cwd))}`).then(() => focusDesktopApp()).catch(() => undefined); return; }
+      log('new chat in the desktop app needs a Windows folder; starting it in a terminal instead');
+    }
     if (cmd.type === 'start' && !settings.sdkChats) { // no Agent SDK: a new chat is a new session in a real terminal (the pet sees it through the hooks)
       if (settings.newChatIn === 'windows' || !primary().isUp()) {
         const prompt = String(cmd.prompt ?? '').trim();
@@ -391,6 +423,14 @@ if (primary) app.whenReady().then(async () => {
     }
     if (cmd.type === 'send') {
       const s = sessionById(String(cmd.sessionId));
+      if (s?.desktopId && settings.desktopSend === 'real' && typeof cmd.text === 'string' && cmd.text.trim() && !(Array.isArray(cmd.images) && cmd.images.length)) {
+        const r = await sendToDesktop({ text: cmd.text, title: s.project, desktopId: s.desktopId });
+        if (r === 'ok') return;
+        log(`desktop send: ${r}; delivering through the hook instead`);
+        win.webContents.send('pet:msg', { type: 'chat', sessionId: s.id, event: { kind: 'note', text: r === 'busy'
+          ? L('Чат в приложении занят: сообщение доставлено через хук (в приложении оно выглядит бледной вставкой).', 'The chat in the app is busy: the message went through the hook (the app shows it as faint text).', '应用中的聊天正忙：消息已通过钩子发送（在应用中显示为淡色文字）。')
+          : L('Не удалось ввести сообщение в приложение (' + r + '): оно доставлено через хук и выглядит там бледной вставкой.', 'Could not type the message into the app (' + r + '): it went through the hook and looks faint there.', '无法在应用中输入消息（' + r + '）：已通过钩子发送，在应用中显示为淡色文字。') } });
+      }
       // the warning is for the SDK fallback only: a session reachable through its mailbox (or on the Windows host) is woken by a hook, no second process
       if (s && !s.owned && !s.pty && !s.mailbox && s.host !== 'windows' && !warnedTerminal.has(s.id)) {
         const r = await dialog.showMessageBox(win, confirmOptions({
@@ -429,7 +469,7 @@ if (primary) app.whenReady().then(async () => {
     const last = lastEventByHost(lastSnapshot?.sessions ?? []);
     const hosts = (await Promise.all([...wslHosts.values()].map(hostRowState))).map((h) => ({ ...h, lastEventAt: last[h.id] ?? null }));
     return {
-      answerPermissions: settings.answerPermissions, sdkChats: settings.sdkChats, newChatIn: settings.newChatIn, helper: !!helperPath, helperPath, wrapper: wrapperState(),
+      answerPermissions: settings.answerPermissions, sdkChats: settings.sdkChats, newChatIn: settings.newChatIn, desktopSend: settings.desktopSend, helper: !!helperPath, helperPath, wrapper: wrapperState(),
       windows: (() => { const sl = winHost.statusLine({}); return { ...winHost.state(settings.answerPermissions), port: winHost.port, up: winUp, statusLine: sl.kind, statusLineDiff: sl.diff, statusLineError: sl.error, lastEventAt: last.windows ?? null }; })(),
       wsl: hosts.find((x) => x.id === 'wsl')!,
       others: hosts.filter((x) => x.id !== 'wsl'),
@@ -532,7 +572,11 @@ if (primary) app.whenReady().then(async () => {
     return connectionsState();
   });
   ipcMain.handle('pet:new-chat-in', (_e, where: unknown) => {
-    settings = { ...settings, newChatIn: where === 'windows' ? 'windows' : 'wsl' }; applySettings();
+    settings = { ...settings, newChatIn: where === 'windows' || where === 'desktop' ? where : 'wsl' }; applySettings();
+    return connectionsState();
+  });
+  ipcMain.handle('pet:desktop-send', (_e, how: unknown) => {
+    settings = { ...settings, desktopSend: how === 'hook' ? 'hook' : 'real' }; applySettings();
     return connectionsState();
   });
   ipcMain.handle('pet:sdk-chats', async (_e, on: unknown) => {

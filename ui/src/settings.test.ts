@@ -23,9 +23,9 @@ describe('settings', () => {
   });
   it('round-trips', () => {
     const f = file();
-    saveSettings(f, { autostart: true, notify: false, hotkey: 'Control+Shift+K', model: 'clawd', appearance: { primary: null, accent: null }, permissions: 'ask', answerPermissions: false, sdkChats: false, newChatIn: 'wsl', checkUpdates: true, language: 'auto', petScale: 1 });
-    expect(JSON.parse(readFileSync(f, 'utf8'))).toEqual({ autostart: true, notify: false, hotkey: 'Control+Shift+K', model: 'clawd', appearance: { primary: null, accent: null }, permissions: 'ask', answerPermissions: false, sdkChats: false, newChatIn: 'wsl', checkUpdates: true, language: 'auto', petScale: 1 });
-    expect(loadSettings(f)).toEqual({ autostart: true, notify: false, hotkey: 'Control+Shift+K', model: 'clawd', appearance: { primary: null, accent: null }, permissions: 'ask', answerPermissions: false, sdkChats: false, newChatIn: 'wsl', checkUpdates: true, language: 'auto', petScale: 1 });
+    saveSettings(f, { autostart: true, notify: false, hotkey: 'Control+Shift+K', model: 'clawd', appearance: { primary: null, accent: null }, permissions: 'ask', answerPermissions: false, sdkChats: false, newChatIn: 'wsl', desktopSend: 'real', checkUpdates: true, language: 'auto', petScale: 1 });
+    expect(JSON.parse(readFileSync(f, 'utf8'))).toEqual({ autostart: true, notify: false, hotkey: 'Control+Shift+K', model: 'clawd', appearance: { primary: null, accent: null }, permissions: 'ask', answerPermissions: false, sdkChats: false, newChatIn: 'wsl', desktopSend: 'real', checkUpdates: true, language: 'auto', petScale: 1 });
+    expect(loadSettings(f)).toEqual({ autostart: true, notify: false, hotkey: 'Control+Shift+K', model: 'clawd', appearance: { primary: null, accent: null }, permissions: 'ask', answerPermissions: false, sdkChats: false, newChatIn: 'wsl', desktopSend: 'real', checkUpdates: true, language: 'auto', petScale: 1 });
   });
   it('a fresh install uses Claude-maiden; a valid model id is kept', () => {
     expect(DEFAULTS.model).toBe('claude-maiden');
@@ -72,6 +72,10 @@ describe('settings', () => {
     expect(loadSettings(f).newChatIn).toBe('windows');
     writeFileSync(f, JSON.stringify({ newChatIn: 'mars' }));
     expect(loadSettings(f).newChatIn).toBe('wsl');
+    writeFileSync(f, JSON.stringify({ newChatIn: 'desktop', desktopSend: 'hook' }));
+    expect(loadSettings(f).newChatIn).toBe('desktop');
+    expect(loadSettings(f).desktopSend).toBe('hook');
+    expect(DEFAULTS.desktopSend).toBe('real');
   });
 });
 

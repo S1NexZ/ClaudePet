@@ -10,7 +10,7 @@ export interface Pet {
   cell: { w: 192; h: 208 };
   rows: { frames: number }[];
   /** Optional per-pack fixes from tweaks.json: row index -> max half-width (px) kept around the head centre. */
-  tweaks: { trimHalfWidth?: Record<string, number>; /** peel a light rim off the character ('remove') or turn it into a dark outline ('dark') */ lightFringe?: 'remove' | 'dark'; fringeCream?: boolean; stabilize?: boolean };
+  tweaks: { trimHalfWidth?: Record<string, number>; /** peel a light rim off the character ('remove') or turn it into a dark outline ('dark') */ lightFringe?: 'remove' | 'dark'; fringeCream?: boolean; stabilize?: boolean; /** false keeps the purple rim some packs have (removed by default) */ spill?: boolean };
 }
 
 /** Loads a Codex-format pet pack (pet.json + spritesheet) from a directory. */

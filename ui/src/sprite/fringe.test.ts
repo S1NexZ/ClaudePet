@@ -68,3 +68,68 @@ describe('removeLightFringe lighter-than-inside rim', () => {
     expect(d[(2 * w + 2) * 4 + 3]).toBe(255);
   });
 });
+
+import { removeColorSpill } from './fringe.js';
+describe('removeColorSpill (a purple rim left by the key colour)', () => {
+  const W = 12, H = 12;
+  const blob = (inner: [number, number, number], rim: [number, number, number]) => {
+    const d = new Uint8ClampedArray(W * H * 4);
+    for (let y = 2; y < 10; y++) for (let x = 2; x < 10; x++) {
+      const i = (y * W + x) * 4, edge = x === 2 || y === 2 || x === 9 || y === 9;
+      const c = edge ? rim : inner;
+      d[i] = c[0]; d[i + 1] = c[1]; d[i + 2] = c[2]; d[i + 3] = edge ? 150 : 255;
+    }
+    return d;
+  };
+  it('takes the inner colour for a purple rim and keeps the alpha', () => {
+    const d = blob([240, 240, 240], [150, 60, 170]);
+    const n = removeColorSpill(d, W, H);
+    expect(n).toBeGreaterThan(0);
+    const i = (2 * W + 5) * 4;
+    expect([d[i], d[i + 1], d[i + 2]]).toEqual([240, 240, 240]);
+    expect(d[i + 3]).toBe(150);
+  });
+  it('leaves a purple character alone', () => {
+    const d = blob([150, 60, 170], [150, 60, 170]);
+    const before = Array.from(d);
+    expect(removeColorSpill(d, W, H)).toBe(0);
+    expect(Array.from(d)).toEqual(before);
+  });
+  it('leaves a non-purple rim alone', () => {
+    const d = blob([240, 240, 240], [20, 20, 20]);
+    expect(removeColorSpill(d, W, H)).toBe(0);
+  });
+  it('peels a rim that is two pixels wide', () => {
+    const d = new Uint8ClampedArray(W * H * 4);
+    for (let y = 1; y < 11; y++) for (let x = 1; x < 11; x++) {
+      const i = (y * W + x) * 4, ring = Math.min(x - 1, y - 1, 10 - x, 10 - y);
+      const c = ring < 2 ? [150, 60, 170] : [240, 240, 240];
+      d[i] = c[0]; d[i + 1] = c[1]; d[i + 2] = c[2]; d[i + 3] = ring === 0 ? 120 : ring === 1 ? 200 : 255;
+    }
+    removeColorSpill(d, W, H);
+    for (const [x, y] of [[1, 5], [2, 5]]) { const i = (y * W + x) * 4; expect([d[i], d[i + 1], d[i + 2]]).toEqual([240, 240, 240]); }
+  });
+  it('drops a faint lone purple pixel and keeps a near-black outline', () => {
+    const d = new Uint8ClampedArray(W * H * 4);
+    const lone = 0; d[lone] = 150; d[lone + 1] = 60; d[lone + 2] = 170; d[lone + 3] = 60;
+    for (let y = 4; y < 10; y++) for (let x = 4; x < 10; x++) { const i = (y * W + x) * 4; const edge = x === 4 || y === 4 || x === 9 || y === 9; const c = edge ? [26, 15, 23] : [240, 240, 240]; d[i] = c[0]; d[i + 1] = c[1]; d[i + 2] = c[2]; d[i + 3] = 255; }
+    removeColorSpill(d, W, H);
+    expect(d[lone + 3]).toBe(0);
+    const o = (4 * W + 6) * 4; expect([d[o], d[o + 1], d[o + 2]]).toEqual([26, 15, 23]);
+  });
+});
+
+describe('removeColorSpill: dark violet rim', () => {
+  it('makes a dark semi-transparent violet rim grey and keeps its brightness', () => {
+    const W2 = 12, H2 = 12, d = new Uint8ClampedArray(W2 * H2 * 4);
+    for (let y = 2; y < 10; y++) for (let x = 2; x < 10; x++) {
+      const i = (y * W2 + x) * 4, edge = x === 2 || y === 2 || x === 9 || y === 9;
+      const c = edge ? [60, 20, 70] : [240, 240, 240];
+      d[i] = c[0]; d[i + 1] = c[1]; d[i + 2] = c[2]; d[i + 3] = edge ? 180 : 255;
+    }
+    removeColorSpill(d, W2, H2);
+    const i = (2 * W2 + 5) * 4;
+    expect(d[i]).toBe(d[i + 1]); expect(d[i + 1]).toBe(d[i + 2]); // no tint left (it took the inner colour or went grey)
+    expect(d[i + 3]).toBe(180);
+  });
+});

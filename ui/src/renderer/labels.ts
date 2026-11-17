@@ -16,6 +16,12 @@ const ZH_LABEL: Record<PetState, string> = {
   running: '运行命令', testing: '测试中', waiting: '需要权限',
   subagent: '子代理工作中', done: '完成', error: '出错', sleeping: '休眠',
 };
+/** One short word per state for the status island (the long labels above stay for the session lists and notifications). */
+const RU_CHIP: Record<PetState, string> = { idle: 'Готов', thinking: 'Думает', reading: 'Читает', writing: 'Пишет', running: 'Запуск', testing: 'Тесты', waiting: 'Разрешить?', subagent: 'Субагент', done: 'Готово', error: 'Ошибка', sleeping: 'Спит' };
+const EN_CHIP: Record<PetState, string> = { idle: 'Ready', thinking: 'Thinking', reading: 'Reading', writing: 'Writing', running: 'Running', testing: 'Testing', waiting: 'Allow?', subagent: 'Subagent', done: 'Done', error: 'Error', sleeping: 'Asleep' };
+const ZH_CHIP: Record<PetState, string> = { idle: '就绪', thinking: '思考中', reading: '阅读中', writing: '编写中', running: '运行中', testing: '测试中', waiting: '需授权', subagent: '子代理', done: '完成', error: '出错', sleeping: '休眠' };
+const chipTable = () => ({ en: EN_CHIP, ru: RU_CHIP, zh: ZH_CHIP } as const)[getLang()];
+export const chipLabel = (st: PetState): string => chipTable()[st];
 /** read lazily, so the label follows the language chosen at runtime */
 export const STATE_LABEL = new Proxy({} as Record<PetState, string>, {
   get: (_t, k) => ({ en: EN_LABEL, ru: RU_LABEL, zh: ZH_LABEL } as const)[getLang()][k as PetState],
@@ -37,14 +43,15 @@ export function formatElapsed(ms: number): string {
   return h > 0 ? `${h}:${String(m).padStart(2, '0')}:${ss}` : `${m}:${ss}`;
 }
 
-export interface StatusView { label: string; detail: string; state: PetState; attention: boolean }
+export interface StatusView { label: string; /** the short word for the island */ chip: string; detail: string; state: PetState; attention: boolean }
 
 export function statusView(snap: Snapshot | null, connected: boolean, now: number): StatusView {
-  if (!connected || !snap) return { label: L('Нет связи с Claude Code', 'No connection to Claude Code', '无法连接 Claude Code'), detail: '', state: 'sleeping', attention: false };
+  if (!connected || !snap) return { label: L('Нет связи с Claude Code', 'No connection to Claude Code', '无法连接 Claude Code'), chip: L('Нет связи', 'Offline', '未连接'), detail: '', state: 'sleeping', attention: false };
   const s = snap.sessions.find((x) => x.id === snap.attention);
-  if (!s) return { label: L('Жду Claude Code…', 'Waiting for Claude Code…', '正在等待 Claude Code…'), detail: '', state: 'idle', attention: false };
+  if (!s) return { label: L('Жду Claude Code…', 'Waiting for Claude Code…', '正在等待 Claude Code…'), chip: L('Ожидание', 'Waiting', '等待中'), detail: '', state: 'idle', attention: false };
   return {
     label: STATE_LABEL[s.state],
+    chip: chipLabel(s.state),
     detail: `${s.project} · ${formatElapsed(now - s.since)}`,
     state: s.state,
     attention: s.state === 'waiting' || s.state === 'error',

@@ -1,4 +1,4 @@
-import { statusView, STATE_LABEL, formatElapsed, hostTag } from './labels.js';
+import { statusView, STATE_LABEL, formatElapsed, hostTag, chipLabel } from './labels.js';
 import { createConnectionsTab, type ConnectionsHost } from './connectionsTab.js';
 import { pinSnapshot, focusSnapshot } from './view.js';
 import { sessionRows, nextChatId, isQuiet } from './switcher.js';
@@ -17,7 +17,7 @@ import { localizeHtml } from './htmlText.js';
 import { syncRows, type RowData } from './rowList.js';
 import { initTooltips } from './tooltip.js';
 import { createMotion, animatePanels } from './motion.js';
-import { removeLightFringe } from '../sprite/fringe.js';
+import { removeLightFringe, removeColorSpill } from '../sprite/fringe.js';
 import { dominantHue, type Appearance } from '../appearance.js';
 import type { AppCommand, BridgeMessage, ChatItem, Session, Snapshot, UsageInfo, PermissionPolicy } from '../../../shared/src/types.js';
 import { L, setLang, type Lang, type LangPref } from '../../../shared/src/i18n.js';
@@ -32,7 +32,7 @@ interface PetConfig {
   lang?: Lang;
   petScale?: number;
   language?: LangPref;
-  pet: { imageUrl: string; cell: { w: number; h: number }; rows: { frames: number }[]; tweaks?: { trimHalfWidth?: Record<string, number>; lightFringe?: 'remove' | 'dark'; fringeCream?: boolean; stabilize?: boolean } };
+  pet: { imageUrl: string; cell: { w: number; h: number }; rows: { frames: number }[]; tweaks?: { trimHalfWidth?: Record<string, number>; lightFringe?: 'remove' | 'dark'; fringeCream?: boolean; stabilize?: boolean; spill?: boolean } };
 }
 declare global {
   interface Window {
@@ -157,6 +157,7 @@ async function main() {
   $('models').addEventListener('keydown', (e) => { if (e.key === 'Escape') { hideModels(); input.focus(); } });
 
   // ---- subscription limits (real Claude plan limits fed by Claude Code's statusLine; never invented) ----
+  let lastKey = '', lastText = '', lastNotified = '';
   let usage: UsageInfo | null = null, usageOpen = false;
   const usageRing = $('usage-ring'), usagePanel = $('usage');
   const barLevel = (p: number) => (p >= 90 ? 'high' : p >= 75 ? 'warn' : '');
@@ -274,6 +275,8 @@ async function main() {
         const stabilize = data.tweaks?.stabilize !== false;
         if (stabilize) cleanCell(cell.data, cw, ch);
         const fringe = data.tweaks?.lightFringe ? removeLightFringe(cell.data, cw, ch, data.tweaks.lightFringe, 3, !!data.tweaks.fringeCream) : 0;
+        // a purple rim left by the key colour the pack was cut out of (off with tweaks.json {"spill": false})
+        const spill = data.tweaks?.spill === false ? 0 : removeColorSpill(cell.data, cw, ch);
         const hx = stabilize ? headCenter(cell.data, cw, ch) : null;
         if (hx !== null) {
           const half = data.tweaks?.trimHalfWidth?.[String(r)];
@@ -281,7 +284,7 @@ async function main() {
           const shifted = shiftCell(cell.data, cw, ch, Math.round(cw / 2 - hx)) as Uint8ClampedArray<ArrayBuffer>;
           ax.putImageData(new ImageData(shifted, cw, ch), c * cw, r * ch);
           atlasVersion++;
-        } else if (fringe) {
+        } else if (fringe || spill) {
           ax.putImageData(cell, c * cw, r * ch);
           atlasVersion++;
         }
@@ -506,22 +509,32 @@ async function main() {
   });
   let hoverSent = '';
   const reportHover = () => {
-    const rects = ['sprite-wrap', 'dock', 'chip'].map((id) => document.getElementById(id)).filter((e): e is HTMLElement => !!e && !e.hidden && e.offsetParent !== null)
+    const rects = ['sprite-wrap', 'dock-pill', 'chip'].map((id) => document.getElementById(id)).filter((e): e is HTMLElement => !!e && !e.hidden && e.offsetParent !== null)
       .map((e) => { const r = e.getBoundingClientRect(); return { x: r.left, y: r.top, w: r.width, h: r.height }; });
     const key = rectsKey(rects);
     if (key !== hoverSent) { hoverSent = key; host.hoverRects(rects); }
   };
 
   // ---- frame loop ----
-  let lastKey = '', lastText = '', lastNotified = '';
-  let ringHover = false, lastHeavy = 0;
+
+  let detailOpen = false, lastHeavy = 0;
   // Smooth motion: frames cross-fade into each other (a state change fades a little longer and gets a soft "pop"),
   // and a calm pet breathes. All of it is skipped when the OS asks for reduced motion.
   const reduceMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false;
   animatePanels(['notice', 'perm', 'sessions', 'settings', 'usage', 'chat', 'chat-menu', 'models'].map((id) => document.getElementById(id)), reduceMotion);
-  const motion = createMotion({ sprite, dockPill, chip: $('chip'), ring: usageRing }, reduceMotion);
-  usageRing.addEventListener('mouseenter', () => { ringHover = true; wake(); });
-  usageRing.addEventListener('mouseleave', () => { ringHover = false; wake(); });
+  const motion = createMotion({ sprite, dockPill, chip: $('chip') }, reduceMotion);
+  // a click on the chip (outside the ring, which opens the limits) shows or hides the session name
+  $('chip').addEventListener('click', (e) => { if ((e.target as HTMLElement).closest('#usage-ring')) return; detailOpen = !detailOpen; wake(); });
+  // the island's left edge is placed so that the calm word ("Ready") is centred under the pet; the ring stays there whatever the word is
+  const fitAnchor = () => {
+    const w = $('label'), cs = getComputedStyle(w);
+    const ctx = document.createElement('canvas').getContext('2d');
+    if (!ctx) return;
+    ctx.font = `${cs.fontWeight} ${cs.fontSize} ${cs.fontFamily}`;
+    $('chip').style.setProperty('--ref', `${Math.ceil(7 + 26 + 8 + ctx.measureText(chipLabel('idle')).width + 15)}px`); // border + ring + gap + word + padding
+  };
+  fitAnchor();
+  void document.fonts?.ready.then(fitAnchor);
   const FRAME_FADE_MS = 100, STATE_FADE_MS = 190;
   let curRow = -1, curCol = -1, prevRow = -1, prevCol = -1, fadeStart = 0, fadeMs = 0, fading = false, lastAtlasV = -1, lastSizeV = -1, drawnFade = 1;
   const smooth = (p: number) => p * p * (3 - 2 * p);
@@ -544,8 +557,8 @@ async function main() {
     dockPill.classList.toggle('rest', !awake);
     $('chip').classList.toggle('rest', !awake);
     motion.setAwake(awake || expanded);
-    const lvl = usageRing.getAttribute('data-level');
-    motion.setRing(awake || ringHover || lvl === 'high' || lvl === 'full');
+    if (!awake) detailOpen = false;
+    motion.setDetail(detailOpen);
     const { row, col } = anim.frame(t);
     if (row !== curRow || col !== curCol) {
       const rowChanged = curRow >= 0 && row !== curRow;
@@ -562,14 +575,13 @@ async function main() {
       if (p < 1 && prevRow >= 0) { draw(prevRow, prevCol, 1); draw(curRow, curCol, smooth(p)); } else draw(curRow, curCol, 1);
     }
     motion.setBreathing(!movedAt && (v.state === 'idle' || v.state === 'sleeping'));
-    const text = `${v.label}|${v.detail}|${v.attention}`;
+    const text = `${v.chip}|${v.detail}|${v.attention}`;
     if (text !== lastText) {
       lastText = text;
-      $('label').textContent = v.label;
+      motion.setWord(v.chip);
       $('detail').textContent = v.detail;
       $('chip').classList.toggle('attention', v.attention);
       $('chip').dataset.state = v.state;
-      $('chip').title = `${v.label} ${v.detail}`.trim();
       motion.setPulse(v.state !== 'idle' && v.state !== 'done' && v.state !== 'sleeping');
       $('chip').classList.toggle('offline', !connected);
     }

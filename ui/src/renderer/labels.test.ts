@@ -32,7 +32,7 @@ describe('statusView', () => {
   });
 });
 
-import { hostTag } from './labels.js';
+import { hostTag, chipLabel } from './labels.js';
 describe('hostTag', () => {
   it('names the host and the Claude Code front end', () => {
     expect(hostTag({ host: 'windows', source: 'claude-desktop' })).toBe('Win · App');
@@ -40,5 +40,13 @@ describe('hostTag', () => {
     expect(hostTag({ host: 'windows', source: 'vscode' })).toBe('Win · VS Code');
     expect(hostTag({})).toBe('');
     expect(hostTag({ host: 'wsl', source: 'sdk-cli' })).toBe('WSL');
+  });
+});
+
+describe('island words', () => {
+  it('every state has one short word, and the status view carries it', () => {
+    const states = ['idle', 'thinking', 'reading', 'writing', 'running', 'testing', 'waiting', 'subagent', 'done', 'error', 'sleeping'] as const;
+    for (const st of states) { expect(chipLabel(st).length).toBeGreaterThan(0); expect(chipLabel(st).length).toBeLessThanOrEqual(11); }
+    expect(statusView(null, false, 0).chip).toBe('Нет связи');
   });
 });

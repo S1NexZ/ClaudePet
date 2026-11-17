@@ -5,7 +5,7 @@ import { gsap } from 'gsap';
  * Each reveal is a paused timeline that is played forwards on "awake" and reversed on rest, so an interrupted move turns around from where it is
  * instead of jumping. With prefers-reduced-motion everything is applied instantly.
  */
-export interface MotionParts { sprite: HTMLElement; dockPill: HTMLElement; chip: HTMLElement; ring: HTMLElement }
+export interface MotionParts { sprite: HTMLElement; dockPill: HTMLElement; chip: HTMLElement }
 
 /**
  * GSAP's ticker: 60 Hz while something really moves (hover reveals, panels, the state "pop"); 15 Hz when the only running tween is the
@@ -22,52 +22,31 @@ setInterval(() => {
 
 export function createMotion(p: MotionParts, reduce: boolean) {
   boost(); // never above 60: on 144 Hz displays GSAP would otherwise re-style everything 144 times a second
-  const dockButtons = Array.from(p.dockPill.querySelectorAll<HTMLElement>('button, .sep'));
-  const label = p.chip.querySelector<HTMLElement>('#label')!;
-  const detail = p.chip.querySelector<HTMLElement>('#detail')!;
-  const ringText = p.ring.querySelector<HTMLElement>('#usage-ring-text')!;
+  const dockButtons = Array.from(p.dockPill.querySelectorAll<HTMLElement>('button'));
+  const word = p.chip.querySelector<HTMLElement>('#label-t')!;
+  const dot = p.chip.querySelector<HTMLElement>('#dot')!;
   const speed = reduce ? 1000 : 1;
   const EASE = 'power3.out';
 
-  // ---- the button pill: a dark shadow under the feet grows into the pill, the icons rise out of it ----
-  gsap.set(p.dockPill, { transformOrigin: '50% 0' });
+  // ---- the button rail: the three round buttons slide out sideways from behind the pet, one after another ----
   const dock = gsap.timeline({ paused: true, defaults: { ease: EASE } })
-    .fromTo(p.dockPill, { scaleX: 0.36, scaleY: 0.16, y: 2, opacity: 0.55 }, { scaleX: 1, scaleY: 1, y: 0, opacity: 1, duration: 0.45, ease: 'back.out(1.25)' }, 0)
-    .fromTo(dockButtons, { opacity: 0, y: -10, scale: 0.5 }, { opacity: 1, y: 0, scale: 1, duration: 0.32, stagger: 0.045, ease: 'back.out(1.6)' }, 0.1);
+    .fromTo(dockButtons, { opacity: 0, x: -18, scale: 0.5 }, { opacity: 1, x: 0, scale: 1, duration: 0.34, stagger: 0.05, ease: 'back.out(1.6)' }, 0);
   dock.timeScale(speed).progress(0);
 
-  // ---- the status chip: a dot and a word near the feet; hovering lowers it and unfolds the glass pill and the details ----
-  gsap.set(p.chip, { y: -47, '--bgo': 0 });
-  const dot = p.chip.querySelector<HTMLElement>('#dot')!;
-  gsap.set(label, { maxWidth: 0, marginLeft: -8, autoAlpha: 0 });
+  // ---- the status island: always visible (the status dot inside the limit ring + one word), never changes its size; a click unfolds the session name ----
+  const detail = p.chip.querySelector<HTMLElement>('#detail')!;
   gsap.set(detail, { maxWidth: 0, marginLeft: -8, autoAlpha: 0 });
-  // at rest the dot and the ring are the same size (REST px) and sized by layout, not by transform scale: both are centred by the flex row,
-  // so they stay level on any display scaling (separately scaled layers were snapped to whole pixels differently)
-  const REST = 15;
-  gsap.set(dot, { width: REST, height: REST });
-  const chip = gsap.timeline({ paused: true, defaults: { ease: EASE } })
-    .to(p.chip, { y: 0, '--bgo': 1, duration: 0.42 }, 0)
-    .to(dot, { width: 10, height: 10, duration: 0.4 }, 0)
-    .to(label, { maxWidth: 220, marginLeft: 0, duration: 0.4 }, 0.02)
-    .to(label, { autoAlpha: 1, duration: 0.3 }, 0.1)
-    .to(detail, { maxWidth: 260, marginLeft: 0, duration: 0.42 }, 0.08)
-    .to(detail, { autoAlpha: 1, duration: 0.3 }, 0.16);
-  chip.timeScale(speed).progress(0);
-
-  // ---- the usage ring: a small quiet arc by the pet; it grows and shows its number when awake ----
-  gsap.set(p.ring, { width: REST, height: REST, opacity: 1 });
-  gsap.set(ringText, { opacity: 0 });
-  const ring = gsap.timeline({ paused: true, defaults: { ease: EASE } })
-    .to(p.ring, { width: 24, height: 24, opacity: 1, duration: 0.4, ease: 'back.out(1.4)' }, 0)
-    .to(ringText, { opacity: 1, duration: 0.25 }, 0.1);
-  ring.timeScale(speed).progress(0);
+  const more = gsap.timeline({ paused: true, defaults: { ease: EASE } })
+    .to(detail, { maxWidth: 260, marginLeft: 0, duration: 0.38 }, 0)
+    .to(detail, { autoAlpha: 1, duration: 0.28 }, 0.08);
+  more.timeScale(speed).progress(0);
 
   const drive = (tl: gsap.core.Timeline, on: boolean, outSpeed = 1.5) => {
     boost();
     if (on) { if (tl.reversed() || tl.progress() === 0 || !tl.isActive()) { tl.timeScale(speed); tl.play(); } }
     else { tl.timeScale(speed * outSpeed); tl.reverse(); }
   };
-  let awakeNow = false, ringNow = false;
+  let awakeNow = false, moreNow = false;
 
   // ---- the pet itself: a calm pet breathes; a state change gives it a soft squash ----
   let popping = false;
@@ -90,10 +69,25 @@ export function createMotion(p: MotionParts, reduce: boolean) {
     setAwake(on: boolean) {
       if (on === awakeNow) return;
       awakeNow = on;
-      drive(dock, on, 1.8); drive(chip, on, 1.4);
+      drive(dock, on, 1.8);
     },
-    /** the ring is open (awake, hovered, or the plan is nearly used up) */
-    setRing(on: boolean) { if (on !== ringNow) { ringNow = on; drive(ring, on, 1.4); } },
+    /** the session name next to the status word (a click on the chip) */
+    setDetail(on: boolean) { if (on !== moreNow) { moreNow = on; drive(more, on, 1.4); } },
+    /** the status word rolls up and the new one rolls in from below; the island's width follows the word (right edge only, the ring stays put) */
+    setWord(text: string) {
+      if (word.textContent === text) return;
+      if (reduce || !word.textContent) { word.textContent = text; return; }
+      boost();
+      gsap.timeline({ defaults: { overwrite: 'auto' } })
+        .to(word, { y: -9, autoAlpha: 0, duration: 0.13, ease: 'power2.in' })
+        .call(() => {
+          const from = p.chip.offsetWidth;
+          word.textContent = text;
+          const to = p.chip.offsetWidth;
+          if (from !== to) gsap.fromTo(p.chip, { width: from }, { width: to, duration: 0.3, ease: 'power3.out', clearProps: 'width' });
+        })
+        .fromTo(word, { y: 9, autoAlpha: 0 }, { y: 0, autoAlpha: 1, duration: 0.24, ease: 'power3.out' });
+    },
     setBreathing(on: boolean) {
       if (reduce || popping) on = false;
       if (on === breathing) return;

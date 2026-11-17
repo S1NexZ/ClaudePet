@@ -19,14 +19,15 @@ export interface HostState {
 import { wrapperLine } from '../psLine.js';
 
 export interface WrapperState { state: 'none' | 'ours' | 'partial' | 'stale' | 'ansi'; files: string[]; policy: string | null }
-export interface ConnectionsState { answerPermissions: boolean; sdkChats?: boolean; /** where new chats start (terminal sessions) */ newChatIn?: 'wsl' | 'windows'; helper: boolean; /** the claude wrapper in the PowerShell profiles */ wrapper?: WrapperState | null; /** full path of pet-helper.exe (for the PowerShell wrapper line) */ helperPath?: string; windows: HostState; wsl: HostState; /** other WSL distros that are followed */ others?: Array<HostState & { id: string }> }
+export interface ConnectionsState { answerPermissions: boolean; sdkChats?: boolean; /** where new chats start (terminal sessions) */ newChatIn?: 'wsl' | 'windows' | 'desktop'; /** how a message to a Claude desktop chat is delivered */ desktopSend?: 'real' | 'hook'; helper: boolean; /** the claude wrapper in the PowerShell profiles */ wrapper?: WrapperState | null; /** full path of pet-helper.exe (for the PowerShell wrapper line) */ helperPath?: string; windows: HostState; wsl: HostState; /** other WSL distros that are followed */ others?: Array<HostState & { id: string }> }
 export interface ConnectionsHost {
   copy?(text: string): void;
   get(): Promise<ConnectionsState>;
   apply(host: string, action: 'connect' | 'disconnect' | 'statusline' | 'statusline-off' | 'wrapper' | 'wrapper-off'): Promise<ConnectionsState>;
   answerPermissions(on: boolean): Promise<ConnectionsState>;
   sdkChats(on: boolean): Promise<ConnectionsState>;
-  newChatIn?(where: 'wsl' | 'windows'): Promise<ConnectionsState>;
+  newChatIn?(where: 'wsl' | 'windows' | 'desktop'): Promise<ConnectionsState>;
+  desktopSend?(how: 'real' | 'hook'): Promise<ConnectionsState>;
   /** builds the report and puts it on the clipboard */
   diagnostics?(): Promise<string>;
 }
@@ -127,7 +128,7 @@ export function createConnectionsTab(host: ConnectionsHost) {
     if (host.newChatIn) {
       const nc = el('div', 's-section');
       nc.append(el('div', 's-title', L('Где запускать новые чаты', 'Where new chats start', '新聊天在哪里启动')));
-      const opts: Array<['wsl' | 'windows', string]> = [['wsl', 'WSL'], ['windows', L('Windows (через обёртку)', 'Windows (through the wrapper)', 'Windows（通过包装器）')]];
+      const opts: Array<['wsl' | 'windows' | 'desktop', string]> = [['wsl', 'WSL'], ['windows', L('Windows (через обёртку)', 'Windows (through the wrapper)', 'Windows（通过包装器）')], ['desktop', L('Приложение Claude (нужна папка Windows)', 'The Claude app (needs a Windows folder)', 'Claude 应用（需要 Windows 文件夹）')]];
       for (const [v, label] of opts) {
         const r = el('label', 's-radio');
         const i = el('input'); i.type = 'radio'; i.name = 'new-chat-in'; i.checked = (state.newChatIn ?? 'wsl') === v; i.disabled = busy;
@@ -137,6 +138,20 @@ export function createConnectionsTab(host: ConnectionsHost) {
       }
       nc.append(el('div', 's-hint', L('Новый чат открывает окно терминала с Claude Code в выбранной папке. Если WSL недоступен, чат стартует в Windows.', 'A new chat opens a terminal window with Claude Code in the chosen folder. If WSL is unavailable, it starts on Windows.', '新聊天会在所选文件夹中打开一个运行 Claude Code 的终端窗口。如果 WSL 不可用，则在 Windows 中启动。')));
       box.append(nc);
+    }
+    if (host.desktopSend) {
+      const ds = el('div', 's-section');
+      ds.append(el('div', 's-title', L('Сообщения в чат приложения Claude', 'Messages to a Claude app chat', '发送到 Claude 应用聊天的消息')));
+      const dopts: Array<['real' | 'hook', string]> = [['real', L('Как обычное сообщение (окно приложения может выйти вперёд)', 'As a normal message (the app window may come forward)', '作为普通消息（应用窗口可能会弹到前台）')], ['hook', L('Тихо через хук (в приложении бледной плашкой)', 'Quietly through the hook (faint text in the app)', '通过钩子静默发送（在应用中显示为淡色文字）')]];
+      for (const [v, label] of dopts) {
+        const r = el('label', 's-radio');
+        const i = el('input'); i.type = 'radio'; i.name = 'desktop-send'; i.checked = (state.desktopSend ?? 'real') === v; i.disabled = busy;
+        i.addEventListener('change', () => { if (i.checked) void run(host.desktopSend!(v)); });
+        r.append(i, el('span', '', ` ${label}`));
+        ds.append(r);
+      }
+      ds.append(el('div', 's-hint', L('Если поле ввода в приложении не найдено или чат занят, сообщение уйдёт через хук.', 'If the prompt box is not found or the chat is busy, the message goes through the hook.', '如果找不到输入框或聊天正忙，消息将通过钩子发送。')));
+      box.append(ds);
     }
     if (host.diagnostics) {
       const d = el('div', 's-section');

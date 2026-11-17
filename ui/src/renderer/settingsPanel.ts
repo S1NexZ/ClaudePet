@@ -125,8 +125,20 @@ export function createSettingsPanel(root: HTMLElement, deps: SettingsDeps, initi
     row.append(grid); box.append(row);
   };
 
+  /** a live copy of the status control: the dot (status) inside the arc (limit, in the accent colour) with the one-word status */
+  const chipPreview = () => {
+    const wrap = el('div', 's-section');
+    const prev = el('div', 's-prev');
+    const ring = el('span', 's-prev-ring');
+    ring.innerHTML = '<svg viewBox="0 0 36 36" aria-hidden="true"><circle class="track" cx="18" cy="18" r="15.9155"/><circle class="arc" cx="18" cy="18" r="15.9155" stroke-dasharray="42 100"/></svg>';
+    ring.append(el('i', 's-prev-dot'));
+    prev.append(ring, el('span', 's-prev-word', STATE_LABEL.idle));
+    wrap.append(prev, el('div', 's-hint', L('Так выглядит значок статуса: точка внутри дуги. Точка показывает, что делает Claude, дуга показывает лимит и берёт акцентный цвет.', 'This is the status control: a dot inside an arc. The dot shows what Claude is doing, the arc shows the limit and takes the accent colour.', '这是状态图标：圆点位于圆弧内。圆点表示 Claude 正在做什么，圆弧表示额度并使用强调色。')));
+    return wrap;
+  };
+
   const renderColors = (box: HTMLElement) => {
-    box.append(
+    box.append(chipPreview(),
       colorRow(L('Цвет питомца', 'Pet color', '宠物颜色'), L('Перекрашивает самого питомца. Изменения видны сразу.', 'Recolors the pet itself. Changes show at once.', '给宠物本身换色。立即生效。'), PRIMARY_PRESETS, appearance.primary, '#d97757', (c, commit = true) => change({ ...appearance, primary: c }, commit)),
       colorRow(L('Акцентный цвет', 'Accent color', '强调色'), L('Кнопки, индикаторы и подсветка интерфейса.', 'Buttons, indicators and UI highlights.', '按钮、指示器和界面高亮。'), ACCENT_PRESETS, appearance.accent, DEFAULT_ACCENT, (c, commit = true) => change({ ...appearance, accent: c }, commit)),
     );

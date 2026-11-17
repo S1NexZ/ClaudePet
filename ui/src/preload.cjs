@@ -37,6 +37,7 @@ contextBridge.exposeInMainWorld('petHost', {
     answerPermissions: (on) => ipcRenderer.invoke('pet:answer-permissions', on),
     sdkChats: (on) => ipcRenderer.invoke('pet:sdk-chats', on),
     newChatIn: (where) => ipcRenderer.invoke('pet:new-chat-in', where),
+    desktopSend: (how) => ipcRenderer.invoke('pet:desktop-send', how),
     diagnostics: () => ipcRenderer.invoke('pet:diagnostics'),
   },
   setAppearance: (a) => ipcRenderer.send('pet:appearance', a),
