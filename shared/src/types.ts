@@ -33,6 +33,8 @@ export interface Session {
   distro?: string;
   /** which Claude Code front end started it, from the transcript's `entrypoint` (cli, claude-desktop, vscode, sdk-cli, ...) */
   source?: string;
+  /** Stop works through this session's hooks (answered with continue:false at the next tool call); set by hosts with HTTP hooks */
+  softStop?: boolean;
   /** a mailbox waiter is armed: a message sent from the pet is delivered even without a PTY */
   mailbox?: boolean;
 }

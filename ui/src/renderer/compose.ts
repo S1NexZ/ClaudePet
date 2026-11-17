@@ -24,7 +24,7 @@ export function isBusyReply(snap: Snapshot | null, mode: Mode): boolean {
 }
 
 /** Stop works for sessions the pet owns and for terminal sessions it can type into (pet-claude.py socket). */
-export const canStop = (s: Pick<Session, 'owned' | 'pty'> | undefined | null): boolean => !!s && (s.owned || !!s.pty);
+export const canStop = (s: Pick<Session, 'owned' | 'pty' | 'softStop'> | undefined | null): boolean => !!s && (s.owned || !!s.pty || !!s.softStop);
 
 const WORKING = new Set(['thinking', 'reading', 'writing', 'running', 'testing', 'waiting', 'subagent']);
 const isWorking = (st: string) => WORKING.has(st);

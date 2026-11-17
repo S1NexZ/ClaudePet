@@ -33,6 +33,15 @@ describe('hook http receiver', () => {
     expect((await post(`${base}/hook/tok/Stop`, { x: 1 })).status).toBe(400);
     expect(events).toHaveLength(0);
   });
+  it('a hook answer (soft stop) goes back as JSON; the event still reaches onEvent', async () => {
+    const { base, events } = await boot({ onReply: (e) => (e.hook_event_name === 'PostToolUse' ? { continue: false, stopReason: 'x' } : null) });
+    const r = await post(`${base}/hook/tok/PostToolUse`, { hook_event_name: 'PostToolUse', session_id: 's1' });
+    expect(r.headers.get('content-type')).toContain('application/json');
+    expect(await r.json()).toEqual({ continue: false, stopReason: 'x' });
+    const r2 = await post(`${base}/hook/tok/Stop`, { hook_event_name: 'Stop', session_id: 's1' });
+    expect(await r2.text()).toBe('');
+    expect(events.map((e) => e.hook_event_name)).toEqual(['PostToolUse', 'Stop']);
+  });
   it('answers a PermissionRequest with the pet\'s decision in the format Claude Code expects', async () => {
     const { base } = await boot({ onPermission: async () => 'deny' });
     const r = await post(`${base}/hook/tok/PermissionRequest`, { session_id: 's1', tool_name: 'Bash' });

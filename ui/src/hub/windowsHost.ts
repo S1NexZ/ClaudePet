@@ -47,14 +47,14 @@ export function createWindowsHost(o: WindowsHostOpts) {
   const mailbox = createMailbox();
   const no = (ru: string, en: string, zh: string) => async () => { throw new Error(L(ru, en, zh)); };
   const bridge = createBridge({
-    store, out: o.out, readTranscript, mailbox, mailboxOnly: true, permissionsFromPet: o.permissionsFromPet,
+    store, out: o.out, readTranscript, mailbox, mailboxOnly: true, permissionsFromPet: o.permissionsFromPet, softStop: true,
     runner: {
       models: async () => [], setPermissionPolicy: () => {}, release: () => false, respondPermission: () => {},
       setModel: no('Сменить модель можно в самой сессии', 'Change the model inside the session', '请在会话内切换模型'),
       btw: no('/btw доступен только для сессий в WSL', '/btw works only for sessions in WSL', '/btw 仅适用于 WSL 中的会话'),
       start: no('Новые чаты запускаются в WSL', 'New chats start in WSL', '新聊天在 WSL 中启动'),
       send: no('Эту сессию нельзя разбудить: в ней не подключены хуки ccPet', 'This session cannot be reached: ccPet hooks are not connected in it', '无法连接此会话：其中未连接 ccPet 钩子'),
-      interrupt: no('Остановить можно только сессию в терминале-обёртке', 'Only a session in the wrapper terminal can be stopped', '只能停止包装终端中的会话'),
+      interrupt: no('Эту сессию нельзя остановить из питомца: в ней не подключены хуки ccPet', 'This session cannot be stopped from the pet: ccPet hooks are not connected in it', '无法从宠物停止此会话：其中未连接 ccPet 钩子'),
     },
     proc: { name: () => null, kill: () => {} },
     hooks: { settingsPath, hookPath: '', nodePath: '' },
@@ -87,7 +87,7 @@ export function createWindowsHost(o: WindowsHostOpts) {
     /** starts the receiver; resolves false (and reports why) when the port is taken */
     async start(): Promise<boolean> {
       try {
-        server = await startHookServer({ port: o.port, token, mailbox, onPty: attachPty, onEvent: (e) => bridge.onHook(e), onPermission: (e) => bridge.onPermission(e) });
+        server = await startHookServer({ port: o.port, token, mailbox, onPty: attachPty, onEvent: (e) => bridge.onHook(e), onReply: (e) => bridge.hookReply(e), onPermission: (e) => bridge.onPermission(e) });
         bridge.snapshot();
         return true;
       } catch (e) {

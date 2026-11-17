@@ -7,6 +7,7 @@ import { interruptedSince, readOriginalCwd, readEntrypoint, PET_MARKER } from '.
 import type { Mailbox } from './mailbox.js';
 import { summarize } from './summary.js';
 import { sendPrompt, sendEsc, PtyGoneError } from './ptySend.js';
+import { createSoftStop } from './softStop.js';
 import { planHooks, removeHooks, lineDiff } from './installHooks.js';
 import { planStatusLine, removeStatusLine, statusLineState } from './installStatusLine.js';
 import { planHostHooks, removeHostHooks, hooksStatus, readSettingsFile, writeSettingsFile } from './hookConfig.js';
@@ -73,6 +74,8 @@ export function createBridge(o: {
   permissionIdPrefix?: string;
   /** delay of the second transcript read after Stop (Claude writes its reply after the hook fires) */
   stopRecheckMs?: number;
+  /** this host's hooks can answer (HTTP hooks): Stop without a PTY ends the turn at the next tool call through `hookReply` */
+  softStop?: boolean;
 }) {
   const pty = o.pty ?? { sendPrompt, sendEsc };
   /** the Agent SDK paths (new chats, resume fallback, /btw, model list) start a second Claude Code process under the user's login: opt-in, off by default */
@@ -96,6 +99,7 @@ export function createBridge(o: {
   const snapshot = (onlyIfChanged = false) => {
     const s = snapshotOf(o.store);
     if (o.mailbox) s.sessions = s.sessions.map((x) => ({ ...x, mailbox: o.mailbox!.hasWaiter(x.id) }));
+    if (soft) s.sessions = s.sessions.map((x) => (hooked.has(x.id) && !x.owned && !x.pty ? { ...x, softStop: true } : x));
     const key = JSON.stringify(s);
     if (onlyIfChanged && key === lastSnap) return;
     lastSnap = key;
@@ -116,6 +120,9 @@ export function createBridge(o: {
   const checking = new Set<string>();
   let usageVersion: number | string = -1;
   const rereadLater = (id: string) => { setTimeout(() => void history(id), o.stopRecheckMs ?? 700).unref?.(); };
+  /** sessions that sent real hook events (not just a transcript-adopted start): only their hooks can carry a soft stop */
+  const hooked = new Set<string>();
+  const soft = o.softStop ? createSoftStop(undefined, (id) => { o.store.markInterrupted(id); snapshot(true); rereadLater(id); }) : null;
   /** What the hooks section of settings.json would become (events hook, plus mailbox waiter and permission hook when this bridge has a receiver) and what is installed now. */
   const hooksPlan = (wantPerm: boolean, remove = false) => {
     const { current, raw } = readSettingsFile(o.hooks.settingsPath);
@@ -175,6 +182,11 @@ export function createBridge(o: {
             const id = String(cmd.sessionId);
             const s = o.store.get(id);
             if (s?.pty && !s.owned) { try { await pty.sendEsc(s.pty); o.store.markInterrupted(id); rereadLater(id); } catch { o.store.clearPty(id); } break; }
+            if (soft && s && !s.owned && hooked.has(id)) {
+              soft.request(id, Date.now());
+              o.out({ type: 'chat', sessionId: id, event: { kind: 'note', text: L('Остановлю после текущего шага…', 'Stopping after the current step…', '将在当前步骤后停止…') } });
+              break;
+            }
             await o.runner.interrupt(id);
             break;
           }
@@ -262,6 +274,7 @@ export function createBridge(o: {
       }
     },
     onHook(e: HookPayload): void {
+      if (e.hook_event_name !== 'SessionStart') hooked.add(e.session_id);
       if (ended.has(e.session_id)) {
         if (e.hook_event_name !== 'UserPromptSubmit' && e.hook_event_name !== 'SessionStart') return;
         ended.delete(e.session_id); // resumed by the user
@@ -325,5 +338,7 @@ export function createBridge(o: {
       try { usageVersion = o.usage.version(); o.out({ type: 'usage', usage: await o.usage.read() }); } catch { /* the next tick retries */ }
     },
     snapshot,
+    /** the answer for a hook event (soft stop), or null */
+    hookReply: (e: HookPayload) => soft?.reply(e, Date.now()) ?? null,
   };
 }

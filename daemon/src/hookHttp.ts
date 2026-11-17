@@ -14,6 +14,8 @@ export interface HookServerOpts {
   onPty?(sessionId: string, pipe: string): void;
   /** answers a PermissionRequest hook; null = no opinion (Claude Code then shows its normal dialog). Absent = never answer. */
   onPermission?(e: HookPayload): Promise<'allow' | 'deny' | null>;
+  /** an answer for an ordinary hook event (soft stop: `{"continue": false}`); null = plain 200 */
+  onReply?(e: HookPayload): Record<string, unknown> | null;
   /** how long one mailbox long-poll may last (the hook re-polls) */
   waitMs?: number;
 }
@@ -70,8 +72,11 @@ export async function startHookServer(o: HookServerOpts): Promise<{ port: number
           });
           return;
         }
+        let reply: Record<string, unknown> | null = null;
+        try { reply = o.onReply?.(ev) ?? null; } catch { /* no opinion */ }
         try { o.onEvent(ev); } catch { /* never fail Claude Code because of the pet */ }
-        res.writeHead(200).end();
+        if (reply) res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify(reply));
+        else res.writeHead(200).end();
       });
       return;
     }

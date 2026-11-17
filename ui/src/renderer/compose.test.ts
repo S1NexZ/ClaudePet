@@ -52,6 +52,7 @@ describe('canStop', () => {
     expect(canStop({ owned: true })).toBe(true);
     expect(canStop({ owned: false, pty: '/x.sock' })).toBe(true);
     expect(canStop({ owned: false })).toBe(false);
+    expect(canStop({ owned: false, softStop: true })).toBe(true); // desktop / IDE: stop through the hooks
     expect(canStop(undefined)).toBe(false);
   });
 });

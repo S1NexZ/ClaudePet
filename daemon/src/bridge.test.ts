@@ -315,6 +315,24 @@ describe('bridge: sessions running under pet-claude.py', () => {
     await t.bridge.handle({ type: 'send', sessionId: 't1', text: 'next' });
     expect(sent).toEqual(['next']);
   });
+  it('soft stop (no PTY, e.g. the desktop app): Stop answers the next tool hook with continue:false and the session goes idle', async () => {
+    const t = setup({ softStop: true, mailbox: createMailbox(), mailboxOnly: true, stopRecheckMs: 1 });
+    t.bridge.onHook({ hook_event_name: 'UserPromptSubmit', session_id: 'd1', cwd: 'C:\\p' });
+    t.bridge.onHook({ hook_event_name: 'PreToolUse', session_id: 'd1', cwd: 'C:\\p', tool_name: 'Bash' } as any);
+    expect(last(t.out, 'snapshot')!.sessions.find((x) => x.id === 'd1')!.softStop).toBe(true);
+    expect(t.bridge.hookReply({ hook_event_name: 'PostToolUse', session_id: 'd1', cwd: '' })).toBeNull();
+    await t.bridge.handle({ type: 'interrupt', sessionId: 'd1' });
+    expect(t.calls).toEqual([]); // no SDK, no runner
+    expect(last(t.out, 'chat')).toMatchObject({ sessionId: 'd1', event: { kind: 'note' } });
+    const r = t.bridge.hookReply({ hook_event_name: 'PostToolUse', session_id: 'd1', cwd: '' }) as any;
+    expect(r).toMatchObject({ continue: false });
+    expect(t.store.get('d1')!.state).toBe('idle');
+  });
+  it('soft stop is not offered for a session only seen in its transcript (no hooks there)', async () => {
+    const t = setup({ softStop: true });
+    t.bridge.onHook({ hook_event_name: 'SessionStart', session_id: 'a1', cwd: '/p' });
+    expect(last(t.out, 'snapshot')!.sessions.find((x) => x.id === 'a1')!.softStop).toBeFalsy();
+  });
   it('the transcript is re-read shortly after Esc (no Stop hook follows an interrupt)', async () => {
     let n = 0;
     const t = setup({ stopRecheckMs: 20, pty: { sendPrompt: async () => {}, sendEsc: async () => {} },
