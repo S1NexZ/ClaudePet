@@ -67,6 +67,7 @@ listenHooks(defaultSocketPath(), (e) => bridge.onHook(e))
     const http = await httpHooks;
     send({ type: 'ready', claude: claude ?? null, distro: process.env.WSL_DISTRO_NAME ?? '' });
     bridge.snapshot();
+    poller?.refresh(); // one query when the pet starts (the numbers on disk may be hours old); after that only the user's click or the status line
     const adopted = new Set<string>();
     let lastAdopt = 0;
     const adoptRecent = async (now: number) => {
