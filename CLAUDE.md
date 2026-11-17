@@ -28,7 +28,7 @@ Closing the pet never kills Claude Code (the bridge exits on stdin EOF).
 - `shared/src/types.ts`: bridge command/message types.
 - `ui/src/`: `main.ts` (window, tray, hotkey, IPC, dialogs), `settings.ts`, `appearance.ts`, `dialogs.ts`, `models/` (registry, zip, install, images), `sprite/` (loader, animator, cell cleanup, `fringe.ts`), `renderer/` (`app.ts`, `settingsPanel.ts`, `modelsTab.ts`, `usage.ts`, `compose.ts`, `chatStore.ts`, …).
 - `scripts/`: `pet-claude.py` (PTY wrapper), `install-shell-integration.sh` (guided `~/.bashrc` block), `start.sh`, `pet.sh`, `anim-test.sh`, tests `test-pet-claude.py`, `test-shell-integration.py`.
-- `models/clawd/`: the bundled default pet (third-party asset, see `THIRD_PARTY_NOTICES.md`). User models live in `%APPDATA%\ccPet\models`.
+- `models/claude-maiden/`: the bundled default pet (third-party asset, see `THIRD_PARTY_NOTICES.md`). Clawd was removed in 0.5.0 (Anthropic's mascot); a saved `clawd` choice falls back to the default. User models live in `%APPDATA%\ccPet\models`.
 
 ### Claude Code integration
 - **PTY wrapper** `scripts/pet-claude.py` runs `claude` as one process on a PTY; the terminal and clients of `~/.claude-pet/pty/<wrapper pid>.sock` (dir 0700, socket 0600) share one PTY. The hook adds `pet_pty` (from `PET_PTY_SOCK`) to events; `SessionEnd` clears it. If `claude` is not on PATH it falls back to `~/.local/bin/claude`.
@@ -72,7 +72,7 @@ To test the real UI: start `ccPet.exe --remote-debugging-port=9333` (listens on 
 - The Agent SDK cannot attach to a running `claude`; tmux/reptyr do not work (ptrace_scope=1); `messagingSocketPath` in `~/.claude/sessions` is undocumented and not a user-input channel.
 - A stdlib-Python PTY wrapper was chosen (node-pty needs a compiler).
 - Usage limits: no private endpoints, no reading OAuth tokens, no scraping; the Admin/Usage API needs an organization key and has no Pro plan windows.
-- Character packs that are not ours (Miku, Clawd) are third-party assets: Miku is never tracked in this repository; Clawd ships with attribution and an explicit "redistribution terms not verified" note.
+- Character packs that are not ours are third-party assets: Miku and Clawd are never tracked in this repository (Clawd is Anthropic's mascot); Claude-maiden ships with attribution.
 
 ## Known limitations
 Esc typed in the first seconds of a turn (while `UserPromptSubmit` hooks run) may be ignored by Claude Code; `get_usage` is experimental; tray menu is not automatically tested.

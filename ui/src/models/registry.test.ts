@@ -31,13 +31,13 @@ describe('model registry', () => {
     expect(l[0].name).toBe('CLAWD');
   });
   it('missing folders give an empty list', () => expect(listModels('/nonexistent/a', '/nonexistent/b')).toEqual([]));
-  it('Clawd is the default on a fresh install; a missing choice falls back to it', () => {
-    const b = root(); model(b, 'clawd'); model(b, 'other');
+  it('Claude-maiden is the default on a fresh install; a missing choice (e.g. the removed Clawd) falls back to it', () => {
+    const b = root(); model(b, 'claude-maiden'); model(b, 'other');
     const l = listModels(b, root());
-    expect(DEFAULT_MODEL).toBe('clawd');
-    expect(pickModel(l, undefined)?.id).toBe('clawd');
+    expect(DEFAULT_MODEL).toBe('claude-maiden');
+    expect(pickModel(l, undefined)?.id).toBe('claude-maiden');
     expect(pickModel(l, 'other')?.id).toBe('other');
-    expect(pickModel(l, 'deleted')?.id).toBe('clawd');
+    expect(pickModel(l, 'clawd')?.id).toBe('claude-maiden');
     expect(pickModel([], 'x')).toBeNull();
   });
   it('model ids are plain folder names', () => {

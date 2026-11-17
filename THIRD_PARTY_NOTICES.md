@@ -3,10 +3,6 @@
 The MIT license in `LICENSE` covers **only the original source code of ccPet**. It does **not** apply to the items below,
 which keep their own licenses and rights.
 
-## Pet model: Clawd (`models/clawd`)
-- Pack `clawd-svg`, Codex pet format v2, installed under the id `clawd`; source recorded in its description: https://github.com/godxxy1229/clawd-codex-pet ("An unofficial Claude-inspired companion for Codex.").
-- The character Clawd is the mascot of Anthropic's Claude Code; rights to the character belong to their owners. The sprite sheet is included unmodified.
-
 ## Pet model: Claude娘 / Claude-maiden (`models/claude-maiden`)
 - Pack `claude-maiden`, Codex pet format v2 ("An orange-haired, amber-eyed Claude."); the author is not named in the pack's metadata.
 - A fan-made personification of Anthropic's Claude; rights to the artwork belong to its author. Included unmodified.

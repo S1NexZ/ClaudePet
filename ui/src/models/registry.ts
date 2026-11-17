@@ -3,7 +3,7 @@ import { join } from 'node:path';
 
 /** Model ids are folder names: plain, lowercase, no separators, so an id can never address anything outside the models folders. */
 export const MODEL_ID = /^[a-z0-9][a-z0-9-]{0,39}$/;
-export const DEFAULT_MODEL = 'clawd';
+export const DEFAULT_MODEL = 'claude-maiden';
 
 export interface ModelInfo {
   id: string;

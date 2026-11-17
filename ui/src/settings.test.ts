@@ -27,8 +27,8 @@ describe('settings', () => {
     expect(JSON.parse(readFileSync(f, 'utf8'))).toEqual({ autostart: true, notify: false, hotkey: 'Control+Shift+K', model: 'clawd', appearance: { primary: null, accent: null }, permissions: 'ask', answerPermissions: false, sdkChats: false, language: 'auto', petScale: 1 });
     expect(loadSettings(f)).toEqual({ autostart: true, notify: false, hotkey: 'Control+Shift+K', model: 'clawd', appearance: { primary: null, accent: null }, permissions: 'ask', answerPermissions: false, sdkChats: false, language: 'auto', petScale: 1 });
   });
-  it('a fresh install uses Clawd; a valid model id is kept', () => {
-    expect(DEFAULTS.model).toBe('clawd');
+  it('a fresh install uses Claude-maiden; a valid model id is kept', () => {
+    expect(DEFAULTS.model).toBe('claude-maiden');
     const f = file(); writeFileSync(f, JSON.stringify({ model: 'my-pet' }));
     expect(loadSettings(f).model).toBe('my-pet');
   });
