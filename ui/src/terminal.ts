@@ -46,8 +46,9 @@ export function windowsNewSessionCommand(o: { cwd: string; helper?: string }, wi
 const normDir = (p: string) => p.replace(/\//g, '\\').replace(/\\+$/, '').toLowerCase();
 
 /** The session a "new chat" on Windows turned into: same folder, appeared after the launch, idle, and typable (has the wrapper's pipe). */
-export function matchNewSession(sessions: Array<{ id: string; cwd: string; since: number; pty?: string; state: string; host?: string }>, w: { cwd: string; at: number }): string | null {
+export function matchNewSession(sessions: Array<{ id: string; cwd: string; since: number; pty?: string; state: string; host?: string }>, w: { cwd: string; at: number; known: string[] }): string | null {
   const dir = normDir(w.cwd);
-  const hit = sessions.find((s) => s.host === 'windows' && !!s.pty && s.state === 'idle' && s.since >= w.at && normDir(s.cwd) === dir);
+  // `since` is the last state change, not the start: sessions that existed at launch are excluded by id
+  const hit = sessions.find((s) => s.host === 'windows' && !!s.pty && s.state === 'idle' && s.since >= w.at && !w.known.includes(s.id) && normDir(s.cwd) === dir);
   return hit?.id ?? null;
 }

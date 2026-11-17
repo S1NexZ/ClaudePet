@@ -29,6 +29,8 @@ export interface Session {
   pendingPermission?: PendingPermission;
   /** where the session runs: 'wsl' (the WSL bridge) or 'windows' (the Windows host); set by the app when it merges hosts */
   host?: 'wsl' | 'windows';
+  /** exact id of the host that owns it ('windows', 'wsl' = default distro, 'wsl:<distro>'); set by the app when it merges hosts */
+  hostId?: string;
   /** the WSL distro of a session that does not run in the default one (set when several distros are followed) */
   distro?: string;
   /** which Claude Code front end started it, from the transcript's `entrypoint` (cli, claude-desktop, vscode, sdk-cli, ...) */

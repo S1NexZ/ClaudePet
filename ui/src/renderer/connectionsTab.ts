@@ -16,7 +16,9 @@ export interface HostState {
   /** newest hook activity from this host (ms), null = none since the pet started */
   lastEventAt?: number | null;
 }
-export interface WrapperState { state: 'none' | 'ours' | 'partial' | 'stale'; files: string[]; policy: string | null }
+import { wrapperLine } from '../psLine.js';
+
+export interface WrapperState { state: 'none' | 'ours' | 'partial' | 'stale' | 'ansi'; files: string[]; policy: string | null }
 export interface ConnectionsState { answerPermissions: boolean; sdkChats?: boolean; /** where new chats start (terminal sessions) */ newChatIn?: 'wsl' | 'windows'; helper: boolean; /** the claude wrapper in the PowerShell profiles */ wrapper?: WrapperState | null; /** full path of pet-helper.exe (for the PowerShell wrapper line) */ helperPath?: string; windows: HostState; wsl: HostState; /** other WSL distros that are followed */ others?: Array<HostState & { id: string }> }
 export interface ConnectionsHost {
   copy?(text: string): void;
@@ -100,13 +102,14 @@ export function createConnectionsTab(host: ConnectionsHost) {
       w.append(el('div', 's-hint', L('Чтобы питомец мог нажимать Esc, «Стоп» и печатать в Windows-сессии как в терминале, claude запускается через обёртку. Питомец может добавить её в профиль PowerShell сам (с показом изменений и копией файла).', 'To let the pet press Esc, Stop and type into a Windows session like a terminal, claude starts through the wrapper. The pet can add it to your PowerShell profile (showing the changes, with a backup).', '要让宠物像终端一样在 Windows 会话中按 Esc、停止和输入，claude 需通过包装器启动。宠物可以把它添加到 PowerShell 配置文件（显示改动并保留备份）。')));
       const wline = el('div', 'c-sl');
       wline.append(chip(on, wr?.state === 'stale' ? L('обёртка устарела', 'wrapper is out of date', '包装器已过期') : L('обёртка в профиле PowerShell', 'wrapper in the PowerShell profile', 'PowerShell 配置文件中的包装器')));
-      const wb = el('button', `s-btn${on ? '' : ' primary'}`, on ? L('Убрать', 'Remove', '移除') : wr?.state === 'stale' || wr?.state === 'partial' ? L('Обновить', 'Update', '更新') : L('Добавить', 'Add', '添加')); wb.type = 'button'; wb.disabled = busy;
+      const wb = el('button', `s-btn${on ? '' : ' primary'}`, on ? L('Убрать', 'Remove', '移除') : wr?.state === 'stale' || wr?.state === 'partial' ? L('Обновить', 'Update', '更新') : L('Добавить', 'Add', '添加')); wb.type = 'button'; wb.disabled = busy || wr?.state === 'ansi';
       wb.addEventListener('click', () => void run(host.apply('windows', on ? 'wrapper-off' : 'wrapper')));
       wline.append(wb);
       w.append(wline);
+      if (wr?.state === 'ansi') w.append(el('div', 's-hint c-err', L('Профиль PowerShell сохранён в кодировке ANSI: питомец не меняет его, чтобы не испортить русский текст. Добавьте строку ниже вручную.', 'The PowerShell profile is saved in an ANSI code page: the pet does not edit it so as not to garble its text. Add the line below yourself.', 'PowerShell 配置文件以 ANSI 编码保存：宠物不会修改它，以免损坏文本。请手动添加下面这一行。')));
       if (wr?.policy && /^(Restricted|AllSigned|Undefined)$/i.test(wr.policy)) w.append(el('div', 's-hint c-err', L(`Политика выполнения PowerShell «${wr.policy}» не даёт запускать профиль: обёртка не сработает. Разрешить можно командой: Set-ExecutionPolicy -Scope CurrentUser RemoteSigned`, `The PowerShell execution policy "${wr.policy}" does not run profiles, so the wrapper will not work. You can allow it with: Set-ExecutionPolicy -Scope CurrentUser RemoteSigned`, `PowerShell 执行策略“${wr.policy}”不允许运行配置文件，包装器不会生效。可用以下命令允许：Set-ExecutionPolicy -Scope CurrentUser RemoteSigned`)));
       w.append(el('div', 's-hint', L('Или добавьте строку вручную (notepad $PROFILE):', 'Or add the line yourself (notepad $PROFILE):', '或手动添加这一行（notepad $PROFILE）：')));
-      const line = `function claude { & '${state.helperPath.replace(/'/g, "''")}' pty claude @args }`;
+      const line = wrapperLine(state.helperPath);
       const code = el('code', 'c-code', line);
       const cp = el('button', 's-btn', L('Копировать строку', 'Copy the line', '复制该行')); cp.type = 'button';
       cp.addEventListener('click', () => { host.copy!(line); cp.textContent = L('Скопировано', 'Copied', '已复制'); });

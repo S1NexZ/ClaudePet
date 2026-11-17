@@ -18,7 +18,9 @@ function isOneShot(args) {
 function oneShot(pid) {
   for (let i = 0; i < 3 && pid > 1; i++) {
     try {
-      if (isOneShot(readFileSync(`/proc/${pid}/cmdline`, 'utf8').split('\0'))) return true;
+      const args = readFileSync(`/proc/${pid}/cmdline`, 'utf8').split('\0');
+      // only claude's own command line counts (a shell or another ancestor may have a -p option of its own)
+      if (args.some((x) => /(^|\/)claude(\.exe)?$|claude-code\/cli\.js$/i.test(x)) && isOneShot(args)) return true;
       const st = readFileSync(`/proc/${pid}/stat`, 'utf8');
       pid = Number(st.slice(st.lastIndexOf(')') + 2).split(' ')[1]) || 0;
     } catch { return false; }
@@ -40,13 +42,23 @@ if (process.argv[2] === 'wait') {
     const parent = process.ppid;
     if (oneShot(parent)) return stop(); // `claude -p "…"` waits for its async hooks before exiting: a waiter there would hang it
     const alive = () => { try { process.kill(parent, 0); return true; } catch { return false; } };
-    // no answer (the pet is not running or restarting): try again later while claude lives, so the session stays reachable
-    const later = () => setTimeout(poll, Number(process.env.CLAUDE_PET_WAIT_RETRY_MS) || 10000);
+    // no answer (the pet is not running or restarting): try again later while claude lives, but give up after a while,
+    // so waiters do not pile up while the pet is away (a new one starts at the session's next turn anyway)
+    const RETRY = Number(process.env.CLAUDE_PET_WAIT_RETRY_MS) || 10000;
+    const MAX_DOWN = Number(process.env.CLAUDE_PET_WAIT_DOWN_MS) || 10 * 60_000;
+    let downSince = 0;
+    const later = () => {
+      if (!downSince) downSince = Date.now();
+      if (Date.now() - downSince > MAX_DOWN) return stop();
+      setTimeout(poll, RETRY);
+    };
     const poll = () => {
       if (!alive()) return stop();
       const hub = readHub();
       if (!hub?.port || !hub?.token) return later();
+      let settled = false; // a timed-out request also emits 'error' after destroy(): only one follow-up poll
       const req = request({ host: '127.0.0.1', port: hub.port, path: `/mailbox/${hub.token}/${sid}`, method: 'GET', timeout: 70000 }, (res) => {
+        settled = true; downSince = 0;
         let body = '';
         res.setEncoding('utf8');
         res.on('data', (d) => { body += d; });
@@ -56,8 +68,8 @@ if (process.argv[2] === 'wait') {
           stop(); // 409 (another waiter) or anything unexpected
         });
       });
-      req.on('timeout', () => { req.destroy(); poll(); });
-      req.on('error', later);
+      req.on('timeout', () => { if (settled) return; settled = true; req.destroy(); poll(); });
+      req.on('error', () => { if (settled) return; settled = true; later(); });
       req.end();
     };
     poll();

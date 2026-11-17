@@ -10,7 +10,7 @@ import { listModels, pickModel, MODEL_ID, DEFAULT_MODEL } from './models/registr
 import { installModelFromZip, installModelFromDir, removeModel, scanPetFolder, ModelError } from './models/install.js';
 import { loadSettings, saveSettings } from './settings.js';
 import { focusByTitle, focusDesktopApp } from './focusWindow.js';
-import { formatDiagnostics, lastEventByHost } from './diagnostics.js';
+import { formatDiagnostics, lastEventByHost, hostIdOf } from './diagnostics.js';
 import { syncHelper } from './stableHelper.js';
 import { checkLatest } from './updates.js';
 import { planProfile, removeFromProfile, profileState, profilePaths, readProfile, applyProfile } from './psProfile.js';
@@ -111,7 +111,7 @@ if (primary) app.whenReady().then(async () => {
     if (m.type === 'usage') { usageBy.set(hostId, m.usage); const u = mergeUsage([...usageBy.values()]); if (u) win.webContents.send('pet:msg', { type: 'usage', usage: u }); return; }
     win.webContents.send('pet:msg', m);
   };
-  let pendingNewChat: { cwd: string; at: number; prompt: string } | null = null;
+  let pendingNewChat: { cwd: string; at: number; prompt: string; known: string[] } | null = null;
   const pushSnapshot = () => {
     const m = mergeSnapshots(hostParts());
     const sessions = decorateDesktop(m.sessions, desktopEntries());
@@ -371,7 +371,11 @@ if (primary) app.whenReady().then(async () => {
           p.unref();
         };
         // the first prompt is typed into the new session once it shows up (it needs the wrapper's pipe for that)
-        pendingNewChat = prompt && helperPath ? { cwd: String(cmd.cwd), at: Date.now(), prompt } : null;
+        pendingNewChat = prompt && helperPath ? { cwd: String(cmd.cwd), at: Date.now(), prompt, known: (lastSnapshot?.sessions ?? []).map((x: Session) => x.id) } : null;
+        if (prompt && !helperPath) { // without the wrapper nothing can type it: keep the text for the user instead of losing it
+          clipboard.writeText(prompt);
+          void info(L('Первое сообщение не отправлено', 'The first message was not sent', '首条消息未发送'), L('Без pet-helper.exe питомец не может ввести его в новую сессию. Текст скопирован в буфер обмена: вставьте его в открывшееся окно.', 'Without pet-helper.exe the pet cannot type it into the new session. The text is on the clipboard: paste it into the new window.', '没有 pet-helper.exe，宠物无法把它输入到新会话中。文本已复制到剪贴板：请粘贴到新窗口中。'));
+        }
         goWin(true);
         return;
       }
@@ -444,8 +448,8 @@ if (primary) app.whenReady().then(async () => {
   execFile('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', 'Get-ExecutionPolicy'], { windowsHide: true, timeout: 15000 }, (err, out) => { if (!err) psPolicy = String(out).trim(); });
   const wrapperState = () => {
     if (!helperPath) return null;
-    const states = psProfiles().map((p) => { try { return profileState(readProfile(p), helperPath); } catch { return 'none' as const; } });
-    const state = states.includes('stale') ? 'stale' : states.every((x) => x === 'ours') ? 'ours' : states.some((x) => x === 'ours') ? 'partial' : 'none';
+    const states = psProfiles().map((p) => { try { return profileState(readProfile(p), helperPath); } catch { return 'ansi' as const; } });
+    const state = states.includes('ansi') ? 'ansi' : states.includes('stale') ? 'stale' : states.every((x) => x === 'ours') ? 'ours' : states.some((x) => x === 'ours') ? 'partial' : 'none';
     return { state, files: psProfiles(), policy: psPolicy };
   };
   /**
@@ -470,7 +474,7 @@ if (primary) app.whenReady().then(async () => {
   ipcMain.handle('pet:diagnostics', async () => {
     const c = await connectionsState();
     const sessions: Session[] = lastSnapshot?.sessions ?? [];
-    const of = (id: string) => sessions.filter((x) => (x.host === 'windows' ? 'windows' : x.distro ? `wsl:${x.distro}` : 'wsl') === id);
+    const of = (id: string) => sessions.filter((x) => hostIdOf(x) === id);
     const row = (id: string, h: any) => ({
       id, distro: h.distro, up: !!h.up, events: !!h.events, mailbox: !!h.mailbox, permissions: !!h.permissions, statusLine: h.statusLine,
       lastEventAt: h.lastEventAt ?? null, sessions: of(id).length, sources: [...new Set(of(id).map((x) => x.source ?? '?'))] as string[], error: h.error,

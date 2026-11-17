@@ -9,8 +9,9 @@ describe('diagnostics report', () => {
     expect(redact('mail me at a.b@example.com', [])).toBe('mail me at <email>');
   });
   it('lastEventByHost: newest event per host (WSL distros apart)', () => {
-    const s = (host: string, at: number, distro?: string) => ({ host, lastEventAt: at, distro } as any);
-    expect(lastEventByHost([s('wsl', 5), s('wsl', 9), s('windows', 3), s('wsl', 7, 'Debian')])).toEqual({ wsl: 9, windows: 3, 'wsl:Debian': 7 });
+    const s = (hostId: string, at: number, distro?: string) => ({ host: hostId === 'windows' ? 'windows' : 'wsl', hostId, lastEventAt: at, distro } as any);
+    // with several distros the default one's sessions carry its name too, but their host is still 'wsl'
+    expect(lastEventByHost([s('wsl', 5, 'Ubuntu'), s('wsl', 9, 'Ubuntu'), s('windows', 3), s('wsl:Debian', 7, 'Debian')])).toEqual({ wsl: 9, windows: 3, 'wsl:Debian': 7 });
   });
   it('ago: human time since an event', () => {
     expect(ago(null, 0)).toBe(null);

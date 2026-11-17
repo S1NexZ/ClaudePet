@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { mkdtempSync, writeFileSync, readFileSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { planProfile, removeFromProfile, profileState, wrapperLine, profilePaths, applyProfile } from './psProfile.js';
+import { planProfile, removeFromProfile, profileState, wrapperLine, profilePaths, applyProfile, readProfile } from './psProfile.js';
 
 const H = 'C:\\Users\\u\\AppData\\Local\\Programs\\claude-pet\\resources\\helper\\pet-helper.exe';
 
@@ -54,4 +54,29 @@ describe('PowerShell profile wrapper', () => {
     expect(readFileSync(f + '.bak', 'utf8')).toContain(wrapperLine(H));
     writeFileSync(f, 'x');
   });
+  it('encodings: UTF-8 is written with a BOM (Windows PowerShell 5.1 reads BOM-less files as ANSI), UTF-16 stays UTF-16, ANSI is not touched', () => {
+    const d = mkdtempSync(join(tmpdir(), 'pse-'));
+    const cyr = 'C:\\Users\\Иван\\pet-helper.exe';
+    // new file
+    const f1 = join(d, 'a.ps1');
+    applyProfile(f1, planProfile(readProfile(f1), cyr).next);
+    const b1 = readFileSync(f1);
+    expect([...b1.subarray(0, 3)]).toEqual([0xef, 0xbb, 0xbf]);
+    expect(readProfile(f1)).toContain(wrapperLine(cyr));
+    // UTF-16LE profile (what `>` makes in PowerShell 5)
+    const f2 = join(d, 'b.ps1');
+    writeFileSync(f2, Buffer.concat([Buffer.from([0xff, 0xfe]), Buffer.from('Set-Alias ll ls\r\n', 'utf16le')]));
+    expect(readProfile(f2)).toBe('Set-Alias ll ls\r\n');
+    applyProfile(f2, planProfile(readProfile(f2), cyr).next);
+    const b2 = readFileSync(f2);
+    expect([...b2.subarray(0, 2)]).toEqual([0xff, 0xfe]);
+    expect(b2.subarray(2).toString('utf16le')).toContain(wrapperLine(cyr));
+    // ANSI (cp1251) text that is not valid UTF-8: refused, file unchanged
+    const f3 = join(d, 'c.ps1');
+    const ansi = Buffer.from([0x23, 0x20, 0xcf, 0xf0, 0xe8, 0xe2, 0xe5, 0xf2, 0x0d, 0x0a]);
+    writeFileSync(f3, ansi);
+    expect(() => readProfile(f3)).toThrow(/ANSI/);
+    expect(readFileSync(f3).equals(ansi)).toBe(true);
+  });
 });
+

@@ -50,11 +50,17 @@ describe('matchNewSession (the first prompt waits for the new Windows session to
   it('a typable session in the same folder (case and slashes do not matter) that started after the launch', async () => {
     const { matchNewSession } = await import('./terminal.js');
     const s = (id: string, cwd: string, at: number, pty = '\\\\.\\pipe\\claude-pet-1', state = 'idle') => ({ id, cwd, lastEventAt: at, since: at, pty, state, host: 'windows' });
-    const w = { cwd: 'C:\\Users\\U\\proj\\', at: 1000 };
+    const w = { cwd: 'C:\\Users\\U\\proj\\', at: 1000, known: ['old', 'busyold'] };
     expect(matchNewSession([s('old', 'C:\\Users\\u\\proj', 500), s('new', 'c:/users/u/proj', 1500)], w)).toBe('new');
     expect(matchNewSession([s('np', 'C:\\Users\\u\\proj', 1500, '')], w)).toBeNull();
     expect(matchNewSession([s('other', 'C:\\x', 1500)], w)).toBeNull();
     expect(matchNewSession([s('busy', 'C:\\Users\\u\\proj', 1500, 'p', 'thinking')], w)).toBeNull();
+  });
+  it('a session that already existed at launch never takes the prompt, even when it turns idle afterwards', async () => {
+    const { matchNewSession } = await import('./terminal.js');
+    const s = (id: string, since: number) => ({ id, cwd: 'C:\\p', lastEventAt: since, since, pty: 'x', state: 'idle', host: 'windows' });
+    expect(matchNewSession([s('busyold', 2000)], { cwd: 'C:\\p', at: 1000, known: ['busyold'] })).toBeNull();
+    expect(matchNewSession([s('busyold', 2000), s('fresh', 2500)], { cwd: 'C:\\p', at: 1000, known: ['busyold'] })).toBe('fresh');
   });
 });
 

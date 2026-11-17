@@ -12,7 +12,7 @@ Chat language with the project owner: Russian (code and comments may be English)
 - Do not add background processes, do not expose tokens/credentials/personal data (for `~/.claude.json` inspect structure only, never values).
 - Do not delete temporary files or test artifacts without permission. Do not weaken existing features (UI, animations, hotkey, PTY, SDK fallback).
 - Never claim something was tested when it was not; keep verified behaviour and assumptions apart.
-- Commits end with `Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>`. Do not push or publish without the owner's approval.
+- Commits end with a `Co-Authored-By: Claude <model> <noreply@anthropic.com>` line naming the model that wrote them. Do not push or publish without the owner's approval.
 
 ## Environment
 - Develop in WSL; Node: `export PATH=$HOME/.local/node/bin:$PATH` (per command). Root is an npm workspace (`shared`, `daemon`, `hook`); `ui/` is a separate package.

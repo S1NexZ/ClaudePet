@@ -85,11 +85,28 @@ static class PetHelper
     }
 
     /** `claude -p "..."` (print mode, not a stream-json session like the desktop app's): it waits for async hooks before exiting, so no waiter there. */
+    [DllImport("shell32.dll", SetLastError = true)] static extern IntPtr CommandLineToArgvW([MarshalAs(UnmanagedType.LPWStr)] string cmd, out int argc);
+    [DllImport("kernel32.dll")] static extern IntPtr LocalFree(IntPtr h);
+
+    /** A command line split the way the process itself sees it (quotes respected). */
+    static string[] Argv(string cmd)
+    {
+        int n; IntPtr p = CommandLineToArgvW(cmd, out n);
+        if (p == IntPtr.Zero) return new string[0];
+        try { var a = new string[n]; for (int i = 0; i < n; i++) a[i] = Marshal.PtrToStringUni(Marshal.ReadIntPtr(p, i * IntPtr.Size)); return a; }
+        finally { LocalFree(p); }
+    }
+
     public static bool IsOneShot(string cmd)
     {
         if (string.IsNullOrEmpty(cmd)) return false;
-        bool print = Regex.IsMatch(cmd, "(^|\\s)(-p|--print)(=|\\s|$)");
-        bool streamIn = Regex.IsMatch(cmd, "--input-format(=|\\s+)\"?stream-json");
+        var a = Argv(cmd);
+        bool print = false, streamIn = false;
+        for (int i = 0; i < a.Length; i++)
+        {
+            if (a[i] == "-p" || a[i] == "--print" || a[i].StartsWith("--print=")) print = true;
+            if (a[i] == "--input-format=stream-json" || (a[i] == "--input-format" && i + 1 < a.Length && a[i + 1] == "stream-json")) streamIn = true;
+        }
         return print && !streamIn;
     }
 
@@ -97,7 +114,10 @@ static class PetHelper
     {
         for (int i = 0; i < 3 && pid > 0; i++)
         {
-            if (IsOneShot(CommandLineOf(pid))) return true;
+            // only claude's own command line counts (an ancestor may have a -p option of its own)
+            string name = null;
+            try { using (var pr = Process.GetProcessById(pid)) name = pr.ProcessName; } catch { }
+            if (name != null && name.StartsWith("claude", StringComparison.OrdinalIgnoreCase) && IsOneShot(CommandLineOf(pid))) return true;
             pid = ParentOf(pid);
         }
         return false;
@@ -120,6 +140,7 @@ static class PetHelper
         if (!string.IsNullOrEmpty(src) && Regex.IsMatch(src, "^[a-z0-9-]{1,32}$")) url += (url.Contains("?") ? "&" : "?") + "src=" + src;
         int parent = ParentPid();
         if (OneShotParent(parent)) return 0;
+        DateTime? downSince = null; // the pet is away: retry for a while (restart / update), then give up so waiters do not pile up
         while (Alive(parent))
         {
             try
@@ -128,6 +149,7 @@ static class PetHelper
                 req.Timeout = 70000; req.ReadWriteTimeout = 70000; req.Proxy = null; req.KeepAlive = false;
                 using (var res = (HttpWebResponse)req.GetResponse())
                 {
+                    downSince = null;
                     if (res.StatusCode == HttpStatusCode.OK)
                     {
                         string body;
@@ -147,8 +169,12 @@ static class PetHelper
                 var r = e.Response as HttpWebResponse;
                 if (r != null && r.StatusCode == HttpStatusCode.NoContent) continue;
                 if (r != null) return 0; // 409 = another waiter, 404 = another pet install / token
-                // no answer at all: the pet is not running (or restarting). Keep the session reachable: try again while claude lives.
+                // no answer at all: the pet is not running (or restarting). Keep the session reachable for a while: try again while claude lives.
+                if (parent <= 0) return 0; // cannot tell whether claude still lives: do not linger
+                if (downSince == null) downSince = DateTime.UtcNow;
+                if (DateTime.UtcNow - downSince.Value > TimeSpan.FromMinutes(10)) return 0;
                 Thread.Sleep(10000);
+                continue;
             }
             catch { return 0; }
         }
@@ -325,7 +351,8 @@ static class PetHelper
                 string tmp = file + "." + Process.GetCurrentProcess().Id + ".tmp";
                 long now = (long)(DateTime.UtcNow - new DateTime(1970, 1, 1, 0, 0, 0, DateTimeKind.Utc)).TotalMilliseconds;
                 File.WriteAllText(tmp, "{\"version\":1,\"updatedAt\":" + now + ",\"five_hour\":" + (five ?? "null") + ",\"seven_day\":" + (seven ?? "null") + "}", new UTF8Encoding(false));
-                if (File.Exists(file)) File.Replace(tmp, file, null); else File.Move(tmp, file); // atomic: the pet never reads half a file
+                try { if (File.Exists(file)) File.Replace(tmp, file, null); else File.Move(tmp, file); } // atomic: the pet never reads half a file
+                catch { try { File.Delete(tmp); } catch { } } // another session's line won the race: drop ours, no stray .tmp files
                 if (chain == null)
                 {
                     var parts = new System.Collections.Generic.List<string>();

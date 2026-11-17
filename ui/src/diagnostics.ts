@@ -27,10 +27,12 @@ export function redact(text: string, names: string[]): string {
 }
 
 /** Newest hook-driven activity per host id ('windows', 'wsl', 'wsl:<distro>'). */
-export function lastEventByHost(sessions: Array<{ host?: string; distro?: string; lastEventAt: number }>): Record<string, number> {
+export const hostIdOf = (s: { host?: string; hostId?: string }): string => s.hostId ?? (s.host === 'windows' ? 'windows' : 'wsl');
+
+export function lastEventByHost(sessions: Array<{ host?: string; hostId?: string; lastEventAt: number }>): Record<string, number> {
   const out: Record<string, number> = {};
   for (const s of sessions) {
-    const id = s.host === 'windows' ? 'windows' : s.distro ? `wsl:${s.distro}` : 'wsl';
+    const id = hostIdOf(s);
     out[id] = Math.max(out[id] ?? 0, s.lastEventAt);
   }
   return out;
