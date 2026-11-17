@@ -37,6 +37,7 @@ export async function writePty(sock: string, chunks: string[], gapMs = 300): Pro
       if (i) await wait(gapMs);
       await new Promise<void>((res, rej) => c.write(chunks[i], 'utf8', (e) => (e ? rej(new PtyGoneError()) : res())));
     }
+    await wait(40); // let the wrapper read the last chunk before the connection closes (an Esc lost to a fast close would make Stop flaky)
   } finally { c.destroy(); }
 }
 
