@@ -15,13 +15,14 @@ export interface HostState {
   statusLineError?: string;
 }
 export interface WrapperState { state: 'none' | 'ours' | 'partial' | 'stale'; files: string[]; policy: string | null }
-export interface ConnectionsState { answerPermissions: boolean; sdkChats?: boolean; helper: boolean; /** the claude wrapper in the PowerShell profiles */ wrapper?: WrapperState | null; /** full path of pet-helper.exe (for the PowerShell wrapper line) */ helperPath?: string; windows: HostState; wsl: HostState; /** other WSL distros that are followed */ others?: Array<HostState & { id: string }> }
+export interface ConnectionsState { answerPermissions: boolean; sdkChats?: boolean; /** where new chats start (terminal sessions) */ newChatIn?: 'wsl' | 'windows'; helper: boolean; /** the claude wrapper in the PowerShell profiles */ wrapper?: WrapperState | null; /** full path of pet-helper.exe (for the PowerShell wrapper line) */ helperPath?: string; windows: HostState; wsl: HostState; /** other WSL distros that are followed */ others?: Array<HostState & { id: string }> }
 export interface ConnectionsHost {
   copy?(text: string): void;
   get(): Promise<ConnectionsState>;
   apply(host: string, action: 'connect' | 'disconnect' | 'statusline' | 'statusline-off' | 'wrapper' | 'wrapper-off'): Promise<ConnectionsState>;
   answerPermissions(on: boolean): Promise<ConnectionsState>;
   sdkChats(on: boolean): Promise<ConnectionsState>;
+  newChatIn?(where: 'wsl' | 'windows'): Promise<ConnectionsState>;
 }
 
 const el = <K extends keyof HTMLElementTagNameMap>(tag: K, cls = '', text = ''): HTMLElementTagNameMap[K] => {
@@ -109,6 +110,20 @@ export function createConnectionsTab(host: ConnectionsHost) {
     cb.addEventListener('change', () => void run(host.answerPermissions(cb.checked)));
     perm.append(cb, el('span', '', ` ${L('Отвечать на запросы разрешений в питомце', 'Answer permission questions in the pet', '在宠物中回答权限请求')}`));
     box.append(perm, el('div', 's-hint', L('Выключено по умолчанию. Если питомец не ответил за 30 с, Claude Code покажет обычный диалог.', 'Off by default. If the pet does not answer within 30 s, Claude Code shows its normal dialog.', '默认关闭。如果宠物在 30 秒内未回答，Claude Code 会显示常规对话框。')));
+    if (host.newChatIn) {
+      const nc = el('div', 's-section');
+      nc.append(el('div', 's-title', L('Где запускать новые чаты', 'Where new chats start', '新聊天在哪里启动')));
+      const opts: Array<['wsl' | 'windows', string]> = [['wsl', 'WSL'], ['windows', L('Windows (через обёртку)', 'Windows (through the wrapper)', 'Windows（通过包装器）')]];
+      for (const [v, label] of opts) {
+        const r = el('label', 's-radio');
+        const i = el('input'); i.type = 'radio'; i.name = 'new-chat-in'; i.checked = (state.newChatIn ?? 'wsl') === v; i.disabled = busy;
+        i.addEventListener('change', () => { if (i.checked) void run(host.newChatIn!(v)); });
+        r.append(i, el('span', '', ` ${label}`));
+        nc.append(r);
+      }
+      nc.append(el('div', 's-hint', L('Новый чат открывает окно терминала с Claude Code в выбранной папке. Если WSL недоступен, чат стартует в Windows.', 'A new chat opens a terminal window with Claude Code in the chosen folder. If WSL is unavailable, it starts on Windows.', '新聊天会在所选文件夹中打开一个运行 Claude Code 的终端窗口。如果 WSL 不可用，则在 Windows 中启动。')));
+      box.append(nc);
+    }
     const sdk = el('label', 's-radio'); sdk.style.display = 'block';
     const sb = el('input'); sb.type = 'checkbox'; sb.checked = !!state.sdkChats; sb.disabled = busy;
     sb.addEventListener('change', () => void run(host.sdkChats(sb.checked)));

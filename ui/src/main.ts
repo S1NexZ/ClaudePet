@@ -13,7 +13,7 @@ import { focusByTitle, focusDesktopApp } from './focusWindow.js';
 import { planProfile, removeFromProfile, profileState, profilePaths, readProfile, applyProfile } from './psProfile.js';
 import { overAny, type Rect } from './hitTest.js';
 import { placeStage, restoreAnchor, IDLE_H, type Anchor } from './placement.js';
-import { terminalCommand, windowsTerminalCommand, newSessionCommand } from './terminal.js';
+import { terminalCommand, windowsTerminalCommand, newSessionCommand, windowsNewSessionCommand, matchNewSession } from './terminal.js';
 import { createWindowsHost, WINDOWS_HOST_PORT } from './hub/windowsHost.js';
 import { createWslHost, parseDistroList, secondaryDistros, portForDistro, type WslHost } from './hub/wslHost.js';
 import { mergeSnapshots, mergeUsage, hostOf, hostOfPermission, type HostPart } from './hub/merge.js';
@@ -108,9 +108,16 @@ if (primary) app.whenReady().then(async () => {
     if (m.type === 'usage') { usageBy.set(hostId, m.usage); const u = mergeUsage([...usageBy.values()]); if (u) win.webContents.send('pet:msg', { type: 'usage', usage: u }); return; }
     win.webContents.send('pet:msg', m);
   };
+  let pendingNewChat: { cwd: string; at: number; prompt: string } | null = null;
   const pushSnapshot = () => {
     const m = mergeSnapshots(hostParts());
     const sessions = decorateDesktop(m.sessions, desktopEntries());
+    if (pendingNewChat) {
+      const w = pendingNewChat;
+      const id = matchNewSession(sessions, w);
+      if (id) { pendingNewChat = null; void winHost.handle({ type: 'send', sessionId: id, text: w.prompt }); }
+      else if (Date.now() - w.at > 120_000) { pendingNewChat = null; log('new Windows chat: the session did not appear in time, first prompt dropped'); }
+    }
     lastSnapshot = { ...m, sessions, attention: sessions.some((x) => x.id === m.attention) ? m.attention : pickAttention(sessions)?.id ?? null };
     win.webContents.send('pet:msg', lastSnapshot);
   };
@@ -326,6 +333,19 @@ if (primary) app.whenReady().then(async () => {
   ipcMain.on('pet:cmd', async (_e, cmd) => {
     if (!cmd || typeof cmd !== 'object') return;
     if (cmd.type === 'start' && !settings.sdkChats) { // no Agent SDK: a new chat is a new session in a real terminal (the pet sees it through the hooks)
+      if (settings.newChatIn === 'windows' || !primary().isUp()) {
+        const prompt = String(cmd.prompt ?? '').trim();
+        const goWin = (useWt: boolean) => {
+          const c = windowsNewSessionCommand({ cwd: String(cmd.cwd), helper: helperPath }, useWt);
+          const p = spawn(c.file, c.args, { detached: true, stdio: 'ignore' });
+          p.on('error', (e) => { log(`terminal (${c.file}) failed: ${e.message}`); if (useWt) goWin(false); });
+          p.unref();
+        };
+        // the first prompt is typed into the new session once it shows up (it needs the wrapper's pipe for that)
+        pendingNewChat = prompt && helperPath ? { cwd: String(cmd.cwd), at: Date.now(), prompt } : null;
+        goWin(true);
+        return;
+      }
       const th = primary();
       const go = (useWt: boolean) => {
         const c = newSessionCommand({ distro: th.name(), cwd: String(cmd.cwd), claude: th.claude(), prompt: String(cmd.prompt ?? '') }, useWt);
@@ -375,7 +395,7 @@ if (primary) app.whenReady().then(async () => {
   const connectionsState = async () => {
     const hosts = await Promise.all([...wslHosts.values()].map(hostRowState));
     return {
-      answerPermissions: settings.answerPermissions, sdkChats: settings.sdkChats, helper: !!helperPath, helperPath, wrapper: wrapperState(),
+      answerPermissions: settings.answerPermissions, sdkChats: settings.sdkChats, newChatIn: settings.newChatIn, helper: !!helperPath, helperPath, wrapper: wrapperState(),
       windows: (() => { const sl = winHost.statusLine({}); return { ...winHost.state(settings.answerPermissions), port: winHost.port, up: winUp, statusLine: sl.kind, statusLineDiff: sl.diff, statusLineError: sl.error }; })(),
       wsl: hosts.find((x) => x.id === 'wsl')!,
       others: hosts.filter((x) => x.id !== 'wsl'),
@@ -457,6 +477,10 @@ if (primary) app.whenReady().then(async () => {
       if (p?.diff && await confirmHooks(remove ? L(`Отключить ${label} от питомца?`, `Disconnect ${label} from the pet?`, `断开 ${label} 与宠物的连接？`) : L(`Подключить сессии Claude Code (${label})?`, `Connect Claude Code sessions (${label})?`, `连接 Claude Code 会话（${label}）？`), [{ file: `~/.claude/settings.json (${label})`, diff: String(p.diff) }]))
         await wslRequest({ type: 'hooks', apply: true, remove, permissions: settings.answerPermissions }, h);
     }
+    return connectionsState();
+  });
+  ipcMain.handle('pet:new-chat-in', (_e, where: unknown) => {
+    settings = { ...settings, newChatIn: where === 'windows' ? 'windows' : 'wsl' }; applySettings();
     return connectionsState();
   });
   ipcMain.handle('pet:sdk-chats', async (_e, on: unknown) => {

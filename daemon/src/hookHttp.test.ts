@@ -48,6 +48,15 @@ describe('hook http receiver', () => {
     await post(`${base}/hook/tok/PostToolUse`, { hook_event_name: 'PostToolUse', session_id: 's1' });
     expect(order).toEqual(['event', 'reply']);
   });
+  it('a waiter that says its folder introduces the session (SessionStart may not reach the pet as an HTTP hook)', async () => {
+    const seen: any[] = [];
+    const { base } = await boot({ onWaiter: (sid: string, cwd: string) => seen.push([sid, cwd]) });
+    const ctl = new AbortController();
+    void fetch(`${base}/mailbox/tok/s9?cwd=${encodeURIComponent('C:\\Users\\u\\Мой проект')}`, { signal: ctl.signal }).catch(() => {});
+    await new Promise((r) => setTimeout(r, 100));
+    ctl.abort();
+    expect(seen).toEqual([['s9', 'C:\\Users\\u\\Мой проект']]);
+  });
   it('answers a PermissionRequest with the pet\'s decision in the format Claude Code expects', async () => {
     const { base } = await boot({ onPermission: async () => 'deny' });
     const r = await post(`${base}/hook/tok/PermissionRequest`, { session_id: 's1', tool_name: 'Bash' });

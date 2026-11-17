@@ -36,3 +36,25 @@ describe('newSessionCommand', () => {
     expect(newSessionCommand({ distro: '', cwd: '/x', claude: '' }).args.join(' ')).toContain("claude; exit 0");
   });
 });
+
+describe('windowsNewSessionCommand', () => {
+  it('starts claude through the wrapper in the folder; the first prompt is never put on the command line (cmd.exe would parse it)', async () => {
+    const { windowsNewSessionCommand } = await import('./terminal.js');
+    const c = windowsNewSessionCommand({ cwd: 'C:\\Users\\u\\p', helper: 'C:\\pet\\pet-helper.exe' });
+    expect(c).toEqual({ file: 'wt.exe', args: ['-w', 'new', '-d', 'C:\\Users\\u\\p', '--', 'C:\\pet\\pet-helper.exe', 'pty', 'claude'] });
+    expect(windowsNewSessionCommand({ cwd: 'C:\\p' }, false)).toEqual({ file: 'cmd.exe', args: ['/c', 'start', '""', '/D', 'C:\\p', 'claude'] });
+  });
+});
+
+describe('matchNewSession (the first prompt waits for the new Windows session to appear)', () => {
+  it('a typable session in the same folder (case and slashes do not matter) that started after the launch', async () => {
+    const { matchNewSession } = await import('./terminal.js');
+    const s = (id: string, cwd: string, at: number, pty = '\\\\.\\pipe\\claude-pet-1', state = 'idle') => ({ id, cwd, lastEventAt: at, since: at, pty, state, host: 'windows' });
+    const w = { cwd: 'C:\\Users\\U\\proj\\', at: 1000 };
+    expect(matchNewSession([s('old', 'C:\\Users\\u\\proj', 500), s('new', 'c:/users/u/proj', 1500)], w)).toBe('new');
+    expect(matchNewSession([s('np', 'C:\\Users\\u\\proj', 1500, '')], w)).toBeNull();
+    expect(matchNewSession([s('other', 'C:\\x', 1500)], w)).toBeNull();
+    expect(matchNewSession([s('busy', 'C:\\Users\\u\\proj', 1500, 'p', 'thinking')], w)).toBeNull();
+  });
+});
+

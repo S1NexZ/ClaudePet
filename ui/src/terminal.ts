@@ -31,3 +31,23 @@ export function newSessionCommand(
     `${o.claude ? sq(o.claude) : 'claude'}${prompt ? ` ${sq(prompt)}` : ''}; exit 0`];
   return windowsTerminal ? { file: 'wt.exe', args: ['-w', 'new', '--', ...wsl] } : { file: 'cmd.exe', args: ['/c', 'start', '""', ...wsl] };
 }
+
+/**
+ * A NEW Claude Code session in a Windows terminal, in `cwd`: through the `pet-helper pty` wrapper when there is one (the pet can then type
+ * the first prompt into it). The prompt itself never goes on the command line: cmd.exe would interpret & | ^ % in it.
+ */
+export function windowsNewSessionCommand(o: { cwd: string; helper?: string }, windowsTerminal = true): { file: string; args: string[] } {
+  const run = o.helper ? [o.helper, 'pty', 'claude'] : ['claude'];
+  return windowsTerminal
+    ? { file: 'wt.exe', args: ['-w', 'new', '-d', o.cwd, '--', ...run] }
+    : { file: 'cmd.exe', args: ['/c', 'start', '""', '/D', o.cwd, ...run] };
+}
+
+const normDir = (p: string) => p.replace(/\//g, '\\').replace(/\\+$/, '').toLowerCase();
+
+/** The session a "new chat" on Windows turned into: same folder, appeared after the launch, idle, and typable (has the wrapper's pipe). */
+export function matchNewSession(sessions: Array<{ id: string; cwd: string; since: number; pty?: string; state: string; host?: string }>, w: { cwd: string; at: number }): string | null {
+  const dir = normDir(w.cwd);
+  const hit = sessions.find((s) => s.host === 'windows' && !!s.pty && s.state === 'idle' && s.since >= w.at && normDir(s.cwd) === dir);
+  return hit?.id ?? null;
+}

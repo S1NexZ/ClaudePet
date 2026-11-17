@@ -125,5 +125,16 @@ describe('windows host: adoption', () => {
     const u = [...out].reverse().find((m) => m.type === 'usage') as any;
     expect(u.usage).toMatchObject({ fiveHour: { usedPct: 42 }, source: 'statusline' });
   });
+  it('a session announced only by its waiter (with its folder) shows up, with the wrapper pipe attached', async () => {
+    const { host, out } = boot();
+    await host.start();
+    const ctl = new AbortController();
+    void fetch(`http://127.0.0.1:${host.port}/mailbox/${host.token}/w9?pty=${encodeURIComponent('\\\\.\\pipe\\claude-pet-77')}&cwd=${encodeURIComponent('C:\\x\\proj')}`, { signal: ctl.signal }).catch(() => {});
+    await new Promise((r) => setTimeout(r, 150));
+    ctl.abort();
+    host.tick(Date.now());
+    const snap = [...out].reverse().find((m) => m.type === 'snapshot') as any;
+    expect(snap.sessions.find((x: any) => x.id === 'w9')).toMatchObject({ project: 'proj', state: 'idle', pty: '\\\\.\\pipe\\claude-pet-77' });
+  });
 });
 

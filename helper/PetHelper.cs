@@ -112,6 +112,9 @@ static class PetHelper
         var url = baseUrl.TrimEnd('/') + "/" + m.Groups[1].Value;
         var pipe = Environment.GetEnvironmentVariable("PET_PTY_SOCK");
         if (!string.IsNullOrEmpty(pipe) && pipe.StartsWith("\\\\.\\pipe\\claude-pet-")) url += "?pty=" + Uri.EscapeDataString(pipe);
+        // the session's folder: the pet learns about the session from its waiter even when no SessionStart HTTP hook reached it
+        string cwd = JsonString(json, "cwd");
+        if (!string.IsNullOrEmpty(cwd) && cwd.Length <= 1024) url += (url.Contains("?") ? "&" : "?") + "cwd=" + Uri.EscapeDataString(cwd);
         int parent = ParentPid();
         if (OneShotParent(parent)) return 0;
         while (Alive(parent))

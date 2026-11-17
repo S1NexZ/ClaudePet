@@ -12,6 +12,8 @@ export interface HookServerOpts {
   mailbox: Mailbox;
   /** a waiter said which pseudoterminal pipe its claude runs on (`pet-helper pty`); only well-formed pipe names of ours are passed on */
   onPty?(sessionId: string, pipe: string): void;
+  /** a waiter told the session's folder (`?cwd=`): the session exists even if its SessionStart never arrived as an HTTP hook */
+  onWaiter?(sessionId: string, cwd: string): void;
   /** answers a PermissionRequest hook; null = no opinion (Claude Code then shows its normal dialog). Absent = never answer. */
   onPermission?(e: HookPayload): Promise<'allow' | 'deny' | null>;
   /** an answer for an ordinary hook event (soft stop: `{"continue": false}`); null = plain 200 */
@@ -41,6 +43,8 @@ export async function startHookServer(o: HookServerOpts): Promise<{ port: number
       const sid = decodeURIComponent(rest);
       if (!SAFE_ID.test(sid)) { res.writeHead(400).end(); return; }
       const pty = url.searchParams.get('pty');
+      const cwd = url.searchParams.get('cwd');
+      if (cwd && cwd.length <= 1024 && !/[\x00-\x1f]/.test(cwd)) o.onWaiter?.(sid, cwd);
       if (pty && PIPE_NAME.test(pty)) o.onPty?.(sid, pty);
       if (o.mailbox.hasWaiter(sid)) { res.writeHead(409).end(); return; }
       let done = false;

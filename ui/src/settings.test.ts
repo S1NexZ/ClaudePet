@@ -23,9 +23,9 @@ describe('settings', () => {
   });
   it('round-trips', () => {
     const f = file();
-    saveSettings(f, { autostart: true, notify: false, hotkey: 'Control+Shift+K', model: 'clawd', appearance: { primary: null, accent: null }, permissions: 'ask', answerPermissions: false, sdkChats: false, language: 'auto', petScale: 1 });
-    expect(JSON.parse(readFileSync(f, 'utf8'))).toEqual({ autostart: true, notify: false, hotkey: 'Control+Shift+K', model: 'clawd', appearance: { primary: null, accent: null }, permissions: 'ask', answerPermissions: false, sdkChats: false, language: 'auto', petScale: 1 });
-    expect(loadSettings(f)).toEqual({ autostart: true, notify: false, hotkey: 'Control+Shift+K', model: 'clawd', appearance: { primary: null, accent: null }, permissions: 'ask', answerPermissions: false, sdkChats: false, language: 'auto', petScale: 1 });
+    saveSettings(f, { autostart: true, notify: false, hotkey: 'Control+Shift+K', model: 'clawd', appearance: { primary: null, accent: null }, permissions: 'ask', answerPermissions: false, sdkChats: false, newChatIn: 'wsl', language: 'auto', petScale: 1 });
+    expect(JSON.parse(readFileSync(f, 'utf8'))).toEqual({ autostart: true, notify: false, hotkey: 'Control+Shift+K', model: 'clawd', appearance: { primary: null, accent: null }, permissions: 'ask', answerPermissions: false, sdkChats: false, newChatIn: 'wsl', language: 'auto', petScale: 1 });
+    expect(loadSettings(f)).toEqual({ autostart: true, notify: false, hotkey: 'Control+Shift+K', model: 'clawd', appearance: { primary: null, accent: null }, permissions: 'ask', answerPermissions: false, sdkChats: false, newChatIn: 'wsl', language: 'auto', petScale: 1 });
   });
   it('a fresh install uses Claude-maiden; a valid model id is kept', () => {
     expect(DEFAULTS.model).toBe('claude-maiden');
@@ -66,4 +66,12 @@ describe('settings', () => {
     writeFileSync(f, JSON.stringify({ petScale: 'x' }));
     expect(loadSettings(f).petScale).toBe(1);
   });
+  it('new chats start in WSL by default; "windows" is kept, anything else falls back', () => {
+    expect(DEFAULTS.newChatIn).toBe('wsl');
+    const f = file(); writeFileSync(f, JSON.stringify({ newChatIn: 'windows' }));
+    expect(loadSettings(f).newChatIn).toBe('windows');
+    writeFileSync(f, JSON.stringify({ newChatIn: 'mars' }));
+    expect(loadSettings(f).newChatIn).toBe('wsl');
+  });
 });
+
