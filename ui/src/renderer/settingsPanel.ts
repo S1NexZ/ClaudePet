@@ -1,6 +1,7 @@
 import { ACCENT_PRESETS, PRIMARY_PRESETS, DEFAULT_ACCENT, accentVars, spriteFilter, cleanAppearance, type Appearance } from '../appearance.js';
 import type { PermissionPolicy } from '../../../shared/src/types.js';
 import { gsap } from 'gsap';
+import { boost } from './motion.js';
 import { STATE_LABEL } from './labels.js';
 import { L, type LangPref } from '../../../shared/src/i18n.js';
 
@@ -192,6 +193,7 @@ export function createSettingsPanel(root: HTMLElement, deps: SettingsDeps, initi
     root.replaceChildren(head, body);
     if (keepScroll) body.scrollTop = keepScroll;
     if (lastShown !== tab && !matchMedia('(prefers-reduced-motion: reduce)').matches) {
+      boost();
       gsap.fromTo(body.children, { opacity: 0, y: 8 }, { opacity: 1, y: 0, duration: 0.28, stagger: 0.04, ease: 'power2.out', clearProps: 'opacity,transform' });
     }
     lastShown = tab;

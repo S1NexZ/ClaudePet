@@ -204,6 +204,8 @@ async function main() {
   }, true);
   setInterval(renderUsage, 60_000); // only repaints (age, "stale", expired windows); no I/O
 
+  /** sets `hidden` only when it changes (setting the same value still counts as a DOM change and would wake the loop) */
+  const show = (el: HTMLElement, on: boolean) => { if (el.hidden === on) el.hidden = !on; };
   /** wakes the frame loop at once (it sleeps between sprite frames); anything that can change what is on screen calls it */
   let wake: () => void = () => {};
   host.onBridge((up) => { connected = up; if (!up) raw = null; if (up) host.send({ type: 'usage' }); wake(); });
@@ -411,7 +413,7 @@ async function main() {
     const sid = newChat ? null : s?.id ?? null;
     const title = newChat ? `${L('Новый чат', 'New chat', '新聊天')} · ${folder!.replace(/[\\/]+$/, '').split(/[\\/]/).pop()}` : s ? `${s.project} · ${STATE_LABEL[s.state]}` : L('Чат', 'Chat', '聊天');
     if ($('chat-title').textContent !== title) $('chat-title').textContent = title;
-    $('btn-term').hidden = !sid; $('btn-end').hidden = !sid;
+    show($('btn-term'), !!sid); show($('btn-end'), !!sid);
     const openLabel = s?.desktopId ? L('Открыть в приложении Claude', 'Open in the Claude app', '在 Claude 应用中打开') : L('Открыть в терминале', 'Open in terminal', '在终端中打开');
     if ($('btn-term').getAttribute('aria-label') !== openLabel) { $('btn-term').title = openLabel; $('btn-term').setAttribute('aria-label', openLabel); }
     // ask for the transcript once per opening of this chat (even if /btw already put messages there)
@@ -530,7 +532,7 @@ async function main() {
   };
   let lastTick = 0;
   const tick = (t: number) => {
-    own = true; queueMicrotask(() => { own = false; });
+    own = true;
     if (t - lastTick < 15) { schedule(t); return; } // high-refresh displays (144 Hz+): ~60 updates a second are plenty
     lastTick = t;
     const snap = eff();
@@ -576,7 +578,7 @@ async function main() {
     dirty = false;
     lastHeavy = t;
     const pp = s?.pendingPermission;
-    $('perm').hidden = !pp;
+    show($('perm'), !!pp);
     if (pp) {
       $('perm-text').textContent = `${pp.tool}: ${pp.summary}`;
       if (pp.id !== lastNotified) { lastNotified = pp.id; host.notify(L('Claude ждёт разрешения', 'Claude needs permission', 'Claude 需要权限'), `${s!.project}: ${pp.tool} ${pp.summary}`); }
@@ -589,8 +591,8 @@ async function main() {
     const ph = placeholderFor(cs, folder, mode);
     if (input.placeholder !== ph) input.placeholder = ph;
     if (input.disabled !== busy) { input.disabled = busy; if (!busy && expanded) input.focus(); }
-    $('btn-stop').hidden = !(busy && canStop(chatS));
-    $('btn-send').hidden = busy && canStop(chatS);
+    show($('btn-stop'), busy && canStop(chatS));
+    show($('btn-send'), !(busy && canStop(chatS)));
     lastSnap = snap;
     renderPanel(snap);
     renderChatMenu();
@@ -607,6 +609,8 @@ async function main() {
   let timer: ReturnType<typeof setTimeout> | undefined, queued = false, dirty = true;
   const runSoon = () => { if (!queued) { queued = true; requestAnimationFrame((t) => { queued = false; tick(t); }); } };
   function schedule(t: number) {
+    // queued at the END of the tick: the observers' records of this tick's own writes are delivered before it
+    queueMicrotask(() => { own = false; });
     if (fading || dirty) { runSoon(); return; }
     let ms = Math.min(anim.msToNextFrame(t), 1000 - (Date.now() % 1000) + 5);
     if (movedAt) ms = Math.min(ms, Math.max(0, 180 - (t - movedAt)));

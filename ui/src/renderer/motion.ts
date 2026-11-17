@@ -7,8 +7,21 @@ import { gsap } from 'gsap';
  */
 export interface MotionParts { sprite: HTMLElement; dockPill: HTMLElement; chip: HTMLElement; ring: HTMLElement }
 
+/**
+ * GSAP's ticker: 60 Hz while something really moves (hover reveals, panels, the state "pop"); 15 Hz when the only running tween is the
+ * stepped breathing (~7 visible changes a second, placed by time, so it looks the same). Every motion start calls boost() first.
+ */
+let fpsNow = 0;
+const setFps = (f: number) => { if (f !== fpsNow) { fpsNow = f; gsap.ticker.fps(f); } };
+export const boost = () => setFps(60);
+let idleTween: gsap.core.Tween | null = null;
+setInterval(() => {
+  const busy = gsap.globalTimeline.getChildren(true, true, true).some((t) => t !== idleTween && t.isActive());
+  setFps(busy ? 60 : 15);
+}, 500);
+
 export function createMotion(p: MotionParts, reduce: boolean) {
-  gsap.ticker.fps(60); // on 144 Hz displays GSAP would otherwise re-style everything 144 times a second
+  boost(); // never above 60: on 144 Hz displays GSAP would otherwise re-style everything 144 times a second
   const dockButtons = Array.from(p.dockPill.querySelectorAll<HTMLElement>('button, .sep'));
   const label = p.chip.querySelector<HTMLElement>('#label')!;
   const detail = p.chip.querySelector<HTMLElement>('#detail')!;
@@ -50,6 +63,7 @@ export function createMotion(p: MotionParts, reduce: boolean) {
   ring.timeScale(speed).progress(0);
 
   const drive = (tl: gsap.core.Timeline, on: boolean, outSpeed = 1.5) => {
+    boost();
     if (on) { if (tl.reversed() || tl.progress() === 0 || !tl.isActive()) { tl.timeScale(speed); tl.play(); } }
     else { tl.timeScale(speed * outSpeed); tl.reverse(); }
   };
@@ -57,12 +71,11 @@ export function createMotion(p: MotionParts, reduce: boolean) {
 
   // ---- the pet itself: a calm pet breathes; a state change gives it a soft squash ----
   let popping = false;
-  const breath = gsap.to(p.sprite, { y: -1.5, scaleX: 1.012, scaleY: 1.02, duration: 1.8, ease: 'steps(12)', yoyo: true, repeat: -1, paused: true }); // stepped: ~7 visible changes a second instead of a repaint on every frame (the idle GPU cost)
+  const breath = idleTween = gsap.to(p.sprite, { y: -1.5, scaleX: 1.012, scaleY: 1.02, duration: 1.8, ease: 'steps(12)', yoyo: true, repeat: -1, paused: true }); // stepped: ~7 visible changes a second instead of a repaint on every frame (the idle GPU cost)
   let breathing = false;
-  const settle = () => { gsap.to(p.sprite, { y: 0, scaleX: 1, scaleY: 1, duration: 0.35, ease: 'power2.out', overwrite: 'auto' }); };
+  const settle = () => { boost(); gsap.to(p.sprite, { y: 0, scaleX: 1, scaleY: 1, duration: 0.35, ease: 'power2.out', overwrite: 'auto' }); };
 
-  // the status dot glows softly while Claude works
-  const glow = gsap.to(dot, { '--gr': '12px', duration: 0.9, ease: 'sine.inOut', yoyo: true, repeat: -1, paused: true });
+  // the status dot glows softly while Claude works (a CSS animation of the glow's opacity: no per-frame JS or repaint)
   let pulsing = false;
 
   return {
@@ -71,7 +84,7 @@ export function createMotion(p: MotionParts, reduce: boolean) {
       if (reduce) on = false;
       if (on === pulsing) return;
       pulsing = on;
-      if (on) glow.play(); else { glow.pause(); gsap.to(dot, { '--gr': '6px', duration: 0.3, overwrite: 'auto' }); }
+      dot.classList.toggle('glowing', on);
     },
     /** the hover state: pill + chip */
     setAwake(on: boolean) {
@@ -89,6 +102,7 @@ export function createMotion(p: MotionParts, reduce: boolean) {
     },
     pop() {
       if (reduce) return;
+      boost();
       popping = true; breathing = false; breath.pause();
       gsap.timeline({ onComplete: () => { popping = false; } })
         .to(p.sprite, { scaleX: 1.045, scaleY: 0.955, y: 0, duration: 0.12, ease: 'power2.out', overwrite: true })
@@ -114,6 +128,7 @@ export function animatePanels(els: Array<HTMLElement | null>, reduce: boolean): 
       set(v: boolean) {
         const cur = proto.get!.call(el) as boolean;
         if (reduce) { real(!!v); return; }
+        boost();
         if (!v) {
           if (!cur && !leaving) return; // already shown
           leaving = false; gsap.killTweensOf(el); real(false);

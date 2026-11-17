@@ -44,7 +44,12 @@ body { font-family: "Segoe UI", "Microsoft YaHei UI", system-ui, sans-serif; col
 #chip[data-state="subagent"] { --sc: #f472b6; }
 #chip[data-state="done"] { --sc: #a3e635; }
 #chip[data-state="sleeping"] { --sc: #8b93a7; }
-#dot { --gr: 6px; width: 10px; height: 10px; border-radius: 50%; background: var(--sc); box-shadow: 0 0 var(--gr) color-mix(in srgb, var(--sc) 75%, transparent); flex: none; transition: background .25s; }
+#dot { position: relative; width: 10px; height: 10px; border-radius: 50%; background: var(--sc); box-shadow: 0 0 6px color-mix(in srgb, var(--sc) 75%, transparent); flex: none; transition: background .25s; }
+/* the working glow: a wider shadow painted once, only its opacity pulses (compositor-only; animating the blur radius repainted every frame) */
+#dot::after { content: ''; position: absolute; inset: 0; border-radius: 50%; box-shadow: 0 0 12px color-mix(in srgb, var(--sc) 75%, transparent); opacity: 0; transition: opacity .3s; pointer-events: none; }
+#dot.glowing::after { animation: dot-glow 1.8s ease-in-out infinite; }
+@keyframes dot-glow { 0%, 100% { opacity: 0; } 50% { opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { #dot.glowing::after { animation: none; } }
 #label { overflow: hidden; }
 #detail { color: var(--muted); font-size: 12.5px; overflow: hidden; text-overflow: ellipsis; }
 #pill, #dock-pill { display: flex; align-items: center; background: var(--glass); border: 1px solid var(--glass-line); border-radius: 22px; padding: 4px 6px; }
