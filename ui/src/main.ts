@@ -12,6 +12,7 @@ import { loadSettings, saveSettings } from './settings.js';
 import { focusByTitle, focusDesktopApp } from './focusWindow.js';
 import { formatDiagnostics, lastEventByHost } from './diagnostics.js';
 import { syncHelper } from './stableHelper.js';
+import { checkLatest } from './updates.js';
 import { planProfile, removeFromProfile, profileState, profilePaths, readProfile, applyProfile } from './psProfile.js';
 import { overAny, type Rect } from './hitTest.js';
 import { placeStage, restoreAnchor, IDLE_H, type Anchor } from './placement.js';
@@ -232,7 +233,24 @@ if (primary) app.whenReady().then(async () => {
     }));
     if (isConfirmed(r)) clipboard.writeText(cmd);
   };
+  // ---- update check: once a day (first ~20 s after start), only tells the user; the release page opens on click ----
+  let update: { version: string; url: string } | null = null;
+  const checkUpdates = async () => {
+    if (!settings.checkUpdates || !app.isPackaged) return;
+    const u = await checkLatest(app.getVersion());
+    if (!u || u.version === update?.version) return;
+    update = u;
+    log(`update available: ${u.version}`);
+    if (Notification.isSupported()) {
+      const n = new Notification({ title: 'ccPet', body: L(`Доступна версия ${u.version}. Нажмите, чтобы открыть страницу релиза.`, `Version ${u.version} is available. Click to open the release page.`, `${u.version} 版本已发布。点击打开发布页面。`) });
+      n.on('click', () => void shell.openExternal(u.url));
+      n.show();
+    }
+  };
+  setTimeout(() => void checkUpdates(), 20_000).unref();
+  setInterval(() => void checkUpdates(), 24 * 3600_000).unref();
   const trayMenu = () => Menu.buildFromTemplate([
+    ...(update ? [{ label: L(`Доступна версия ${update.version}…`, `Version ${update.version} is available…`, `${update.version} 版本可用…`), click: () => void shell.openExternal(update!.url) }, { type: 'separator' as const }] : []),
     { label: win.isVisible() ? L('Скрыть питомца', 'Hide the pet', '隐藏宠物') : L('Показать питомца', 'Show the pet', '显示宠物'), click: toggleWindow },
     { label: `${L('Вызов питомца', 'Summon the pet', '唤出宠物')}: ${settings.hotkey || L('выключен', 'off', '关')}`, enabled: false },
     { type: 'separator' },
@@ -246,6 +264,8 @@ if (primary) app.whenReady().then(async () => {
       click: () => { settings = { ...settings, petScale: v }; applySettings(); win.webContents.send('pet:scale', v); } })) },
     { label: L('Запускать вместе с Windows', 'Start with Windows', '随 Windows 启动'), type: 'checkbox', checked: settings.autostart, enabled: app.isPackaged,
       click: (i) => { settings = { ...settings, autostart: i.checked }; applySettings(); } },
+    { label: L('Проверять обновления (раз в день)', 'Check for updates (daily)', '检查更新（每天）'), type: 'checkbox', checked: settings.checkUpdates,
+      click: (i) => { settings = { ...settings, checkUpdates: i.checked }; applySettings(); if (i.checked) void checkUpdates(); } },
     { type: 'separator' },
     { label: L('Выйти', 'Quit', '退出'), click: () => app.quit() },
   ]);
