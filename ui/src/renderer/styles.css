@@ -167,12 +167,11 @@ body { font-family: "Segoe UI", "Microsoft YaHei UI", system-ui, sans-serif; col
 #usage-ring circle { fill: none; stroke-width: 2.6; }
 #usage-ring .track { stroke: color-mix(in srgb, var(--text) 22%, transparent); }
 #usage-ring .arc { stroke: var(--ring); stroke-linecap: round; }
-#usage-ring[data-level="warn"] { --ring: #e0a43c; }
-#usage-ring[data-level="high"] { --ring: var(--alert); }
-#usage-ring[data-level="full"] { --ring: var(--alert); animation: ring-full 2.4s ease-in-out infinite; }
-#usage-ring[data-level="full"] #usage-ring-text { font-size: 8px; letter-spacing: -0.4px; color: var(--alert); }
-@keyframes ring-full { 0%, 100% { box-shadow: 0 0 0 0 transparent; } 50% { box-shadow: 0 0 9px 1px color-mix(in srgb, var(--alert) 70%, transparent); } }
-@media (prefers-reduced-motion: reduce) { #usage-ring[data-level="full"] { animation: none; box-shadow: 0 0 6px color-mix(in srgb, var(--alert) 60%, transparent); } }
+/* the arc keeps the user's accent colour at any level (Settings → Colours); a used-up limit only breathes */
+#usage-ring[data-level="full"] { animation: ring-full 2.4s ease-in-out infinite; }
+#usage-ring[data-level="full"] #usage-ring-text { font-size: 8px; letter-spacing: -0.4px; }
+@keyframes ring-full { 0%, 100% { box-shadow: 0 0 0 0 transparent; } 50% { box-shadow: 0 0 9px 1px color-mix(in srgb, var(--ring) 70%, transparent); } }
+@media (prefers-reduced-motion: reduce) { #usage-ring[data-level="full"] { animation: none; box-shadow: 0 0 6px color-mix(in srgb, var(--ring) 60%, transparent); } }
 #usage-ring[data-level="none"] .arc { stroke-dasharray: 0 100; }
 #usage-ring.stale svg { opacity: 0.8; }
 #usage-ring-text { position: relative; font: 600 8.5px "Segoe UI", "Microsoft YaHei UI", system-ui, sans-serif; color: var(--text); }
@@ -184,8 +183,7 @@ body { font-family: "Segoe UI", "Microsoft YaHei UI", system-ui, sans-serif; col
 #usage .u-sub { font-size: 12px; color: var(--muted); }
 #usage .u-bar { height: 6px; border-radius: 3px; background: var(--hover2); overflow: hidden; }
 #usage .u-bar i { display: block; height: 100%; border-radius: 3px; background: var(--teal); }
-#usage .u-bar i.warn { background: #e0a43c; }
-#usage .u-bar i.high { background: var(--alert); }
+/* the bars keep the user's accent colour at any level, like the ring */
 #usage .u-val { font-size: 12px; color: var(--muted); }
 #usage .u-msg { font-size: 12.5px; line-height: 1.4; color: var(--muted); }
 #usage .u-foot { font-size: 11.5px; color: var(--muted); border-top: 1px solid var(--glass-line); padding-top: 7px; }

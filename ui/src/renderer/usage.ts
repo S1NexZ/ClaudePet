@@ -110,13 +110,13 @@ export function panelModel(u: UsageInfo | null, now: number): PanelModel {
 
 export interface RingModel { text: string; pct: number | null; level: 'none' | 'ok' | 'warn' | 'high' | 'full'; stale: boolean; title: string }
 
-/** The ring shows the fuller of the two windows (whichever stops work first); the other one is in the tooltip. */
+/** The ring shows the 5-hour window (the weekly one when 5 h has nothing current); both are in the tooltip. */
 export function ringModel(u: UsageInfo | null, now: number): RingModel {
   const status = usageStatus(u, now);
   const none: RingModel = { text: '—', pct: null, level: 'none', stale: false, title: L('Лимиты плана: данных нет', 'Plan limits: no data', '套餐额度：无数据') };
   if (status === 'unavailable' || status === 'invalid') return { ...none, title: status === 'invalid' ? L('Лимиты плана: ответ не распознан', 'Plan limits: response not understood', '套餐额度：无法理解响应') : none.title };
   const f = windowView(u!.fiveHour, now), w = windowView(u!.sevenDay, now);
-  const main = f.kind === 'ok' && w.kind === 'ok' ? (w.pct > f.pct ? w : f) : f.kind === 'ok' ? f : w.kind === 'ok' ? w : null;
+  const main = f.kind === 'ok' ? f : w.kind === 'ok' ? w : null;
   if (!main) return { ...none, title: L('Лимиты плана: данные устарели (период сброшен)', 'Plan limits: data is stale (period reset)', '套餐额度：数据已过期（周期已重置）'), stale: true };
   const parts = [f.kind === 'ok' && `${L('5 ч', '5 h', '5 小时')}: ${fmtPct(f.pct)}`, w.kind === 'ok' && `${L('неделя', 'week', '本周')}: ${fmtPct(w.pct)}`].filter(Boolean).join(' · ');
   const stale = status === 'stale';
