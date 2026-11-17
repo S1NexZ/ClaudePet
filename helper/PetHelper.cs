@@ -244,11 +244,110 @@ static class PetHelper
         }
     }
 
+    // ---- statusLine: Claude Code passes the account's rate limits on stdin; saved for the pet's limits ring ----
+    static string Num(string json, string window, string field)
+    {
+        var w = Regex.Match(json, "\"rate_limits\"\\s*:\\s*\\{.*?\"" + window + "\"\\s*:\\s*\\{([^{}]*)\\}", RegexOptions.Singleline);
+        if (!w.Success) return null;
+        var f = Regex.Match(w.Groups[1].Value, "\"" + field + "\"\\s*:\\s*(-?[0-9]+(?:\\.[0-9]+)?(?:[eE][-+]?[0-9]+)?)");
+        return f.Success ? f.Groups[1].Value : null;
+    }
+
+    static string Window(string json, string window, out double pct)
+    {
+        pct = 0;
+        string p = Num(json, window, "used_percentage"), r = Num(json, window, "resets_at");
+        if (p == null || r == null) return null;
+        pct = double.Parse(p, System.Globalization.CultureInfo.InvariantCulture);
+        return "{\"used_percentage\":" + p + ",\"resets_at\":" + r + "}";
+    }
+
+    static string JsonString(string json, string key)
+    {
+        var m = Regex.Match(json, "\"" + key + "\"\\s*:\\s*\"((?:[^\"\\\\]|\\\\.)*)\"");
+        if (!m.Success) return null;
+        var sb = new StringBuilder(); var v = m.Groups[1].Value;
+        for (int i = 0; i < v.Length; i++)
+        {
+            char c = v[i];
+            if (c != '\\' || i + 1 >= v.Length) { sb.Append(c); continue; }
+            char n = v[++i];
+            switch (n)
+            {
+                case 'n': sb.Append('\n'); break; case 't': sb.Append('\t'); break; case 'r': sb.Append('\r'); break;
+                case 'b': sb.Append('\b'); break; case 'f': sb.Append('\f'); break;
+                case 'u': if (i + 4 < v.Length) { sb.Append((char)Convert.ToInt32(v.Substring(i + 1, 4), 16)); i += 4; } break;
+                default: sb.Append(n); break;
+            }
+        }
+        return sb.ToString();
+    }
+
+    static void Out(string text) { var b = new UTF8Encoding(false).GetBytes(text); using (var o = Console.OpenStandardOutput()) { o.Write(b, 0, b.Length); o.Flush(); } }
+
+    static int StatusLine(string[] args)
+    {
+        string input = "";
+        try { using (var rd = new StreamReader(Console.OpenStandardInput(), new UTF8Encoding(false))) input = rd.ReadToEnd(); } catch { }
+        string chain = null;
+        for (int i = 0; i + 1 < args.Length; i++) if (args[i] == "--chain") chain = args[i + 1];
+        try
+        {
+            double p5, p7;
+            string five = Window(input, "five_hour", out p5), seven = Window(input, "seven_day", out p7);
+            if (five != null || seven != null)
+            {
+                string file = Environment.GetEnvironmentVariable("CLAUDE_PET_USAGE");
+                if (string.IsNullOrEmpty(file)) file = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".claude-pet", "usage.json");
+                Directory.CreateDirectory(Path.GetDirectoryName(file));
+                string tmp = file + "." + Process.GetCurrentProcess().Id + ".tmp";
+                long now = (long)(DateTime.UtcNow - new DateTime(1970, 1, 1, 0, 0, 0, DateTimeKind.Utc)).TotalMilliseconds;
+                File.WriteAllText(tmp, "{\"version\":1,\"updatedAt\":" + now + ",\"five_hour\":" + (five ?? "null") + ",\"seven_day\":" + (seven ?? "null") + "}", new UTF8Encoding(false));
+                if (File.Exists(file)) File.Replace(tmp, file, null); else File.Move(tmp, file); // atomic: the pet never reads half a file
+                if (chain == null)
+                {
+                    var parts = new System.Collections.Generic.List<string>();
+                    if (five != null) parts.Add("5ч " + Math.Round(p5) + "%");
+                    if (seven != null) parts.Add("нед " + Math.Round(p7) + "%");
+                    Out(string.Join(" · ", parts) + "\n");
+                }
+            }
+        }
+        catch { /* a status line must never break the session */ }
+        if (chain != null)
+        {
+            try
+            {
+                string b64 = chain.Replace('-', '+').Replace('_', '/'); while (b64.Length % 4 != 0) b64 += "=";
+                string cmd = JsonString(Encoding.UTF8.GetString(Convert.FromBase64String(b64)), "command");
+                if (!string.IsNullOrEmpty(cmd))
+                {
+                    // the user's own line: with Git Bash when there is one (that is what Claude Code uses on Windows), else cmd
+                    string bash = Environment.GetEnvironmentVariable("CLAUDE_CODE_GIT_BASH_PATH");
+                    if (string.IsNullOrEmpty(bash) || !File.Exists(bash)) bash = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "Git", "bin", "bash.exe");
+                    var psi = File.Exists(bash) ? new ProcessStartInfo(bash, "-c " + Quote(cmd)) : new ProcessStartInfo("cmd.exe", "/d /s /c \"" + cmd + "\"");
+                    psi.UseShellExecute = false; psi.RedirectStandardInput = true; psi.RedirectStandardOutput = true; psi.CreateNoWindow = true;
+                    psi.StandardOutputEncoding = new UTF8Encoding(false);
+                    using (var pr = Process.Start(psi))
+                    {
+                        var w = new StreamWriter(pr.StandardInput.BaseStream, new UTF8Encoding(false)); w.Write(input); w.Close();
+                        var outTask = pr.StandardOutput.ReadToEndAsync();
+                        if (pr.WaitForExit(4000) && outTask.Wait(500)) Out(outTask.Result);
+                        else { try { pr.Kill(); } catch { } }
+                    }
+                }
+            }
+            catch { /* the user's own line failed: show nothing rather than break the session */ }
+        }
+        return 0;
+    }
+
     static string Quote(string a) { return a.IndexOfAny(new[] { ' ', '\t', '"' }) >= 0 ? "\"" + a.Replace("\"", "\\\"") + "\"" : a; }
 
     static int Main(string[] args)
     {
         if (args.Length >= 2 && args[0] == "wait") return Wait(args[1]);
+        if (args.Length >= 1 && args[0] == "statusline") { var rest = new string[args.Length - 1]; Array.Copy(args, 1, rest, 0, rest.Length); return StatusLine(rest); }
         if (args.Length >= 2 && args[0] == "oneshot") return IsOneShot(args[1]) ? 1 : 0; // self-test of the rule
         if (args.Length >= 2 && args[0] == "pty") { var rest = new string[args.Length - 1]; Array.Copy(args, 1, rest, 0, rest.Length); return Pty(rest); }
         return 0;

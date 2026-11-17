@@ -81,3 +81,24 @@ describe('runInstallStatusLine', () => {
     expect(readdirSync(foreign.d).some((f) => f.startsWith('settings.json.bak-statusline-'))).toBe(true);
   });
 });
+
+describe('Windows statusLine (pet-helper.exe statusline)', () => {
+  const EXE = 'C:\\Users\\u\\AppData\\Local\\Programs\\claude-pet\\resources\\helper\\pet-helper.exe';
+  it('points statusLine at the helper (no POSIX redirections: the helper never fails or writes to stderr)', () => {
+    const { next, kind } = planStatusLine({}, '', '', { exe: EXE });
+    expect(kind).toBe('ours');
+    expect(next.statusLine).toEqual({ type: 'command', command: `"${EXE}" statusline`, padding: 0 });
+    expect(statusLineState(next)).toBe('ours');
+  });
+  it("wraps the user's own line and restores it; an updated helper path replaces ours", () => {
+    const mine = { type: 'command', command: 'powershell -c "Get-Date"' };
+    const r = planStatusLine({ statusLine: mine }, '', '', { exe: EXE });
+    expect(r.kind).toBe('chained');
+    expect(statusLineState(r.next)).toBe('chained');
+    expect(removeStatusLine(r.next).next.statusLine).toEqual(mine);
+    const moved = planStatusLine(r.next, '', '', { exe: 'D:\\pet\\pet-helper.exe' });
+    expect(moved.next.statusLine.command).toContain('D:\\pet\\pet-helper.exe');
+    expect(removeStatusLine(moved.next).next.statusLine).toEqual(mine);
+  });
+});
+

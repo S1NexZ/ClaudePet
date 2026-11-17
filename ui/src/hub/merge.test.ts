@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { mergeSnapshots, hostOf, hostOfPermission, type HostPart } from './merge.js';
-import type { Session } from '../../../shared/src/types.js';
+import { mergeSnapshots, hostOf, hostOfPermission, mergeUsage, type HostPart } from './merge.js';
+import type { Session, UsageInfo } from '../../../shared/src/types.js';
 
 const s = (id: string, state: Session['state'], at: number, extra: Partial<Session> = {}): Session => ({ id, cwd: '/', project: id, state, since: at, lastEventAt: at, owned: false, ...extra });
 const parts: HostPart[] = [
@@ -37,3 +37,22 @@ describe('several WSL distros', () => {
     expect(hostOf('c', parts)).toBe('windows');
   });
 });
+
+describe('mergeUsage (limits from the WSL and the Windows side)', () => {
+  const u = (o: Partial<UsageInfo>): UsageInfo => ({ plan: null, updatedAt: null, fiveHour: null, sevenDay: null, statusLine: 'none', ...o });
+  it('the numbers come wholesale from the side that got them last; plan and the status line state from any side', () => {
+    const wsl = u({ plan: 'pro', updatedAt: 100, fiveHour: { usedPct: 10, resetsAt: 1 }, source: 'live', liveActive: true, lastAttemptAt: 100, lastError: null });
+    const win = u({ updatedAt: 200, fiveHour: { usedPct: 40, resetsAt: 2 }, sevenDay: { usedPct: 5, resetsAt: 3 }, statusLine: 'ours', source: 'statusline' });
+    expect(mergeUsage([wsl, win])).toMatchObject({ plan: 'pro', updatedAt: 200, fiveHour: { usedPct: 40 }, sevenDay: { usedPct: 5 }, statusLine: 'ours', source: 'statusline', liveActive: true, lastAttemptAt: 100 });
+  });
+  it('one side only, or a side without data, gives the other one', () => {
+    const wsl = u({ plan: 'max', updatedAt: 100, fiveHour: { usedPct: 10, resetsAt: 1 }, statusLine: 'other' });
+    expect(mergeUsage([wsl])).toEqual(wsl);
+    expect(mergeUsage([u({}), wsl])).toMatchObject({ updatedAt: 100, plan: 'max', statusLine: 'other' });
+    expect(mergeUsage([])).toBeNull();
+  });
+  it('a click refresh running on any side shows as refreshing', () => {
+    expect(mergeUsage([u({ refreshing: true }), u({ updatedAt: 5 })])!.refreshing).toBe(true);
+  });
+});
+

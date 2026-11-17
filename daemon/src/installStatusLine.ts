@@ -8,7 +8,9 @@ type Settings = Record<string, any>;
 const CHAIN = ' --chain ';
 const enc = (o: unknown) => Buffer.from(JSON.stringify(o), 'utf8').toString('base64url');
 const dec = (b: string): any => { try { return JSON.parse(Buffer.from(b, 'base64url').toString('utf8')); } catch { return null; } };
-const isOurs = (sl: any) => !!sl && String(sl.command ?? '').includes(MARKER);
+/** pet-statusline.mjs (WSL / Linux, run by node) or `pet-helper.exe statusline` (Windows) */
+export const isPetStatusLine = (command: string): boolean => command.includes(MARKER) || /pet-helper\.exe"?\s+statusline\b/i.test(command);
+const isOurs = (sl: any) => !!sl && isPetStatusLine(String(sl.command ?? ''));
 /** The statusLine Claude Code had before we wrapped it (null: ours is not a wrapper, or the wrapper is unreadable). */
 export function chainedOriginal(sl: any): any | null {
   if (!isOurs(sl)) return null;
@@ -23,14 +25,16 @@ export type StatusLineKind = 'none' | 'ours' | 'chained';
  * Someone else's statusLine is not replaced but wrapped: our script runs it with the same input and prints its output, and the
  * original object is kept (base64) so removeStatusLine restores it exactly.
  */
-export function planStatusLine(current: Settings, scriptPath: string, nodePath: string): { next: Settings; diff: string; kind: StatusLineKind } {
+export function planStatusLine(current: Settings, scriptPath: string, nodePath: string, opts: { exe?: string } = {}): { next: Settings; diff: string; kind: StatusLineKind } {
   const existing = current.statusLine;
-  const base = `"${nodePath}" "${scriptPath}"`;
+  // Windows: the helper exe; it always exits 0 and prints nothing to stderr, so no POSIX `2>/dev/null || true` (Claude Code may run it with cmd)
+  const base = opts.exe ? `"${opts.exe}" statusline` : `"${nodePath}" "${scriptPath}"`;
+  const tail = opts.exe ? '' : ' 2>/dev/null || true';
   const orig = isOurs(existing) ? chainedOriginal(existing) : existing ?? null;
   const next: Settings = JSON.parse(JSON.stringify(current));
   next.statusLine = orig
-    ? { ...orig, type: 'command', command: `${base}${CHAIN}${enc(orig)} 2>/dev/null || true` }
-    : { type: 'command', command: `${base} 2>/dev/null || true`, padding: 0 };
+    ? { ...orig, type: 'command', command: `${base}${CHAIN}${enc(orig)}${tail}` }
+    : { type: 'command', command: `${base}${tail}`, padding: 0 };
   const kind: StatusLineKind = orig ? 'chained' : 'ours';
   if (JSON.stringify(current.statusLine) === JSON.stringify(next.statusLine)) return { next, diff: '', kind };
   const before = current.statusLine === undefined ? [] : JSON.stringify({ statusLine: current.statusLine }, null, 2).split('\n');

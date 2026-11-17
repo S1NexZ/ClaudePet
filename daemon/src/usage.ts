@@ -4,6 +4,7 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 import type { UsageInfo, UsageWindow } from '../../shared/src/types.js';
 import type { LiveState } from './usageLive.js';
+import { isPetStatusLine } from './installStatusLine.js';
 
 export const defaultUsagePath = () => process.env.CLAUDE_PET_USAGE ?? join(homedir(), '.claude-pet', 'usage.json');
 
@@ -34,7 +35,7 @@ export function statusLineKind(settingsJson: string): UsageInfo['statusLine'] {
   try {
     const sl = JSON.parse(settingsJson)?.statusLine;
     if (!sl) return 'none';
-    return String(sl.command ?? '').includes('pet-statusline.mjs') ? 'ours' : 'other';
+    return isPetStatusLine(String(sl.command ?? '')) ? 'ours' : 'other';
   } catch { return 'none'; }
 }
 

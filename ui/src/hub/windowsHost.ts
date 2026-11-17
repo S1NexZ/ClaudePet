@@ -1,4 +1,4 @@
-import { join } from 'node:path';
+import { join, dirname } from 'node:path';
 import { randomBytes } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { SessionStore } from '../../../daemon/src/sessionStore.js';
@@ -7,6 +7,8 @@ import { createMailbox } from '../../../daemon/src/mailbox.js';
 import { startHookServer } from '../../../daemon/src/hookHttp.js';
 import { readTranscript } from '../../../daemon/src/transcript.js';
 import { findRunning } from '../../../daemon/src/adopt.js';
+import { createUsageSource } from '../../../daemon/src/usage.js';
+import { planStatusLine, removeStatusLine, statusLineState, type StatusLineKind } from '../../../daemon/src/installStatusLine.js';
 import { planHostHooks, removeHostHooks, hooksStatus, readSettingsFile, writeSettingsFile, type HooksStatus } from '../../../daemon/src/hookConfig.js';
 import type { AppCommand, BridgeMessage } from '../../../shared/src/types.js';
 import { L } from '../../../shared/src/i18n.js';
@@ -48,6 +50,8 @@ export function createWindowsHost(o: WindowsHostOpts) {
   const no = (ru: string, en: string, zh: string) => async () => { throw new Error(L(ru, en, zh)); };
   const bridge = createBridge({
     store, out: o.out, readTranscript, mailbox, mailboxOnly: true, permissionsFromPet: o.permissionsFromPet, softStop: true,
+    // limits saved by `pet-helper.exe statusline` (%USERPROFILE%\.claude-pet\usage.json), read when the file changes
+    usage: createUsageSource({ path: join(dirname(o.claudeHome), '.claude-pet', 'usage.json'), settingsPath }),
     runner: {
       models: async () => [], setPermissionPolicy: () => {}, release: () => false, respondPermission: () => {},
       setModel: no('Сменить модель можно в самой сессии', 'Change the model inside the session', '请在会话内切换模型'),
@@ -127,6 +131,17 @@ export function createWindowsHost(o: WindowsHostOpts) {
       writeSettingsFile(settingsPath, r.next, raw !== undefined);
       return { applied: true, diff: r.diff };
     },
+    /** the Windows statusLine (`pet-helper.exe statusline`, wrapping the user's own line): the plan, or the write after the user agreed */
+    statusLine(c: { apply?: boolean; remove?: boolean }): { diff: string; applied: boolean; kind: StatusLineKind; error?: string } {
+      if (!o.helperPath) return { diff: '', applied: false, kind: 'none', error: 'unsupported' };
+      try {
+        const { current, raw } = readSettingsFile(settingsPath);
+        const r = c.remove ? removeStatusLine(current) : planStatusLine(current, '', '', { exe: o.helperPath });
+        if (c.apply && r.diff) writeSettingsFile(settingsPath, r.next, raw !== undefined);
+        return { diff: c.apply ? '' : r.diff, applied: !!c.apply && !!r.diff, kind: statusLineState(c.apply || !r.diff ? r.next : current) };
+      } catch (e) { return { diff: '', applied: false, kind: 'none', error: (e as Error).message }; }
+    },
+    pushUsage: () => bridge.pushUsage(),
     settingsPath,
     hasSettings: () => existsSync(settingsPath),
   };

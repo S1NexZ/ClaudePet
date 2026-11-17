@@ -39,6 +39,7 @@ describe('planFromAuthStatus', () => {
 describe('statusLineKind', () => {
   it('ours / other / none', () => {
     expect(statusLineKind('{"statusLine":{"type":"command","command":"node /x/pet-statusline.mjs"}}')).toBe('ours');
+    expect(statusLineKind(JSON.stringify({ statusLine: { type: 'command', command: '"C:\\\\p\\\\pet-helper.exe" statusline' } }))).toBe('ours');
     expect(statusLineKind('{"statusLine":{"type":"command","command":"my-line.sh"}}')).toBe('other');
     expect(statusLineKind('{"model":"opus"}')).toBe('none');
     expect(statusLineKind('broken')).toBe('none');

@@ -15,13 +15,13 @@ import { placeStage, restoreAnchor, IDLE_H, type Anchor } from './placement.js';
 import { terminalCommand, windowsTerminalCommand, newSessionCommand } from './terminal.js';
 import { createWindowsHost, WINDOWS_HOST_PORT } from './hub/windowsHost.js';
 import { createWslHost, parseDistroList, secondaryDistros, portForDistro, type WslHost } from './hub/wslHost.js';
-import { mergeSnapshots, hostOf, hostOfPermission, type HostPart } from './hub/merge.js';
+import { mergeSnapshots, mergeUsage, hostOf, hostOfPermission, type HostPart } from './hub/merge.js';
 import { createDesktopRegistry, findRegistryRoots, decorateDesktop, type DesktopEntry } from './hub/desktopRegistry.js';
 import { pickAttention } from '../../daemon/src/sessionStore.js';
 import { toWslPath } from '../../daemon/src/paths.js';
 import { cleanAppearance } from './appearance.js';
 import { clampScale, PET_SCALE_MIN, PET_SCALE_MAX } from './petScale.js';
-import { PERMISSION_POLICIES, type PermissionPolicy } from '../../shared/src/types.js';
+import { PERMISSION_POLICIES, type PermissionPolicy, type BridgeMessage, type UsageInfo } from '../../shared/src/types.js';
 import { L, setLang, getLang, resolveLang, LANG_PREFS, type LangPref } from '../../shared/src/i18n.js';
 
 /** Width is constant; the height starts at the pet's own part and the renderer grows it downwards when a panel opens (see pet:resize). */
@@ -101,6 +101,12 @@ if (primary) app.whenReady().then(async () => {
     if (Date.now() - desktopAt > 5000) { desktopAt = Date.now(); try { desktopMap = desktopReg.byCliId(); } catch (e) { log(`desktop registry: ${(e as Error).message}`); } }
     return desktopMap;
   };
+  /** limits come from every host (the WSL bridge, the Windows status line): the ring shows the freshest numbers */
+  const usageBy = new Map<string, UsageInfo>();
+  const hostMessage = (hostId: string, m: BridgeMessage) => {
+    if (m.type === 'usage') { usageBy.set(hostId, m.usage); const u = mergeUsage([...usageBy.values()]); if (u) win.webContents.send('pet:msg', { type: 'usage', usage: u }); return; }
+    win.webContents.send('pet:msg', m);
+  };
   const pushSnapshot = () => {
     const m = mergeSnapshots(hostParts());
     const sessions = decorateDesktop(m.sessions, desktopEntries());
@@ -112,7 +118,7 @@ if (primary) app.whenReady().then(async () => {
   const winHost = createWindowsHost({
     dataDir: app.getPath('userData'), claudeHome: join(homedir(), '.claude'), port: WINDOWS_HOST_PORT, helperPath,
     permissionsFromPet: () => settings.answerPermissions,
-    out: (m) => { if (m.type === 'snapshot') { winSnap = m; pushSnapshot(); } else win.webContents.send('pet:msg', m); },
+    out: (m) => { if (m.type === 'snapshot') { winSnap = m; pushSnapshot(); } else hostMessage('windows', m); },
   });
   const info = (message: string, detail = '') => dialog.showMessageBox(win, { type: 'info', title: 'ccPet', message, detail });
 
@@ -143,7 +149,7 @@ if (primary) app.whenReady().then(async () => {
     const h = createWslHost({
       id, distro: o.distro, port: o.port, bridgePath, secondary: !!o.distro, log,
       onSnapshot: (snap) => { if (snap) hostSnap.set(id, snap); else hostSnap.delete(id); pushSnapshot(); },
-      onMessage: (m) => win.webContents.send('pet:msg', m),
+      onMessage: (m) => hostMessage(id, m),
       onUp: (v) => { hostUp.set(id, v); sendUp(); },
       onReady: (host, r) => {
         if (!host.secondary) {
@@ -369,7 +375,7 @@ if (primary) app.whenReady().then(async () => {
     const hosts = await Promise.all([...wslHosts.values()].map(hostRowState));
     return {
       answerPermissions: settings.answerPermissions, sdkChats: settings.sdkChats, helper: !!helperPath, helperPath,
-      windows: { ...winHost.state(settings.answerPermissions), port: winHost.port, up: winUp },
+      windows: (() => { const sl = winHost.statusLine({}); return { ...winHost.state(settings.answerPermissions), port: winHost.port, up: winUp, statusLine: sl.kind, statusLineDiff: sl.diff, statusLineError: sl.error }; })(),
       wsl: hosts.find((x) => x.id === 'wsl')!,
       others: hosts.filter((x) => x.id !== 'wsl'),
     };
@@ -383,7 +389,16 @@ if (primary) app.whenReady().then(async () => {
   ipcMain.handle('pet:connections', () => connectionsState());
   ipcMain.handle('pet:connections-apply', async (_e, hostId: unknown, action: unknown) => {
     const remove = action === 'disconnect';
-    if (hostId === 'windows') {
+    if (hostId === 'windows' && (action === 'statusline' || action === 'statusline-off')) {
+      const off = action === 'statusline-off';
+      const p = winHost.statusLine({ remove: off });
+      if (p.error) { void info(L('Не удалось прочитать settings.json', 'Could not read settings.json', '无法读取 settings.json'), p.error); return connectionsState(); }
+      if (p.diff && await confirmHooks(off ? L('Отключить статус-строку от питомца?', 'Disconnect the status line from the pet?', '断开状态栏与宠物的连接？') : L('Подключить статус-строку (лимиты)?', 'Connect the status line (limits)?', '连接状态栏（额度）？'), [{ file: windowsSettings, diff: p.diff }])) {
+        const r = winHost.statusLine({ apply: true, remove: off });
+        if (r.error) void info(L('Не удалось записать настройки', 'Could not write the settings', '无法写入设置'), r.error);
+        else void winHost.pushUsage();
+      }
+    } else if (hostId === 'windows') {
       const st = winHost.state(settings.answerPermissions);
       if (st.error) { void info(L('Не удалось прочитать settings.json', 'Could not read settings.json', '无法读取 settings.json'), st.error); return connectionsState(); }
       const diff = remove ? winHost.removeDiff() : st.diff;
@@ -565,7 +580,7 @@ if (primary) app.whenReady().then(async () => {
   await win.loadFile(join(__dirname, 'index.html'));
   win.showInactive();
   log(`window bounds=${JSON.stringify(win.getBounds())} scale=${screen.getDisplayMatching(win.getBounds()).scaleFactor}`);
-  void winHost.start().then((ok) => { winUp = ok; sendUp(); log(`windows host ${ok ? `listening on 127.0.0.1:${winHost.port}` : 'not started'}`); });
+  void winHost.start().then((ok) => { winUp = ok; sendUp(); if (ok) void winHost.pushUsage(); log(`windows host ${ok ? `listening on 127.0.0.1:${winHost.port}` : 'not started'}`); });
   const winTimer = setInterval(() => winHost.tick(Date.now()), 1500);
   registerHotkey();
   app.on('second-instance', summon);

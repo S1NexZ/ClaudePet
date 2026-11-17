@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach } from 'vitest';
-import { mkdtempSync, writeFileSync, readFileSync } from 'node:fs';
+import { mkdtempSync, writeFileSync, readFileSync, mkdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createWindowsHost } from './windowsHost.js';
@@ -102,4 +102,28 @@ describe('windows host: adoption', () => {
     const snap = [...out].reverse().find((m) => m.type === 'snapshot') as any;
     expect(snap.sessions[0]).toMatchObject({ id: 'abc-123', project: 'app', state: 'idle', source: 'claude-desktop' });
   });
+  it('status line: plans with the helper, writes only on apply (with a backup), removes again', () => {
+    const { host, claudeHome } = boot();
+    const sp = join(claudeHome, 'settings.json');
+    mkdirSync(claudeHome, { recursive: true });
+    writeFileSync(sp, JSON.stringify({ theme: 'dark' }));
+    const plan = host.statusLine({});
+    expect(plan).toMatchObject({ applied: false, kind: 'none' });
+    expect(plan.diff).toContain('pet-helper.exe');
+    expect(JSON.parse(readFileSync(sp, 'utf8'))).toEqual({ theme: 'dark' });
+    expect(host.statusLine({ apply: true })).toMatchObject({ applied: true, kind: 'ours' });
+    expect(JSON.parse(readFileSync(sp, 'utf8')).statusLine.command).toBe('"C:\\pet\\pet-helper.exe" statusline');
+    expect(host.statusLine({ apply: true, remove: true })).toMatchObject({ applied: true, kind: 'none' });
+    expect(JSON.parse(readFileSync(sp, 'utf8'))).toEqual({ theme: 'dark' });
+  });
+  it('limits saved by the helper reach the pet (the file next to .claude)', async () => {
+    const { host, out, claudeHome } = boot();
+    const f = join(claudeHome, '..', '.claude-pet', 'usage.json');
+    mkdirSync(join(claudeHome, '..', '.claude-pet'), { recursive: true });
+    writeFileSync(f, JSON.stringify({ version: 1, updatedAt: Date.now(), five_hour: { used_percentage: 42, resets_at: 1900000000 }, seven_day: null }));
+    await host.pushUsage();
+    const u = [...out].reverse().find((m) => m.type === 'usage') as any;
+    expect(u.usage).toMatchObject({ fiveHour: { usedPct: 42 }, source: 'statusline' });
+  });
 });
+
