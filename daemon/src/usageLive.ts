@@ -43,6 +43,8 @@ export interface PollerOpts {
   timeoutMs?: number;
   now?: () => number;
   onChange?: () => void;
+  /** a query just began (so the UI can show "updating…") */
+  onStart?: () => void;
 }
 
 /**
@@ -63,6 +65,7 @@ export function createUsagePoller(o: PollerOpts) {
 
   const run = (): Promise<void> => {
     st.running = true; lastStart = now(); requests++;
+    try { o.onStart?.(); } catch { /* a listener must not break the query */ }
     const ac = new AbortController();
     const to = setTimeout(() => ac.abort('timeout'), timeout);
     const done = (async () => {
@@ -92,6 +95,15 @@ export function createUsagePoller(o: PollerOpts) {
   }
 
   return {
+    /** true only after start(): a query on a timer. The app no longer starts it; queries come from refresh(). */
+    get periodic() { return started; },
+    /** One query now, for a user's click: never while one runs, never closer than `minGapMs` to the last one. Returns whether it started. */
+    refresh(minGapMs = 60_000): boolean {
+      if (stopped || st.running) return false;
+      if (lastStart !== null && now() - lastStart < minGapMs) return false;
+      void run();
+      return true;
+    },
     start() { if (started || stopped) return; started = true; tick(); },
     async stop() {
       stopped = true;

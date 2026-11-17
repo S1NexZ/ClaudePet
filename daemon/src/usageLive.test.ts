@@ -219,3 +219,41 @@ describe('makeLiveFetch (the real request, with a fake SDK)', () => {
     expect(() => process.kill(pid, 0)).toThrow();       // gone after stop
   });
 });
+
+describe('poller on-demand refresh (no timer)', () => {
+  it('runs one query per call, never within the gap, never while one runs; periodic stays false', async () => {
+    let t = 1_000_000; let n = 0;
+    let release!: () => void;
+    const fetch = vi.fn(async () => { n++; await new Promise<void>((r) => (release = r)); return good(n); });
+    const changes = vi.fn(), starts = vi.fn();
+    const p = createUsagePoller({ fetch, now: () => t, onChange: changes, onStart: starts });
+    expect(p.periodic).toBe(false);
+    expect(p.refresh()).toBe(true);
+    expect(p.state().running).toBe(true);
+    expect(p.refresh()).toBe(false);          // one is running
+    release(); await vi.waitFor(() => expect(p.state().running).toBe(false));
+    expect(p.state().data?.fiveHour?.usedPct).toBe(1);
+    t += 30_000;
+    expect(p.refresh()).toBe(false);          // closer than 60 s to the last start
+    expect(fetch).toHaveBeenCalledTimes(1);
+    t += 31_000;
+    expect(p.refresh()).toBe(true);
+    release(); await vi.waitFor(() => expect(p.state().running).toBe(false));
+    expect(fetch).toHaveBeenCalledTimes(2);
+    expect(starts).toHaveBeenCalledTimes(2);  // when each query begins
+    expect(changes).toHaveBeenCalledTimes(2); // when each query ends
+    expect(p.periodic).toBe(false);
+  });
+  it('a failed query keeps the last good data and records the error', async () => {
+    let t = 5_000_000; let fail = false;
+    const p = createUsagePoller({ fetch: async () => { if (fail) throw new LiveError('timeout'); return good(7); }, now: () => t });
+    p.refresh(); await vi.waitFor(() => expect(p.state().data?.fiveHour?.usedPct).toBe(7));
+    t += 70_000; fail = true;
+    p.refresh(); await vi.waitFor(() => expect(p.state().lastError).toBe('timeout'));
+    expect(p.state().data?.fiveHour?.usedPct).toBe(7);
+  });
+  it('start() makes it periodic', () => {
+    const p = createUsagePoller({ fetch: async () => good(1), intervalMs: 10_000_000 });
+    p.start(); expect(p.periodic).toBe(true); void p.stop();
+  });
+});
