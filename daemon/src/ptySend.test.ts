@@ -3,13 +3,27 @@ import { spawn, spawnSync } from 'node:child_process';
 import { mkdtempSync, readFileSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { sanitize, typedInput, sendPrompt, sendEsc, PtyGoneError } from './ptySend.js';
+import { sanitize, typedInput, sendPrompt, sendEsc, sendTitle, PtyGoneError } from './ptySend.js';
+import { createServer } from 'node:net';
 
 describe('typedInput', () => {
   it('single line: text then Enter', () => expect(typedInput('hi')).toEqual({ body: 'hi', submit: '\r' }));
   it('multi-line goes in as a bracketed paste', () => expect(typedInput('a\nb').body).toBe('\x1b[200~a\nb\x1b[201~'));
   it('strips control characters (Esc, Ctrl+C) but keeps text', () => expect(sanitize('a\x03b\x1bc\td')).toBe('abc\td'));
   it('empty text is nothing to send', async () => { await sendPrompt('/nonexistent.sock', '   \n'); });
+});
+
+describe('sendTitle (Windows wrapper: title its terminal so the pet can raise it)', () => {
+  it('sends one framed sequence the wrapper recognizes; the title cannot carry control characters', async () => {
+    const sock = join(mkdtempSync(join(tmpdir(), 'ptyt-')), 't.sock');
+    let got = '';
+    const srv = createServer((c) => c.on('data', (d) => { got += d; }));
+    await new Promise<void>((r) => srv.listen(sock, r));
+    await sendTitle(sock, 'proj - Claude ab12\x1b]0;evil\x07');
+    await new Promise((r) => setTimeout(r, 50));
+    srv.close();
+    expect(got).toBe('\x1b]ccpet-title;proj - Claude ab12]0;evil\x07');
+  });
 });
 
 const hasPython = spawnSync('python3', ['--version']).status === 0;

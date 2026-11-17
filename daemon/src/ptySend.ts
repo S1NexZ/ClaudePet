@@ -46,3 +46,5 @@ export const sendPrompt = (sock: string, text: string, gapMs?: number) => {
   return writePty(sock, [body, submit], gapMs);
 };
 export const sendEsc = (sock: string) => writePty(sock, [KEY.esc]);
+/** Windows wrapper (`pet-helper pty`): titles the terminal window/tab it runs in (repeated there for a few seconds), so the pet can raise it. */
+export const sendTitle = (sock: string, title: string) => writePty(sock, [`\x1b]ccpet-title;${sanitize(title).replace(/\n|\t/g, ' ').slice(0, 120)}\x07`]);

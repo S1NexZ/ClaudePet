@@ -8,6 +8,7 @@ import { startHookServer } from '../../../daemon/src/hookHttp.js';
 import { readTranscript } from '../../../daemon/src/transcript.js';
 import { findRunning } from '../../../daemon/src/adopt.js';
 import { createUsageSource } from '../../../daemon/src/usage.js';
+import { sendTitle } from '../../../daemon/src/ptySend.js';
 import { planStatusLine, removeStatusLine, statusLineState, type StatusLineKind } from '../../../daemon/src/installStatusLine.js';
 import { planHostHooks, removeHostHooks, hooksStatus, readSettingsFile, writeSettingsFile, type HooksStatus } from '../../../daemon/src/hookConfig.js';
 import type { AppCommand, BridgeMessage } from '../../../shared/src/types.js';
@@ -142,6 +143,12 @@ export function createWindowsHost(o: WindowsHostOpts) {
       } catch (e) { return { diff: '', applied: false, kind: 'none', error: (e as Error).message }; }
     },
     pushUsage: () => bridge.pushUsage(),
+    /** a session in the `pet-helper pty` wrapper: title its terminal (false: no wrapper, or it is gone) */
+    async markTerminal(sessionId: string, mark: string): Promise<boolean> {
+      const pipe = store.get(sessionId)?.pty;
+      if (!pipe) return false;
+      try { await sendTitle(pipe, mark); return true; } catch { store.clearPty(sessionId); return false; }
+    },
     settingsPath,
     hasSettings: () => existsSync(settingsPath),
   };

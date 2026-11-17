@@ -478,13 +478,18 @@ if (primary) app.whenReady().then(async () => {
       return;
     }
     if (s.host === 'windows') {
+      // a wrapped session (pet-helper pty): raise its own terminal; otherwise (or if that fails) a new terminal resumes it
+      const mark = `${s.project} - Claude ${s.id.slice(0, 4)}`;
+      void winHost.markTerminal(s.id, mark).then(async (ok) => {
+        if (ok) { await new Promise((r) => setTimeout(r, 350)); if (await focusByTitle(mark)) return; }
+        launchWin(true);
+      });
       const launchWin = (useWt: boolean) => {
         const c = windowsTerminalCommand({ cwd: s.cwd, sessionId: s.id }, useWt);
         const p = spawn(c.file, c.args, { detached: true, stdio: 'ignore' });
         p.on('error', (e) => { log(`terminal (${c.file}) failed: ${e.message}`); if (useWt) launchWin(false); });
         p.unref();
       };
-      launchWin(true);
       return;
     }
     if (!s.owned) {

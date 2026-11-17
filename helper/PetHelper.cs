@@ -204,11 +204,12 @@ static class PetHelper
 
             var toChild = new FileStream(inWrite, FileAccess.Write, 4096, false);
             var gate = new object();
+            var outGate = new object(); // the child's output and the pet's title sequences must not interleave
             Action<byte[], int> write = (b, n) => { lock (gate) { try { toChild.Write(b, 0, n); toChild.Flush(); } catch { } } };
             // the terminal window -> the child
             new Thread(() => { var si2 = Console.OpenStandardInput(); var buf = new byte[4096]; int n; try { while ((n = si2.Read(buf, 0, buf.Length)) > 0) write(buf, n); } catch { } }) { IsBackground = true }.Start();
             // the child -> the terminal window
-            new Thread(() => { var from = new FileStream(outRead, FileAccess.Read, 4096, false); var so = Console.OpenStandardOutput(); var buf = new byte[8192]; int n; try { while ((n = from.Read(buf, 0, buf.Length)) > 0) { so.Write(buf, 0, n); so.Flush(); } } catch { } }) { IsBackground = true }.Start();
+            new Thread(() => { var from = new FileStream(outRead, FileAccess.Read, 4096, false); var so = Console.OpenStandardOutput(); var buf = new byte[8192]; int n; try { while ((n = from.Read(buf, 0, buf.Length)) > 0) { lock (outGate) { so.Write(buf, 0, n); so.Flush(); } } } catch { } }) { IsBackground = true }.Start();
             // the pet -> the child (only this Windows user may connect)
             new Thread(() =>
             {
@@ -222,7 +223,20 @@ static class PetHelper
                         {
                             srv.WaitForConnection();
                             var buf = new byte[4096]; int n;
-                            while ((n = srv.Read(buf, 0, buf.Length)) > 0) write(buf, n);
+                            while ((n = srv.Read(buf, 0, buf.Length)) > 0)
+                            {
+                                // "ESC ]ccpet-title;<text> BEL" from the pet: title this terminal window/tab (so the pet can raise it), not input for claude.
+                                // Claude Code sets its own title too, so it is repeated for ~3 s.
+                                string head = Encoding.UTF8.GetString(buf, 0, n);
+                                if (head.StartsWith("\u001b]ccpet-title;") && head.IndexOf('\u0007') > 0)
+                                {
+                                    string title = Regex.Replace(head.Substring(14, head.IndexOf('\u0007') - 14), "[\\x00-\\x1f\\x7f]", "");
+                                    var osc = new UTF8Encoding(false).GetBytes("\u001b]0;" + title + "\u0007");
+                                    new Thread(() => { var so = Console.OpenStandardOutput(); for (int i = 0; i < 10; i++) { try { lock (outGate) { so.Write(osc, 0, osc.Length); so.Flush(); } } catch { } Thread.Sleep(300); } }) { IsBackground = true }.Start();
+                                    continue;
+                                }
+                                write(buf, n);
+                            }
                         }
                     }
                     catch { Thread.Sleep(200); }
