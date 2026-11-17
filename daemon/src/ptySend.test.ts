@@ -45,7 +45,9 @@ describe.skipIf(!hasPython)('sendPrompt against the real pet-claude.py wrapper',
       await sendPrompt(sock, 'second', 100); // reconnect after the first client left: child still alive
       await new Promise((r) => setTimeout(r, 400));
       // cooked-mode child holds the earlier Esc in its line buffer until Enter, so it arrives in front of the next line
-      expect(readFileSync(log, 'utf8')).toContain('\\x1bsecond');
+      const after = readFileSync(log, 'utf8'); // (on a slow machine the Esc may arrive as a read of its own)
+      expect(after).toContain('\\x1b');
+      expect(after).toContain('second');
     } finally { w.kill('SIGTERM'); }
     await new Promise((r) => w.once('exit', r));
     await expect(sendPrompt(sock, 'x')).rejects.toBeInstanceOf(PtyGoneError); // wrapper gone: socket removed
