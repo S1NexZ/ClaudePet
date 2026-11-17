@@ -485,7 +485,9 @@ if (primary) app.whenReady().then(async () => {
     // a session's commands go to the host that owns it (new chats, models and limits stay with the WSL bridge)
     const h = cmd.type === 'permission' ? hostOfPermission(String(cmd.id), hostParts()) : typeof cmd.sessionId === 'string' ? hostOf(cmd.sessionId, hostParts()) : null;
     if (h === 'windows') { void winHost.handle(cmd); return; }
-    (h ? wslHosts.get(h) : undefined)?.send(cmd) ?? toBridge(cmd);
+    // send() returns nothing, so `?.send(cmd) ?? toBridge(cmd)` ran both: every command to a WSL session reached the bridge twice (a typed message arrived doubled)
+    const target = h ? wslHosts.get(h) : undefined;
+    if (target) target.send(cmd); else toBridge(cmd);
   });
   // ---- connections: our hooks in each host's settings.json (always with the diff and the user's consent) ----
   const wslRequest = (cmd: object, host: WslHost = primary()): Promise<any> => host.request(cmd);
