@@ -329,8 +329,8 @@ static class PetHelper
                 if (chain == null)
                 {
                     var parts = new System.Collections.Generic.List<string>();
-                    if (five != null) parts.Add("5ч " + Math.Round(p5) + "%");
-                    if (seven != null) parts.Add("нед " + Math.Round(p7) + "%");
+                    if (five != null) parts.Add("5h " + Math.Round(p5) + "%");
+                    if (seven != null) parts.Add("7d " + Math.Round(p7) + "%");
                     Out(string.Join(" · ", parts) + "\n");
                 }
             }

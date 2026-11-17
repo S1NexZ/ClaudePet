@@ -2,6 +2,10 @@
 
 Формат: [Keep a Changelog](https://keepachangelog.com/ru/1.1.0/), версии по [SemVer](https://semver.org/lang/ru/).
 
+## [Unreleased]
+### Изменено
+- Подписи в статус-строке Claude Code не зависят от языка: `5h 23% · 7d 77%` (раньше «5ч · нед»).
+
 ## [0.5.0] — 2026-11-17
 Главное: десктопное приложение Claude и Windows работают как «родные» сессии.
 

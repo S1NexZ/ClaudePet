@@ -29,7 +29,7 @@ try {
     writeFileSync(tmp, JSON.stringify({ version: 1, updatedAt: Date.now(), five_hour: five, seven_day: seven }), { mode: 0o600 });
     renameSync(tmp, file); // atomic: the bridge never reads a half-written file
     const p = (w) => `${Math.round(w.used_percentage)}%`;
-    if (!chainAt || chainAt < 0) process.stdout.write([five && `5ч ${p(five)}`, seven && `нед ${p(seven)}`].filter(Boolean).join(' · ') + '\n');
+    if (!chainAt || chainAt < 0) process.stdout.write([five && `5h ${p(five)}`, seven && `7d ${p(seven)}`].filter(Boolean).join(' · ') + '\n');
   }
 } catch { /* ignore: a status line must never break the session */ }
 if (chained) {
