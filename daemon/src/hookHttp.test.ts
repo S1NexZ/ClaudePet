@@ -42,6 +42,12 @@ describe('hook http receiver', () => {
     expect(await r2.text()).toBe('');
     expect(events.map((e) => e.hook_event_name)).toEqual(['PostToolUse', 'Stop']);
   });
+  it('the event is recorded before the answer is made (a stop answer must be the last word on the session state)', async () => {
+    const order: string[] = [];
+    const { base } = await boot({ onEvent: () => order.push('event'), onReply: () => { order.push('reply'); return null; } });
+    await post(`${base}/hook/tok/PostToolUse`, { hook_event_name: 'PostToolUse', session_id: 's1' });
+    expect(order).toEqual(['event', 'reply']);
+  });
   it('answers a PermissionRequest with the pet\'s decision in the format Claude Code expects', async () => {
     const { base } = await boot({ onPermission: async () => 'deny' });
     const r = await post(`${base}/hook/tok/PermissionRequest`, { session_id: 's1', tool_name: 'Bash' });

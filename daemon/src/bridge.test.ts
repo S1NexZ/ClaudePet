@@ -324,6 +324,7 @@ describe('bridge: sessions running under pet-claude.py', () => {
     await t.bridge.handle({ type: 'interrupt', sessionId: 'd1' });
     expect(t.calls).toEqual([]); // no SDK, no runner
     expect(last(t.out, 'chat')).toMatchObject({ sessionId: 'd1', event: { kind: 'note' } });
+    t.bridge.onHook({ hook_event_name: 'PostToolUse', session_id: 'd1', cwd: 'C:\\p', tool_name: 'Bash' } as any); // the receiver records the event first
     const r = t.bridge.hookReply({ hook_event_name: 'PostToolUse', session_id: 'd1', cwd: '' }) as any;
     expect(r).toMatchObject({ continue: false });
     expect(t.store.get('d1')!.state).toBe('idle');

@@ -72,9 +72,10 @@ export async function startHookServer(o: HookServerOpts): Promise<{ port: number
           });
           return;
         }
+        try { o.onEvent(ev); } catch { /* never fail Claude Code because of the pet */ }
+        // after the event: a stop answer marks the session idle, and no Stop hook follows `continue: false`
         let reply: Record<string, unknown> | null = null;
         try { reply = o.onReply?.(ev) ?? null; } catch { /* no opinion */ }
-        try { o.onEvent(ev); } catch { /* never fail Claude Code because of the pet */ }
         if (reply) res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify(reply));
         else res.writeHead(200).end();
       });
