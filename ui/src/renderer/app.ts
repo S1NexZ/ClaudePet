@@ -327,6 +327,7 @@ async function main() {
   // ---- chat + composer ----
   const input = $('input') as HTMLInputElement;
   const list = $('chat-list');
+  let pendingBottom = false;
   const setExpanded = (on: boolean) => {
     expanded = on;
     if (!on) { chatMenu.hidden = true; switchBtn.setAttribute('aria-expanded', 'false'); }
@@ -335,6 +336,8 @@ async function main() {
       if (!chatSession()) chatId = current()?.id ?? null;
       mode = chatSession() ? 'reply' : 'new';
       host.focus(); input.focus();
+      // a hidden list forgets its scroll position (display: none): open at the last message, also for what arrived while it was closed
+      pendingBottom = true; list.scrollTop = list.scrollHeight;
     }
   };
   const chooseFolder = async (): Promise<boolean> => {
@@ -411,8 +414,9 @@ async function main() {
     if (sid !== shownFor) { shownFor = sid; shown = []; list.replaceChildren(); }
     let i = 0;
     while (i < shown.length && i < items.length && shown[i] === items[i]) i++;
-    if (i === shown.length && i === items.length && list.firstChild) return;
-    const stick = list.scrollHeight - list.scrollTop - list.clientHeight < 48;
+    if (i === shown.length && i === items.length && list.firstChild) { if (pendingBottom) { list.scrollTop = list.scrollHeight; pendingBottom = false; } return; }
+    const stick = pendingBottom || list.scrollHeight - list.scrollTop - list.clientHeight < 48;
+    pendingBottom = false;
     while (list.children.length > i) list.lastChild!.remove();
     for (let k = i; k < items.length; k++) list.append(messageNode(items[k]));
     if (items.length === 0) {
