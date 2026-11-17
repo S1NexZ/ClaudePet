@@ -310,6 +310,34 @@ static class PetHelper
         return "{\"used_percentage\":" + p + ",\"resets_at\":" + r + "}";
     }
 
+    /** A window saved in usage.json: {"used_percentage":x,"resets_at":y} (null when absent). */
+    static double[] Saved(string json, string window)
+    {
+        var m = Regex.Match(json ?? "", "\"" + window + "\"\\s*:\\s*\\{\\s*\"used_percentage\"\\s*:\\s*(-?[0-9.eE+-]+)\\s*,\\s*\"resets_at\"\\s*:\\s*(-?[0-9.eE+-]+)\\s*\\}");
+        if (!m.Success) return null;
+        var c = System.Globalization.CultureInfo.InvariantCulture;
+        double u, r;
+        if (!double.TryParse(m.Groups[1].Value, System.Globalization.NumberStyles.Float, c, out u) || !double.TryParse(m.Groups[2].Value, System.Globalization.NumberStyles.Float, c, out r)) return null;
+        return new[] { u, r };
+    }
+
+    /**
+     * Other sessions re-render their line with the numbers of their last API response: within one window (same reset time) usage only grows,
+     * so a lower value is stale and the saved one stays; a later reset time is a new window.
+     */
+    static string Keep(string fresh, double freshPct, string json, double[] saved, out double pct)
+    {
+        pct = freshPct;
+        if (saved == null) return fresh;
+        var c = System.Globalization.CultureInfo.InvariantCulture;
+        string old = "{\"used_percentage\":" + saved[0].ToString(c) + ",\"resets_at\":" + saved[1].ToString(c) + "}";
+        if (fresh == null) { pct = saved[0]; return old; }
+        double freshReset = double.Parse(Regex.Match(fresh, "\"resets_at\":(-?[0-9.eE+-]+)").Groups[1].Value, c);
+        bool keepOld = saved[1] != freshReset ? saved[1] > freshReset : saved[0] > freshPct;
+        if (keepOld) { pct = saved[0]; return old; }
+        return fresh;
+    }
+
     static string JsonString(string json, string key)
     {
         var m = Regex.Match(json, "\"" + key + "\"\\s*:\\s*\"((?:[^\"\\\\]|\\\\.)*)\"");
@@ -348,6 +376,10 @@ static class PetHelper
                 string file = Environment.GetEnvironmentVariable("CLAUDE_PET_USAGE");
                 if (string.IsNullOrEmpty(file)) file = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".claude-pet", "usage.json");
                 Directory.CreateDirectory(Path.GetDirectoryName(file));
+                string savedJson = null;
+                try { if (File.Exists(file)) savedJson = File.ReadAllText(file); } catch { }
+                five = Keep(five, p5, savedJson, Saved(savedJson, "five_hour"), out p5);
+                seven = Keep(seven, p7, savedJson, Saved(savedJson, "seven_day"), out p7);
                 string tmp = file + "." + Process.GetCurrentProcess().Id + ".tmp";
                 long now = (long)(DateTime.UtcNow - new DateTime(1970, 1, 1, 0, 0, 0, DateTimeKind.Utc)).TotalMilliseconds;
                 File.WriteAllText(tmp, "{\"version\":1,\"updatedAt\":" + now + ",\"five_hour\":" + (five ?? "null") + ",\"seven_day\":" + (seven ?? "null") + "}", new UTF8Encoding(false));

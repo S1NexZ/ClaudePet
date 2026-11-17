@@ -1,4 +1,5 @@
 import { pickAttention } from '../../../daemon/src/sessionStore.js';
+import { freshestWindow } from '../../../shared/src/usageWindow.js';
 import type { Session, Snapshot, UsageInfo } from '../../../shared/src/types.js';
 
 /** 'windows', 'wsl' (the default distro) or 'wsl:<distro>' */
@@ -24,8 +25,8 @@ export function hostOfPermission(id: string, parts: HostPart[]): HostId | null {
 }
 
 /**
- * Limits as the WSL bridge and the Windows host each know them: the numbers are taken wholesale from the side that obtained them last
- * (windows of two sources are never mixed); the plan, the status line state and the query state come from whichever side has them.
+ * Limits as the WSL bridge and the Windows host each know them: each window comes from the report that is current for it
+ * (a later reset time, or within one window the higher usage: lower numbers there are stale); the plan, the status line state and the query state come from whichever side has them.
  */
 export function mergeUsage(parts: UsageInfo[]): UsageInfo | null {
   if (!parts.length) return null;
@@ -35,8 +36,11 @@ export function mergeUsage(parts: UsageInfo[]): UsageInfo | null {
   const rank = { ours: 2, other: 1, none: 0 } as Record<string, number>;
   const statusLine = parts.map((p) => p.statusLine).sort((a, b) => (rank[b] ?? 0) - (rank[a] ?? 0))[0];
   const live = parts.find((p) => p.liveActive) ?? parts.find((p) => p.lastAttemptAt != null);
+  const fiveHour = withData.reduce<UsageInfo['fiveHour']>((acc, p) => freshestWindow(acc, p.fiveHour), null);
+  const sevenDay = withData.reduce<UsageInfo['sevenDay']>((acc, p) => freshestWindow(acc, p.sevenDay), null);
   return {
     ...base,
+    ...(withData.length ? { fiveHour, sevenDay } : {}),
     plan: base.plan ?? parts.find((p) => p.plan)?.plan ?? null,
     statusLine,
     liveActive: parts.some((p) => p.liveActive),

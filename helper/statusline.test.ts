@@ -45,4 +45,15 @@ describe.runIf(runnable)('pet-helper.exe statusline', () => {
     for (const arg of ['not-base64!!', enc({})]) expect(run(['--chain', arg], file).status).toBe(0);
     expect(run([], file, '{not json').status).toBe(0);
   });
+  it('a stale report (same window, lower usage) does not roll the saved numbers back; a new window replaces them', () => {
+    const file = join(tmp(), 'usage.json');
+    const ev = (five: number, week: number, reset = 1900000000) => JSON.stringify({ rate_limits: { five_hour: { used_percentage: five, resets_at: reset }, seven_day: { used_percentage: week, resets_at: 1900500000 } } });
+    run([], file, ev(43, 97));
+    const r = run([], file, ev(14, 94));
+    expect(JSON.parse(readFileSync(file, 'utf8'))).toMatchObject({ five_hour: { used_percentage: 43 }, seven_day: { used_percentage: 97 } });
+    expect(r.stdout).toContain('43%');
+    run([], file, ev(2, 98, 1900020000));
+    expect(JSON.parse(readFileSync(file, 'utf8'))).toMatchObject({ five_hour: { used_percentage: 2, resets_at: 1900020000 }, seven_day: { used_percentage: 98 } });
+  });
 });
+

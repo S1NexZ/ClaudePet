@@ -117,10 +117,16 @@ describe('usage source with the periodic query', () => {
     const idle = await mk({ state: () => liveState(), revision: () => 1, periodic: false, refresh }).read();
     expect('refreshing' in idle).toBe(false);
   });
-  it('the newer of live and statusLine wins, one source wholesale', async () => {
-    const file = { updatedAt: 9000, five_hour: { used_percentage: 70, resets_at: 8 }, seven_day: null };
-    expect(await mk({ state: () => liveState(), revision: () => 1 }, file).read()).toMatchObject({ source: 'statusline', updatedAt: 9000, fiveHour: { usedPct: 70 }, sevenDay: null });
-    expect(await mk({ state: () => liveState({ data: { ...liveState().data, updatedAt: 9500 } }), revision: () => 1 }, file).read()).toMatchObject({ source: 'live', fiveHour: { usedPct: 64 } });
+  it('per window, the current report wins: a later reset time, or the higher usage within one window (never rolled back)', async () => {
+    // statusLine: same 5 h window as the query but higher usage (newer) -> statusLine's 70; the week only the query knows
+    const same = { updatedAt: 4000, five_hour: { used_percentage: 70, resets_at: 9 }, seven_day: null };
+    expect(await mk({ state: () => liveState(), revision: () => 1 }, same).read()).toMatchObject({ updatedAt: 5000, fiveHour: { usedPct: 70 }, sevenDay: { usedPct: 60 } });
+    // a newer statusLine write from an idle session with stale numbers (same window, lower) does not roll the query's numbers back
+    const stale = { updatedAt: 9000, five_hour: { used_percentage: 20, resets_at: 9 }, seven_day: { used_percentage: 50, resets_at: 99 } };
+    expect(await mk({ state: () => liveState(), revision: () => 1 }, stale).read()).toMatchObject({ updatedAt: 9000, fiveHour: { usedPct: 64 }, sevenDay: { usedPct: 60 } });
+    // an earlier window in the file loses to the query's later one
+    const old = { updatedAt: 9000, five_hour: { used_percentage: 90, resets_at: 8 }, seven_day: null };
+    expect(await mk({ state: () => liveState(), revision: () => 1 }, old).read()).toMatchObject({ fiveHour: { usedPct: 64, resetsAt: 9 } });
   });
   it('a failed query keeps the last good live data and reports the error', async () => {
     const r = await mk({ state: () => liveState({ lastError: 'timeout', lastAttemptAt: 8000 }), revision: () => 4 }).read();

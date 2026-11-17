@@ -54,5 +54,12 @@ describe('mergeUsage (limits from the WSL and the Windows side)', () => {
   it('a click refresh running on any side shows as refreshing', () => {
     expect(mergeUsage([u({ refreshing: true }), u({ updatedAt: 5 })])!.refreshing).toBe(true);
   });
+  it('a newer but stale report (same window, lower usage) does not roll the numbers back', () => {
+    const fresh = u({ updatedAt: 100, fiveHour: { usedPct: 43, resetsAt: 9 }, sevenDay: { usedPct: 97, resetsAt: 9 } });
+    const stale = u({ updatedAt: 200, fiveHour: { usedPct: 14, resetsAt: 9 }, sevenDay: { usedPct: 94, resetsAt: 9 } });
+    expect(mergeUsage([fresh, stale])).toMatchObject({ fiveHour: { usedPct: 43 }, sevenDay: { usedPct: 97 } });
+    const next = u({ updatedAt: 300, fiveHour: { usedPct: 2, resetsAt: 20 } });
+    expect(mergeUsage([fresh, next])!.fiveHour).toEqual({ usedPct: 2, resetsAt: 20 });
+  });
 });
 

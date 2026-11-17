@@ -24,12 +24,18 @@ try {
   const rl = event?.rate_limits;
   const five = win(rl?.five_hour), seven = win(rl?.seven_day);
   if (five || seven) {
+    // other sessions re-render their line with the numbers of their last API response: within one window (same reset time) usage only
+    // grows, so a lower value is stale and the saved one stays; a later reset time is a new window
+    let saved = null;
+    try { saved = JSON.parse(readFileSync(file, 'utf8')); } catch { /* none yet */ }
+    const keep = (n, o) => { o = win(o); if (!n) return o; if (!o) return n; if (o.resets_at !== n.resets_at) return o.resets_at > n.resets_at ? o : n; return o.used_percentage > n.used_percentage ? o : n; };
+    const five2 = keep(five, saved?.five_hour), seven2 = keep(seven, saved?.seven_day);
     mkdirSync(dirname(file), { recursive: true, mode: 0o700 });
     const tmp = `${file}.${process.pid}.tmp`;
-    writeFileSync(tmp, JSON.stringify({ version: 1, updatedAt: Date.now(), five_hour: five, seven_day: seven }), { mode: 0o600 });
+    writeFileSync(tmp, JSON.stringify({ version: 1, updatedAt: Date.now(), five_hour: five2, seven_day: seven2 }), { mode: 0o600 });
     renameSync(tmp, file); // atomic: the bridge never reads a half-written file
     const p = (w) => `${Math.round(w.used_percentage)}%`;
-    if (!chainAt || chainAt < 0) process.stdout.write([five && `5h ${p(five)}`, seven && `7d ${p(seven)}`].filter(Boolean).join(' · ') + '\n');
+    if (!chainAt || chainAt < 0) process.stdout.write([five2 && `5h ${p(five2)}`, seven2 && `7d ${p(seven2)}`].filter(Boolean).join(' · ') + '\n');
   }
 } catch { /* ignore: a status line must never break the session */ }
 if (chained) {

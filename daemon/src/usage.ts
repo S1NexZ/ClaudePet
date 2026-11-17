@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import type { UsageInfo, UsageWindow } from '../../shared/src/types.js';
 import type { LiveState } from './usageLive.js';
 import { isPetStatusLine } from './installStatusLine.js';
+import { freshestWindow } from '../../shared/src/usageWindow.js';
 
 export const defaultUsagePath = () => process.env.CLAUDE_PET_USAGE ?? join(homedir(), '.claude-pet', 'usage.json');
 
@@ -84,7 +85,10 @@ export function createUsageSource(o: {
       const live = ls?.data ?? null;
       // one source wholesale (never mix windows of two): the one obtained later
       const useLive = !!live && (!fileOk || live.updatedAt >= (f.updatedAt as number));
-      const chosen = useLive ? { updatedAt: live!.updatedAt, fiveHour: live!.fiveHour, sevenDay: live!.sevenDay } : fileOk ? f : { updatedAt: null, fiveHour: null, sevenDay: null };
+      // per window: a stale report (same reset time, lower usage) never replaces a current one, whichever source it came from
+      const chosen = live || fileOk
+        ? { updatedAt: Math.max(live?.updatedAt ?? 0, fileOk ? (f.updatedAt as number) : 0), fiveHour: freshestWindow(live?.fiveHour ?? null, fileOk ? f.fiveHour : null), sevenDay: freshestWindow(live?.sevenDay ?? null, fileOk ? f.sevenDay : null) }
+        : { updatedAt: null, fiveHour: null, sevenDay: null };
       return {
         plan: live?.plan ?? plan, ...chosen, statusLine,
         source: useLive ? 'live' : fileOk ? 'statusline' : null,

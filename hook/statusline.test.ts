@@ -34,4 +34,14 @@ describe('pet-statusline.mjs', () => {
     }
     expect(existsSync(file)).toBe(true);
   });
+  it('a stale report from an idle session (same window, lower usage) does not roll the saved numbers back; a new window replaces them', () => {
+    const file = join(mkdtempSync(join(tmpdir(), 'sl-')), 'usage.json');
+    const ev = (five: number, week: number, reset = 1900000000) => JSON.stringify({ rate_limits: { five_hour: { used_percentage: five, resets_at: reset }, seven_day: { used_percentage: week, resets_at: 1900500000 } } });
+    run([], file, ev(43, 97));
+    run([], file, ev(14, 94)); // the idle session re-renders with its old numbers
+    expect(JSON.parse(readFileSync(file, 'utf8'))).toMatchObject({ five_hour: { used_percentage: 43 }, seven_day: { used_percentage: 97 } });
+    run([], file, ev(2, 98, 1900020000)); // the 5 h window reset: a later reset time
+    expect(JSON.parse(readFileSync(file, 'utf8'))).toMatchObject({ five_hour: { used_percentage: 2, resets_at: 1900020000 }, seven_day: { used_percentage: 98 } });
+  });
 });
+
