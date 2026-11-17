@@ -330,7 +330,8 @@ async function main() {
   let pendingBottom = false;
   const setExpanded = (on: boolean) => {
     expanded = on;
-    if (!on) { chatMenu.hidden = true; switchBtn.setAttribute('aria-expanded', 'false'); }
+    // the sessions panel belongs to the open chat: it folds away with it
+    if (!on) { chatMenu.hidden = true; switchBtn.setAttribute('aria-expanded', 'false'); $('sessions').hidden = true; }
     $('compose').hidden = !on; $('pill').hidden = !on; $('dock').hidden = on; $('chat').hidden = !on;
     if (on) {
       if (!chatSession()) chatId = current()?.id ?? null;
