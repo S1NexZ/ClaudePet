@@ -282,6 +282,14 @@ describe('bridge: sessions running under pet-claude.py', () => {
     expect(sent).toEqual([]);
     expect(last(t.out, 'error')?.message).toMatch(/занят/);
   });
+  it('/btw is typed even while Claude is working (it is the command made for that); other text is not', async () => {
+    const sent: string[] = [];
+    const t = setup({ pty: { sendPrompt: async (_s, x) => { sent.push(x); }, sendEsc: async () => {} } });
+    t.bridge.onHook(ev()); t.bridge.onHook(ev({ hook_event_name: 'UserPromptSubmit' }));
+    await t.bridge.handle({ type: 'send', sessionId: 't1', text: '/btw what is X?' });
+    await t.bridge.handle({ type: 'send', sessionId: 't1', text: 'hello' });
+    expect(sent).toEqual(['/btw what is X?']);
+  });
   it('dead socket: falls back to the SDK and forgets the socket', async () => {
     const { PtyGoneError } = await import('./ptySend.js');
     const t = setup({ pty: { sendPrompt: async () => { throw new PtyGoneError(); }, sendEsc: async () => {} } });

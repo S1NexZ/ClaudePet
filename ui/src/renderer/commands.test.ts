@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { matchCommands, planSlash, findCommand, COMMANDS } from './commands.js';
+import { matchCommands, planSlash, findCommand, COMMANDS, typedLine, MODEL_ALIASES } from './commands.js';
 
 describe('matchCommands', () => {
   it('lists everything for a lone slash', () => expect(matchCommands('/').length).toBe(COMMANDS.length));
@@ -20,4 +20,11 @@ describe('planSlash', () => {
   it('unknown /words (skills, custom commands) pass through as before', () => expect(planSlash({ name: 'superpowers:x', args: '' }, false)).toEqual({ kind: 'claude-pass' }));
   it('not a command', () => expect(planSlash(null, true)).toBeNull());
   it('lookup is case-insensitive', () => expect(findCommand('MODEL')?.name).toBe('model'));
+});
+
+describe('typedLine (pet commands that go into the terminal as typed)', () => {
+  it('/model <name> and /btw <question> become the same line', () => { expect(typedLine('model', 'sonnet')).toBe('/model sonnet'); expect(typedLine('btw', 'why?')).toBe('/btw why?'); });
+  it('without an argument there is nothing to type', () => { expect(typedLine('model', '')).toBeNull(); expect(typedLine('btw', '')).toBeNull(); });
+  it('other commands are not typed', () => expect(typedLine('stop', 'x')).toBeNull());
+  it('the alias list has the usual names and descriptions', () => { expect(MODEL_ALIASES.map((m) => m.value)).toEqual(['default', 'opus', 'sonnet', 'haiku', 'opusplan']); for (const m of MODEL_ALIASES) expect(m.label().length).toBeGreaterThan(3); });
 });

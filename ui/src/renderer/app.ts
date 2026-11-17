@@ -2,7 +2,7 @@ import { statusView, STATE_LABEL, formatElapsed, hostTag, chipLabel } from './la
 import { createConnectionsTab, type ConnectionsHost } from './connectionsTab.js';
 import { pinSnapshot, focusSnapshot } from './view.js';
 import { sessionRows, nextChatId, isQuiet } from './switcher.js';
-import { matchCommands, planSlash, COMMANDS, type Command } from './commands.js';
+import { matchCommands, planSlash, COMMANDS, typedLine, MODEL_ALIASES, type Command } from './commands.js';
 import { decideSend, placeholderFor, isBusyReply, canStop, parseSlash, type Mode } from './compose.js';
 import { applyChat, mergeHistory } from './chatStore.js';
 import { mdBlocks, mdInline } from './md.js';
@@ -401,7 +401,28 @@ async function main() {
     }
     if (plan?.kind === 'pet') {
       const { name, args } = plan;
-      if (name === 'model') {
+      // a session with the pet's terminal link: Claude Code runs /model and /btw itself, the pet only types the line (no Agent SDK, no second process)
+      const typable = !!target?.pty && !target.owned;
+      if (typable && (name === 'model' || name === 'btw')) {
+        const line = typedLine(name, args);
+        if (line) host.send({ type: 'send', sessionId: target!.id, text: line });
+        else if (name === 'btw') { notify(L('Напиши вопрос после /btw', 'Type your question after /btw', '请在 /btw 后输入你的问题')); return; }
+        else {
+          const box = $('models');
+          const hint = Object.assign(document.createElement('div'), { className: 'hint', textContent: L('Выбери модель для этого чата (команда уйдёт в терминал)', 'Pick a model for this chat (the command is typed into the terminal)', '为此聊天选择模型（命令将输入到终端）') });
+          box.replaceChildren(hint, ...MODEL_ALIASES.map((m) => {
+            const b = document.createElement('button'); b.className = 'm';
+            const n = document.createElement('b'); n.textContent = m.value;
+            const d = document.createElement('span'); d.textContent = m.label();
+            b.append(n, d);
+            b.addEventListener('click', () => { host.send({ type: 'send', sessionId: target!.id, text: `/model ${m.value}` }); hideModels(); });
+            return b;
+          }));
+          box.hidden = false;
+          (box.querySelector('.m') as HTMLElement | null)?.focus();
+          return;
+        }
+      } else if (name === 'model') {
         pickerFor = target?.id ?? null;
         if (args) host.send({ type: 'setModel', sessionId: pickerFor, model: args });
         else { const box = $('models'); box.replaceChildren(Object.assign(document.createElement('div'), { className: 'hint', textContent: L('Загружаю список моделей…', 'Loading the model list…', '正在加载模型列表…') })); box.hidden = false; host.send({ type: 'models' }); }

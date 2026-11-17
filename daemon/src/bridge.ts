@@ -159,7 +159,7 @@ export function createBridge(o: {
             const s = o.store.get(id);
             if (s?.pty && !s.owned) {
               // the session runs under pet-claude.py: type into that very process (no second claude)
-              if (WORKING.has(s.state)) throw new Error(L('Claude занят', 'Claude is busy', 'Claude 正忙'));
+              if (WORKING.has(s.state) && !/^\s*\/btw\b/.test(String(cmd.text))) throw new Error(L('Claude занят', 'Claude is busy', 'Claude 正忙')); // /btw is the one command made for a busy session
               try { await pty.sendPrompt(s.pty, String(cmd.text)); break; }
               catch (e) {
                 if (!(e instanceof PtyGoneError)) throw e;

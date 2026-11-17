@@ -46,3 +46,19 @@ export function planSlash(sl: { name: string; args: string } | null, canType: bo
   if (c?.kind === 'claude' && !canType) return { kind: 'no-terminal', name: c.name };
   return { kind: 'claude-pass' }; // unknown /commands (skills, user commands) go through as typed, like before
 }
+
+/** Model names Claude Code's own `/model <name>` accepts; the pet lists them without starting a second claude (the real model list needs the Agent SDK). */
+export const MODEL_ALIASES: Array<{ value: string; label: () => string }> = [
+  { value: 'default', label: () => L('Модель по умолчанию вашего плана', 'Your plan\'s default model', '套餐默认模型') },
+  { value: 'opus', label: () => L('Самая сильная, для сложных задач', 'Most capable, for hard tasks', '能力最强，适合复杂任务') },
+  { value: 'sonnet', label: () => L('Быстрая и сбалансированная', 'Fast and balanced', '快速且均衡') },
+  { value: 'haiku', label: () => L('Самая быстрая и дешёвая', 'Fastest and cheapest', '最快最省') },
+  { value: 'opusplan', label: () => L('Opus для плана, Sonnet для работы', 'Opus to plan, Sonnet to work', 'Opus 规划，Sonnet 执行') },
+];
+
+/** The line typed into a terminal session for a pet command that Claude Code itself runs (`/model <name>`, `/btw <question>`); null for the rest. */
+export function typedLine(name: string, args: string): string | null {
+  if (name === 'btw') return args ? `/btw ${args}` : null;
+  if (name === 'model') return args ? `/model ${args}` : null;
+  return null;
+}
