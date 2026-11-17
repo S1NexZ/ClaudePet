@@ -39,7 +39,7 @@ class Run:
             if c in r:
                 try: got += c.recv(65536)
                 except OSError: pass
-            if until and (until in self.term or until in got): break
+            if until and until in self.term and (c is None or until in got): break  # with a client attached, wait for its copy too
         return got
     def connect(self):
         c = socket.socket(socket.AF_UNIX); c.connect(self.sock); c.setblocking(False); return c
@@ -65,7 +65,7 @@ check('child starts as one process, PET_PTY_SOCK exported', f'READY {cp} 100x30 
 check('socket mode is 0600', stat.S_IMODE(os.stat(sp).st_mode) == 0o600, oct(stat.S_IMODE(os.stat(sp).st_mode)))
 
 c = r.connect()
-out = (c.send(b'hello-from-socket\n'), r.pump(1, c, until=b'ECHO hello-from-socket'))[1]
+out = (c.send(b'hello-from-socket\n'), r.pump(5, c, until=b'ECHO hello-from-socket'))[1]
 check('socket input reaches the child; output seen by terminal and client', b'ECHO hello-from-socket' in r.term and b'ECHO hello-from-socket' in out)
 os.write(r.fd, b'hello-from-terminal\n'); out = r.pump(1, c, until=b'ECHO hello-from-terminal')
 check('terminal input reaches the same child; client sees it too', b'ECHO hello-from-terminal' in out)
