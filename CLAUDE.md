@@ -47,9 +47,9 @@ Windows terminals and the Claude desktop app are served by a **Windows host** in
 **Open in terminal** (`ui/src/focusWindow.ts`): `term-mark` makes the bridge write an OSC title to the claude process's tty, then PowerShell finds the window (or the Windows Terminal tab, via UI Automation) with that title and raises it; no live terminal = `claude --resume` in a new window.
 
 ### Usage limits
-`daemon/src/usageLive.ts`: experimental SDK method `usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET` (`get_usage`), one short-lived `claude` process per request (no prompt, `persistSession:false`, `settingSources:[]`, `skipBehaviors:true`, env without `CLAUDE_*`/`ANTHROPIC_*`, cwd `~/.claude-pet/usage-query`), first at start and then every 60 s from the previous start,
-never overlapping, 25 s timeout, last good data kept on failure, children killed when the bridge stops (`CLAUDE_PET_LIVE_USAGE=0` disables it). Optional fallback source: `hook/pet-statusline.mjs` → `~/.claude-pet/usage.json` (`npx tsx daemon/src/cli.ts install-statusline [--dry-run]`).
-Display logic: `ui/src/renderer/usage.ts` (stale after a failed request or 190 s).
+`daemon/src/usageLive.ts`: experimental SDK method `usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET` (`get_usage`), one short-lived `claude` process per request (no prompt, `persistSession:false`, `settingSources:[]`, `skipBehaviors:true`, env without `CLAUDE_*`/`ANTHROPIC_*`, cwd `~/.claude-pet/usage-query`). **No timer**: the poller is never `start()`ed; `refresh()` (bridge command `usage-refresh`, sent when the user opens the panel by clicking the ring) runs one query, never overlapping, at most one per 60 s, 25 s timeout, last good data kept on failure (`CLAUDE_PET_LIVE_USAGE=0` removes it).
+Background source: Claude Code's `statusLine` → `hook/pet-statusline.mjs` → `~/.claude-pet/usage.json` (the bridge compares its mtime). Installed from Settings → Connections (bridge command `statusline`, `installStatusLine.ts`: diff + `.bak`; a foreign statusLine is wrapped with `--chain <base64>` and restored on removal).
+Display logic: `ui/src/renderer/usage.ts` (stale after a failed request or 15 min).
 
 ### Models and settings
 Models are Codex-format packs (`pet.json` + 1536×1872 sheet, 8×9 cells of 192×208). `ui/src/models/zip.ts` reads ZIPs in memory with strict checks; `install.ts` validates, installs atomically and never overwrites. Settings (`ui/src/settings.ts`): autostart, notify, hotkey, active model, appearance colors (`#rrggbb`).
