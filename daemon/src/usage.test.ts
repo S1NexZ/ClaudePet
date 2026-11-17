@@ -79,7 +79,7 @@ describe('pet-statusline.mjs', () => {
     const file = join(dir(), 'sub', 'usage.json');
     const r = run(JSON.stringify({ model: {}, rate_limits: { five_hour: { used_percentage: 23.5, resets_at: 100 }, seven_day: { used_percentage: 41.2, resets_at: 200 } } }), file);
     expect(r.status).toBe(0);
-    expect(r.stdout.trim()).toBe('5ч 24% · нед 41%');
+    expect(r.stdout.trim()).toBe('5h 24% · 7d 41%');
     const u = parseUsage(require('node:fs').readFileSync(file, 'utf8'));
     expect(u.fiveHour).toEqual({ usedPct: 23.5, resetsAt: 100 });
     expect(u.sevenDay).toEqual({ usedPct: 41.2, resetsAt: 200 });

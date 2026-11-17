@@ -112,7 +112,7 @@ describe('windows host: adoption', () => {
     expect(plan.diff).toContain('pet-helper.exe');
     expect(JSON.parse(readFileSync(sp, 'utf8'))).toEqual({ theme: 'dark' });
     expect(host.statusLine({ apply: true })).toMatchObject({ applied: true, kind: 'ours' });
-    expect(JSON.parse(readFileSync(sp, 'utf8')).statusLine.command).toBe('"C:\\pet\\pet-helper.exe" statusline');
+    expect(JSON.parse(readFileSync(sp, 'utf8')).statusLine.command).toBe('C:/pet/pet-helper.exe statusline');
     expect(host.statusLine({ apply: true, remove: true })).toMatchObject({ applied: true, kind: 'none' });
     expect(JSON.parse(readFileSync(sp, 'utf8'))).toEqual({ theme: 'dark' });
   });

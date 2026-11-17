@@ -1,5 +1,6 @@
 import { join, dirname } from 'node:path';
 import { randomBytes } from 'node:crypto';
+import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { SessionStore } from '../../../daemon/src/sessionStore.js';
 import { createBridge } from '../../../daemon/src/bridge.js';
@@ -36,6 +37,12 @@ export interface HostHooksState extends HooksStatus { settingsPath: string; diff
  * HTTP hooks (PowerShell / CMD / Windows Terminal / VS Code terminal / the desktop app all read C:\Users\<user>\.claude\settings.json).
  * Messages to its sessions go through the mailbox; there is no SDK fallback here.
  */
+/** The status line command must not contain spaces (it runs in Git Bash or PowerShell unquoted): a path with spaces becomes its short 8.3 form. */
+function shellSafePath(p: string): string {
+  if (!/\s/.test(p) || process.platform !== 'win32') return p;
+  try { return execFileSync('cmd.exe', ['/d', '/c', `for %I in ("${p}") do @echo %~sI`], { encoding: 'utf8', windowsHide: true, timeout: 5000 }).trim() || p; } catch { return p; }
+}
+
 export function createWindowsHost(o: WindowsHostOpts) {
   const settingsPath = join(o.claudeHome, 'settings.json');
   const tokenFile = join(o.dataDir, 'hub.json');
@@ -140,7 +147,7 @@ export function createWindowsHost(o: WindowsHostOpts) {
       if (!o.helperPath) return { diff: '', applied: false, kind: 'none', error: 'unsupported' };
       try {
         const { current, raw } = readSettingsFile(settingsPath);
-        const r = c.remove ? removeStatusLine(current) : planStatusLine(current, '', '', { exe: o.helperPath });
+        const r = c.remove ? removeStatusLine(current) : planStatusLine(current, '', '', { exe: shellSafePath(o.helperPath) });
         if (c.apply && r.diff) writeSettingsFile(settingsPath, r.next, raw !== undefined);
         return { diff: c.apply ? '' : r.diff, applied: !!c.apply && !!r.diff, kind: statusLineState(c.apply || !r.diff ? r.next : current) };
       } catch (e) { return { diff: '', applied: false, kind: 'none', error: (e as Error).message }; }

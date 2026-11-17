@@ -28,7 +28,10 @@ export type StatusLineKind = 'none' | 'ours' | 'chained';
 export function planStatusLine(current: Settings, scriptPath: string, nodePath: string, opts: { exe?: string } = {}): { next: Settings; diff: string; kind: StatusLineKind } {
   const existing = current.statusLine;
   // Windows: the helper exe; it always exits 0 and prints nothing to stderr, so no POSIX `2>/dev/null || true` (Claude Code may run it with cmd)
-  const base = opts.exe ? `"${opts.exe}" statusline` : `"${nodePath}" "${scriptPath}"`;
+  // Windows: Claude Code runs the line with Git Bash, or PowerShell when there is none. An unquoted forward-slash path runs in both
+  // (a quoted path followed by an argument is a syntax error in PowerShell); paths with spaces must come in their short 8.3 form.
+  if (opts.exe && /\s/.test(opts.exe)) throw new Error('statusLine helper path must not contain spaces (use the short 8.3 path)');
+  const base = opts.exe ? `${opts.exe.replace(/\\/g, '/')} statusline` : `"${nodePath}" "${scriptPath}"`;
   const tail = opts.exe ? '' : ' 2>/dev/null || true';
   const orig = isOurs(existing) ? chainedOriginal(existing) : existing ?? null;
   const next: Settings = JSON.parse(JSON.stringify(current));

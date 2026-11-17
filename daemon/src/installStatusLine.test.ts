@@ -87,7 +87,8 @@ describe('Windows statusLine (pet-helper.exe statusline)', () => {
   it('points statusLine at the helper (no POSIX redirections: the helper never fails or writes to stderr)', () => {
     const { next, kind } = planStatusLine({}, '', '', { exe: EXE });
     expect(kind).toBe('ours');
-    expect(next.statusLine).toEqual({ type: 'command', command: `"${EXE}" statusline`, padding: 0 });
+    // no quotes and forward slashes: the same text runs in Git Bash and in PowerShell (what Claude Code uses without Git Bash)
+    expect(next.statusLine).toEqual({ type: 'command', command: 'C:/Users/u/AppData/Local/Programs/claude-pet/resources/helper/pet-helper.exe statusline', padding: 0 });
     expect(statusLineState(next)).toBe('ours');
   });
   it("wraps the user's own line and restores it; an updated helper path replaces ours", () => {
@@ -97,8 +98,18 @@ describe('Windows statusLine (pet-helper.exe statusline)', () => {
     expect(statusLineState(r.next)).toBe('chained');
     expect(removeStatusLine(r.next).next.statusLine).toEqual(mine);
     const moved = planStatusLine(r.next, '', '', { exe: 'D:\\pet\\pet-helper.exe' });
-    expect(moved.next.statusLine.command).toContain('D:\\pet\\pet-helper.exe');
+    expect(moved.next.statusLine.command).toContain('D:/pet/pet-helper.exe statusline');
     expect(removeStatusLine(moved.next).next.statusLine).toEqual(mine);
+  });
+  it('the old quoted form (broken under PowerShell) is still ours and gets replaced by an update', () => {
+    const old = { statusLine: { type: 'command', command: `"${EXE}" statusline`, padding: 0 } };
+    expect(statusLineState(old)).toBe('ours');
+    const r = planStatusLine(old, '', '', { exe: EXE });
+    expect(r.diff).not.toBe('');
+    expect(r.next.statusLine.command).toBe('C:/Users/u/AppData/Local/Programs/claude-pet/resources/helper/pet-helper.exe statusline');
+  });
+  it('a path with spaces is refused (the caller passes the short 8.3 form instead)', () => {
+    expect(() => planStatusLine({}, '', '', { exe: 'C:\\Program Files\\pet\\pet-helper.exe' })).toThrow();
   });
 });
 
