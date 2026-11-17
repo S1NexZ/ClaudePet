@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { mkdtempSync, writeFileSync, utimesSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -106,6 +106,15 @@ describe('usage source with the periodic query', () => {
   it('live data is used, with its plan (no `claude auth status` needed) and bookkeeping', async () => {
     const src = mk({ state: () => liveState(), revision: () => 3 });
     expect(await src.read()).toEqual({ plan: 'pro', updatedAt: 5000, fiveHour: { usedPct: 64, resetsAt: 9 }, sevenDay: { usedPct: 60, resetsAt: 99 }, statusLine: 'none', source: 'live', liveActive: true, lastAttemptAt: 5000, lastError: null });
+  });
+  it('without a timer the query is on demand: liveActive false, refreshing only while one runs, refresh() is passed on', async () => {
+    const refresh = vi.fn(() => true);
+    const src = mk({ state: () => liveState({ running: true }), revision: () => 1, periodic: false, refresh });
+    expect(await src.read()).toMatchObject({ liveActive: false, refreshing: true });
+    expect(src.refresh()).toBe(true);
+    expect(refresh).toHaveBeenCalledTimes(1);
+    const idle = await mk({ state: () => liveState(), revision: () => 1, periodic: false, refresh }).read();
+    expect('refreshing' in idle).toBe(false);
   });
   it('the newer of live and statusLine wins, one source wholesale', async () => {
     const file = { updatedAt: 9000, five_hour: { used_percentage: 70, resets_at: 8 }, seven_day: null };

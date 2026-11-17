@@ -44,9 +44,9 @@ const runner = new SessionRunner({
   onChange: () => bridge.snapshot(true),
   onChat: (sid, e) => bridge.onChat(sid, e),
 });
-// periodic limits query (CLAUDE_PET_LIVE_USAGE=0 turns it off); starts once the bridge is listening, stops with it
+// the limits query runs only when the user clicks the ring (refresh()), never on a timer; CLAUDE_PET_LIVE_USAGE=0 removes it entirely
 const poller = process.env.CLAUDE_PET_LIVE_USAGE === '0' ? null
-  : createUsagePoller({ fetch: makeLiveFetch({ claudePath: claude }), onChange: () => { void bridge.pushUsage(); } });
+  : createUsagePoller({ fetch: makeLiveFetch({ claudePath: claude }), onChange: () => { void bridge.pushUsage(); }, onStart: () => { void bridge.pushUsage(); } });
 bridge = createBridge({
   store, runner, out: send, readTranscript,
   usage: createUsageSource({ settingsPath: join(homedir(), '.claude', 'settings.json'), claudePath: claude, live: poller ?? undefined }),
@@ -67,7 +67,6 @@ listenHooks(defaultSocketPath(), (e) => bridge.onHook(e))
     const http = await httpHooks;
     send({ type: 'ready', claude: claude ?? null, distro: process.env.WSL_DISTRO_NAME ?? '' });
     bridge.snapshot();
-    poller?.start();
     const adopted = new Set<string>();
     let lastAdopt = 0;
     const adoptRecent = async (now: number) => {

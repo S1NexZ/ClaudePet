@@ -77,6 +77,7 @@ export type AppCommand =
   | { type: 'release'; sessionId: string }
   | { type: 'dismiss'; sessionId: string }
   | { type: 'term-mark'; sessionId: string; text: string }
+  | { type: 'usage-refresh' }
   | { type: 'end'; sessionId: string }
   | { type: 'usage' };
 
@@ -109,6 +110,8 @@ export interface UsageInfo {
   source?: 'live' | 'statusline' | null;
   /** the periodic query is running (so data older than a few cycles is stale) */
   liveActive?: boolean;
+  /** a manual query (the user clicked the ring) is running right now */
+  refreshing?: boolean;
   /** when the last periodic query finished (ms), successful or not */
   lastAttemptAt?: number | null;
   /** why the last periodic query failed; null when it succeeded */

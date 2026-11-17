@@ -317,6 +317,14 @@ describe('bridge: sessions running under pet-claude.py', () => {
     await vi.waitFor(() => expect(last(t.out, 'usage')).toEqual({ type: 'usage', usage: info }));
     expect(calls).toBe(2);
   });
+  it('usage-refresh asks the source for one query and answers with the current limits', async () => {
+    let started = 0; const info: any = { plan: 'pro', updatedAt: 1, fiveHour: null, sevenDay: null, statusLine: 'none', refreshing: true };
+    const t = setup({ usage: { version: () => 1, read: async () => info, refresh: () => { started++; return true; } } } as any);
+    await t.bridge.handle({ type: 'usage-refresh' });
+    expect(started).toBe(1);
+    expect(last(t.out, 'usage')).toEqual({ type: 'usage', usage: info });
+  });
+
   it('without a usage source the command is ignored (no crash)', async () => {
     const t = setup();
     await t.bridge.handle({ type: 'usage' });

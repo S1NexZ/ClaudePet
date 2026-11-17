@@ -46,7 +46,7 @@ export function usageVersion(path = defaultUsagePath()): number {
 export function createUsageSource(o: {
   path?: string; settingsPath: string; claudePath?: string; now?: () => number;
   /** the periodic Claude Code usage query (optional): its last good data wins over an older statusLine file */
-  live?: { state(): LiveState; revision(): number };
+  live?: { state(): LiveState; revision(): number; periodic?: boolean; refresh?(minGapMs?: number): boolean };
 }) {
   const path = o.path ?? defaultUsagePath();
   const now = o.now ?? Date.now;
@@ -69,6 +69,8 @@ export function createUsageSource(o: {
 
   return {
     /** changes whenever the file or the periodic query produced something new (also a failed attempt: staleness must show) */
+    /** starts one query for a user's click (false: too soon, one is running, or no live source) */
+    refresh: (): boolean => o.live?.refresh?.() ?? false,
     version: (): number | string => (o.live ? `${usageVersion(path)}:${o.live.revision()}` : usageVersion(path)),
     async read(): Promise<UsageInfo> {
       const ls = o.live?.state() ?? null;
@@ -85,7 +87,7 @@ export function createUsageSource(o: {
       return {
         plan: live?.plan ?? plan, ...chosen, statusLine,
         source: useLive ? 'live' : fileOk ? 'statusline' : null,
-        liveActive: !!o.live, lastAttemptAt: ls?.lastAttemptAt ?? null, lastError: ls?.lastError ?? null,
+        liveActive: !!o.live && o.live.periodic !== false, ...(ls?.running ? { refreshing: true } : {}), lastAttemptAt: ls?.lastAttemptAt ?? null, lastError: ls?.lastError ?? null,
       };
     },
   };

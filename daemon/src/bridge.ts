@@ -53,7 +53,7 @@ export function createBridge(o: {
   /** the folder a session was started in, from its transcript (injectable for tests) */
   originalCwd?: (path: string) => Promise<string | null>;
   /** subscription limits saved by pet-statusline.mjs (injectable for tests) */
-  usage?: { version(): number | string; read(): Promise<UsageInfo> };
+  usage?: { version(): number | string; read(): Promise<UsageInfo>; refresh?(): boolean };
   /** whether the transcript got an "interrupted by user" entry after a time (injectable for tests) */
   interrupted?: (path: string, sinceMs: number) => Promise<boolean>;
   /** the pet's mailbox: delivers messages to sessions without a PTY through their armed waiter */
@@ -179,6 +179,10 @@ export function createBridge(o: {
             break;
           }
           case 'history': await history(String(cmd.sessionId)); return;
+          case 'usage-refresh': { // the user clicked the limits ring: one live query (throttled by the source); its start and end push the numbers
+            if (o.usage) { o.usage.refresh?.(); usageVersion = o.usage.version(); o.out({ type: 'usage', usage: await o.usage.read() }); }
+            return;
+          }
           case 'usage': if (o.usage) { usageVersion = o.usage.version(); o.out({ type: 'usage', usage: await o.usage.read() }); } return;
           case 'models': o.out({ type: 'models', models: await o.runner.models() }); return;
           case 'setModel': {
