@@ -9,6 +9,23 @@ import { join } from 'node:path';
 
 // `pet-hook.mjs wait`: the mailbox waiter (an `asyncRewake` hook). It long-polls the pet; a message is printed to stderr and the exit code 2 wakes
 // the Claude Code session with it. No pet / unknown session / claude gone: exits 0 quietly.
+/** A one-shot `claude -p` (print mode with a prompt, not a stream-json session like the desktop app's) in the hook's parent chain. */
+function isOneShot(args) {
+  const print = args.some((a) => a === '-p' || a === '--print' || a.startsWith('--print='));
+  const streamIn = args.some((a, i) => a === '--input-format=stream-json' || (a === '--input-format' && args[i + 1] === 'stream-json'));
+  return print && !streamIn;
+}
+function oneShot(pid) {
+  for (let i = 0; i < 3 && pid > 1; i++) {
+    try {
+      if (isOneShot(readFileSync(`/proc/${pid}/cmdline`, 'utf8').split('\0'))) return true;
+      const st = readFileSync(`/proc/${pid}/stat`, 'utf8');
+      pid = Number(st.slice(st.lastIndexOf(')') + 2).split(' ')[1]) || 0;
+    } catch { return false; }
+  }
+  return false;
+}
+
 if (process.argv[2] === 'wait') {
   let raw = '';
   process.stdin.setEncoding('utf8');
@@ -22,6 +39,7 @@ if (process.argv[2] === 'wait') {
     try { hub = JSON.parse(readFileSync(join(homedir(), '.claude-pet', 'hub.json'), 'utf8')); } catch { return stop(); }
     if (!sid || !/^[\w-]{1,100}$/.test(sid) || !hub?.port || !hub?.token) return stop();
     const parent = process.ppid;
+    if (oneShot(parent)) return stop(); // `claude -p "…"` waits for its async hooks before exiting: a waiter there would hang it
     const alive = () => { try { process.kill(parent, 0); return true; } catch { return false; } };
     const poll = () => {
       if (!alive()) return stop();

@@ -43,6 +43,66 @@ static class PetHelper
         try { return !Process.GetProcessById(pid).HasExited; } catch { return false; }
     }
 
+    [DllImport("ntdll.dll", EntryPoint = "NtQueryInformationProcess")]
+    static extern int NtQueryInformationProcessBuf(IntPtr handle, int infoClass, IntPtr buf, int size, out int returned);
+
+    /** Command line of a process (ProcessCommandLineInformation, Windows 8.1+); null when it cannot be read. */
+    static string CommandLineOf(int pid)
+    {
+        try
+        {
+            using (var p = Process.GetProcessById(pid))
+            {
+                int len;
+                NtQueryInformationProcessBuf(p.Handle, 60, IntPtr.Zero, 0, out len);
+                if (len <= 0 || len > 1 << 20) return null;
+                IntPtr buf = Marshal.AllocHGlobal(len);
+                try
+                {
+                    if (NtQueryInformationProcessBuf(p.Handle, 60, buf, len, out len) != 0) return null;
+                    int bytes = (ushort)Marshal.ReadInt16(buf);
+                    IntPtr str = Marshal.ReadIntPtr(buf, IntPtr.Size); // UNICODE_STRING { ushort Length, MaximumLength; (padding) PWSTR Buffer }
+                    return Marshal.PtrToStringUni(str, bytes / 2);
+                }
+                finally { Marshal.FreeHGlobal(buf); }
+            }
+        }
+        catch { return null; }
+    }
+
+    static int ParentOf(int pid)
+    {
+        try
+        {
+            using (var p = Process.GetProcessById(pid))
+            {
+                var pbi = new PROCESS_BASIC_INFORMATION(); int ret;
+                if (NtQueryInformationProcess(p.Handle, 0, ref pbi, Marshal.SizeOf(pbi), out ret) == 0) return pbi.InheritedFromUniqueProcessId.ToInt32();
+            }
+        }
+        catch { }
+        return 0;
+    }
+
+    /** `claude -p "..."` (print mode, not a stream-json session like the desktop app's): it waits for async hooks before exiting, so no waiter there. */
+    public static bool IsOneShot(string cmd)
+    {
+        if (string.IsNullOrEmpty(cmd)) return false;
+        bool print = Regex.IsMatch(cmd, "(^|\\s)(-p|--print)(=|\\s|$)");
+        bool streamIn = Regex.IsMatch(cmd, "--input-format(=|\\s+)\"?stream-json");
+        return print && !streamIn;
+    }
+
+    static bool OneShotParent(int pid)
+    {
+        for (int i = 0; i < 3 && pid > 0; i++)
+        {
+            if (IsOneShot(CommandLineOf(pid))) return true;
+            pid = ParentOf(pid);
+        }
+        return false;
+    }
+
     static int Wait(string baseUrl)
     {
         string json;
@@ -53,6 +113,7 @@ static class PetHelper
         var pipe = Environment.GetEnvironmentVariable("PET_PTY_SOCK");
         if (!string.IsNullOrEmpty(pipe) && pipe.StartsWith("\\\\.\\pipe\\claude-pet-")) url += "?pty=" + Uri.EscapeDataString(pipe);
         int parent = ParentPid();
+        if (OneShotParent(parent)) return 0;
         while (Alive(parent))
         {
             try
@@ -188,6 +249,7 @@ static class PetHelper
     static int Main(string[] args)
     {
         if (args.Length >= 2 && args[0] == "wait") return Wait(args[1]);
+        if (args.Length >= 2 && args[0] == "oneshot") return IsOneShot(args[1]) ? 1 : 0; // self-test of the rule
         if (args.Length >= 2 && args[0] == "pty") { var rest = new string[args.Length - 1]; Array.Copy(args, 1, rest, 0, rest.Length); return Pty(rest); }
         return 0;
     }

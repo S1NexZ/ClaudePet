@@ -51,4 +51,22 @@ describe('pet-hook.mjs wait (the mailbox waiter)', () => {
     mailbox.send('s1', 'x');
     expect((await first.done).code).toBe(2);
   });
+  /** runs the waiter under a parent process whose command line ends with `extra` (like `claude -p "hi"`) */
+  const underParent = (home: string, extra: string[]) => spawn(process.execPath, ['-e', `const c=require('child_process').spawn(process.execPath,[${JSON.stringify(script)},'wait'],{env:{...process.env,HOME:${JSON.stringify(home)}},stdio:['pipe','inherit','inherit']});c.stdin.end(JSON.stringify({session_id:'s1'}));c.on('close',(k)=>process.exit(k??9))`, '--', ...extra], { stdio: 'ignore' });
+  const exitOf = (p: ReturnType<typeof spawn>) => new Promise<number | null>((r) => p.on('close', r));
+  it('a one-shot `claude -p` parent: exits 0 at once instead of holding the run open', async () => {
+    const { home } = await hub(2000);
+    for (const args of [['-p', 'hi'], ['--print', 'hi']]) {
+      const t0 = Date.now();
+      expect(await exitOf(underParent(home, args))).toBe(0);
+      expect(Date.now() - t0).toBeLessThan(1500);
+    }
+  });
+  it('a stream-json session (the desktop app runs claude like that) keeps its waiter', async () => {
+    const { home, mailbox } = await hub(2000);
+    const p = underParent(home, ['--output-format', 'stream-json', '--input-format', 'stream-json', '-p']);
+    await new Promise((r) => setTimeout(r, 500));
+    mailbox.send('s1', 'wake');
+    expect(await exitOf(p)).toBe(2);
+  });
 });
