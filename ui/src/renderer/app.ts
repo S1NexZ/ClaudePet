@@ -2,6 +2,7 @@ import { statusView, STATE_LABEL, formatElapsed, hostTag, chipLabel } from './la
 import { createConnectionsTab, type ConnectionsHost } from './connectionsTab.js';
 import { pinSnapshot, focusSnapshot } from './view.js';
 import { sessionRows, nextChatId, isQuiet } from './switcher.js';
+import { matchCommands, planSlash, COMMANDS, type Command } from './commands.js';
 import { decideSend, placeholderFor, isBusyReply, canStop, parseSlash, type Mode } from './compose.js';
 import { applyChat, mergeHistory } from './chatStore.js';
 import { mdBlocks, mdInline } from './md.js';
@@ -357,22 +358,70 @@ async function main() {
     input.focus();
     return true;
   };
+  // ---- "/" command menu ----
+  let cmdSel = 0, cmdList: Command[] = [];
+  const hideCmds = () => { $('cmds').hidden = true; cmdList = []; };
+  const renderCmds = () => {
+    cmdList = matchCommands(input.value);
+    const box = $('cmds');
+    if (!cmdList.length) { box.hidden = true; return; }
+    cmdSel = Math.min(cmdSel, cmdList.length - 1);
+    box.replaceChildren(...cmdList.map((c, i) => {
+      const b = document.createElement('button'); b.className = `c${c.kind === 'claude' ? ' cl' : ''}${i === cmdSel ? ' on' : ''}`; b.tabIndex = -1; b.setAttribute('role', 'option');
+      const n = document.createElement('b'); n.textContent = `/${c.name}`;
+      b.append(n);
+      if (c.args) { const a = document.createElement('i'); a.textContent = c.args; b.append(a); }
+      const d = document.createElement('span'); d.textContent = c.desc(); b.append(d);
+      b.addEventListener('mousedown', (e) => { e.preventDefault(); pickCmd(c); });
+      return b;
+    }));
+    box.hidden = false;
+    (box.querySelector('.on') as HTMLElement | null)?.scrollIntoView({ block: 'nearest' });
+  };
+  const pickCmd = (c: Command) => { input.value = `/${c.name}${c.args ? ' ' : ''}`; hideCmds(); input.focus(); if (!c.args) void submit(); };
+  input.addEventListener('input', () => { cmdSel = 0; renderCmds(); });
+  input.addEventListener('keydown', (e) => {
+    if (!cmdList.length) return;
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') { e.preventDefault(); cmdSel = (cmdSel + (e.key === 'ArrowDown' ? 1 : cmdList.length - 1)) % cmdList.length; renderCmds(); }
+    else if (e.key === 'Tab') { e.preventDefault(); input.value = `/${cmdList[cmdSel].name}${cmdList[cmdSel].args ? ' ' : ''}`; renderCmds(); }
+    else if (e.key === 'Enter') { e.preventDefault(); e.stopImmediatePropagation(); pickCmd(cmdList[cmdSel]); }
+    else if (e.key === 'Escape') { e.preventDefault(); e.stopImmediatePropagation(); hideCmds(); }
+  }, true);
   const submit = async () => {
     if (!connected) { notify(L('Нет связи с Claude Code в WSL', 'No connection to Claude Code in WSL', '无法连接 WSL 中的 Claude Code')); return; }
     // commands the pet handles itself; every other /command goes to Claude Code as typed
     const sl = parseSlash(input.value);
     const target = mode === 'reply' ? chatSession() : null;
-    if (sl?.name === 'model') {
-      pickerFor = target?.id ?? null;
-      if (sl.args) host.send({ type: 'setModel', sessionId: pickerFor, model: sl.args });
-      else { const box = $('models'); box.replaceChildren(Object.assign(document.createElement('div'), { className: 'hint', textContent: L('Загружаю список моделей…', 'Loading the model list…', '正在加载模型列表…') })); box.hidden = false; host.send({ type: 'models' }); }
-      input.value = '';
+    const plan = planSlash(sl, !!target?.pty);
+    hideCmds();
+    if (plan?.kind === 'no-terminal') {
+      notify(target ? L(`/${plan.name} выполняет сам Claude Code: сессия без терминала питомца её не примет. Откройте чат в терминале`, `/${plan.name} is run by Claude Code itself: a session without the pet's terminal link cannot take it. Open the chat in the terminal`, `/${plan.name} 由 Claude Code 自己执行：没有宠物终端连接的会话无法接收。请在终端中打开聊天`)
+        : L(`/${plan.name} нужен открытый чат`, `/${plan.name} needs an open chat`, `/${plan.name} 需要已打开的聊天`));
       return;
     }
-    if (sl?.name === 'btw') {
-      if (!target) { notify(L('/btw задаёт вопрос по открытому чату: сначала выбери сессию', '/btw asks about the open chat: pick a session first', '/btw 针对已打开的聊天提问：请先选择会话')); return; }
-      if (!sl.args) { notify(L('Напиши вопрос после /btw', 'Type your question after /btw', '请在 /btw 后输入你的问题')); return; }
-      host.send({ type: 'btw', sessionId: target.id, text: sl.args });
+    if (plan?.kind === 'pet') {
+      const { name, args } = plan;
+      if (name === 'model') {
+        pickerFor = target?.id ?? null;
+        if (args) host.send({ type: 'setModel', sessionId: pickerFor, model: args });
+        else { const box = $('models'); box.replaceChildren(Object.assign(document.createElement('div'), { className: 'hint', textContent: L('Загружаю список моделей…', 'Loading the model list…', '正在加载模型列表…') })); box.hidden = false; host.send({ type: 'models' }); }
+      } else if (name === 'btw') {
+        if (!target) { notify(L('/btw задаёт вопрос по открытому чату: сначала выбери сессию', '/btw asks about the open chat: pick a session first', '/btw 针对已打开的聊天提问：请先选择会话')); return; }
+        if (!args) { notify(L('Напиши вопрос после /btw', 'Type your question after /btw', '请在 /btw 后输入你的问题')); return; }
+        host.send({ type: 'btw', sessionId: target.id, text: args });
+      } else if (name === 'stop') {
+        if (target) host.send({ type: 'interrupt', sessionId: target.id }); else notify(L('Нечего останавливать: чат не открыт', 'Nothing to stop: no chat is open', '没有可停止的内容'));
+      } else if (name === 'new') { input.value = ''; await chooseFolder(); return; }
+      else if (name === 'end') { if (target) host.send({ type: 'end', sessionId: target.id }); else notify(L('Чат не открыт', 'No chat is open', '没有打开的聊天')); }
+      else if (name === 'sessions') { input.value = ''; (document.getElementById('chat-switch') as HTMLElement).click(); return; }
+      else if (name === 'terminal') { if (target) host.openTerminal(target.id); else notify(L('Чат не открыт', 'No chat is open', '没有打开的聊天')); }
+      else if (name === 'usage') { input.value = ''; (document.getElementById('usage-ring') as HTMLElement).click(); return; }
+      else if (name === 'settings') { input.value = ''; settingsPanel.toggle(); return; }
+      else if (name === 'help') {
+        const box = $('models');
+        box.replaceChildren(...COMMANDS.map((c) => Object.assign(document.createElement('div'), { className: 'hint', textContent: `/${c.name}${c.args ? ' ' + c.args : ''} — ${c.desc()}${c.kind === 'claude' ? ' (Claude Code)' : ''}` })));
+        box.hidden = false;
+      }
       input.value = '';
       return;
     }
@@ -521,7 +570,7 @@ async function main() {
   // Smooth motion: frames cross-fade into each other (a state change fades a little longer and gets a soft "pop"),
   // and a calm pet breathes. All of it is skipped when the OS asks for reduced motion.
   const reduceMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false;
-  animatePanels(['notice', 'perm', 'sessions', 'settings', 'usage', 'chat', 'chat-menu', 'models'].map((id) => document.getElementById(id)), reduceMotion);
+  animatePanels(['notice', 'perm', 'sessions', 'settings', 'usage', 'chat', 'chat-menu', 'models', 'cmds'].map((id) => document.getElementById(id)), reduceMotion);
   const motion = createMotion({ sprite, dockPill, chip: $('chip') }, reduceMotion);
   // a click on the chip (outside the ring, which opens the limits) shows or hides the session name
   $('chip').addEventListener('click', (e) => { if ((e.target as HTMLElement).closest('#usage-ring')) return; detailOpen = !detailOpen; wake(); });

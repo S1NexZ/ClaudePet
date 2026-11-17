@@ -156,6 +156,13 @@ body { font-family: "Segoe UI", "Microsoft YaHei UI", system-ui, sans-serif; col
 #models .m:hover, #models .m:focus-visible { background: var(--hover); }
 #models .m b { font-weight: 600; white-space: nowrap; }
 #models .m span { color: var(--muted); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#cmds { display: flex; flex-direction: column; gap: 1px; padding: 2px 8px 6px; max-height: 210px; overflow-y: auto; border-bottom: 1px solid var(--glass-line); flex: none; }
+#cmds .c { all: unset; display: flex; align-items: baseline; gap: 8px; padding: 5px 8px; border-radius: 10px; cursor: pointer; font-size: 13px; }
+#cmds .c.on, #cmds .c:hover { background: var(--hover); }
+#cmds .c b { font-weight: 600; white-space: nowrap; }
+#cmds .c i { font-style: normal; color: var(--muted); font-size: 12px; white-space: nowrap; }
+#cmds .c span { color: var(--muted); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-left: auto; }
+#cmds .c.cl b::before { content: ''; display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: var(--accent, #fff); opacity: .55; margin-right: 6px; vertical-align: 1px; }
 #models .hint { color: var(--muted); font-size: 12px; padding: 4px 8px; }
 .msg.note { align-self: stretch; padding: 6px 10px; border-radius: 10px; background: color-mix(in srgb, var(--teal) 10%, transparent); border: 1px dashed color-mix(in srgb, var(--teal) 45%, transparent); white-space: pre-wrap; font-size: 13px; }
 .msg.note::before { content: "btw · "; color: var(--teal); font-weight: 600; }
