@@ -2,6 +2,10 @@
 
 Формат: [Keep a Changelog](https://keepachangelog.com/ru/1.1.0/), версии по [SemVer](https://semver.org/lang/ru/).
 
+## [0.6.1] — 2026-11-17
+### Исправлено
+- Сборки Linux и macOS прикрепляются к релизу независимо друг от друга и от очереди тестов: в 0.6.0 они не попали на страницу релиза, потому что тест на macOS не дождался свободного runner. Код приложения не менялся.
+
 ## [0.6.0] — 2026-11-17
 ### Добавлено
 - **Linux и macOS (бета).** Мост Claude Code запускается на самом компьютере внутри самого приложения (Electron как Node), WSL не нужен. Сборки: `ccPet-<версия>-linux-x64.AppImage` и `.deb`, `ccPet-<версия>-mac-<x64|arm64>.dmg` и `.zip` (не подписаны). Что сделано: переносимые сведения о процессах (`/proc` в Linux, `ps` в macOS) для терминалов и одноразовых запусков `claude -p`; хуки и строка состояния вызывают то же приложение с `ELECTRON_RUN_AS_NODE`, а скрипты хуков копируются в `~/.claude-pet/bin` (путь AppImage меняется при каждом запуске); открытие и поднятие терминала (gnome-terminal, konsole, xfce4-terminal, kitty, alacritty, xterm; `wmctrl`/`xdotool`; Terminal.app через osascript); автозапуск Linux через `~/.config/autostart`; обёртка `claude` для zsh (`~/.zshrc`); на macOS питомец живёт без значка в Dock, на Linux окно работает через X11/XWayland. Windows-части (WSL, PowerShell, приложение Claude) на этих системах скрыты.

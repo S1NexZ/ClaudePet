@@ -32,8 +32,9 @@ jobs:
 
   package:
     name: Package (${{ matrix.name }})
-    needs: test
     runs-on: ${{ matrix.os }}
+    permissions:
+      contents: write
     strategy:
       fail-fast: false
       matrix:
@@ -58,6 +59,17 @@ jobs:
             ui/release/*.dmg
             ui/release/*.zip
           if-no-files-found: error
+      - name: Attach to the release (tags only; waits for the release page created with the tag)
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          for i in $(seq 1 40); do gh release view "$TAG" -R "$GITHUB_REPOSITORY" >/dev/null 2>&1 && break; sleep 30; done
+          shopt -s nullglob
+          files=(ui/release/*.AppImage ui/release/*.deb ui/release/*.dmg ui/release/*.zip)
+          gh release upload "$TAG" "${files[@]}" -R "$GITHUB_REPOSITORY" --clobber
 
   smoke-linux:
     name: Starts and connects (Linux)
@@ -77,22 +89,3 @@ jobs:
           LOG="$HOME/.config/Claude Pet/pet.log"
           cat "$LOG"
           grep -q "bridge wsl ready" "$LOG"
-
-  release-assets:
-    name: Attach Linux and macOS builds to the release
-    if: startsWith(github.ref, 'refs/tags/v')
-    needs: [package, smoke-linux]
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-    steps:
-      - uses: actions/download-artifact@v4
-        with: { path: dl, pattern: ccPet-*, merge-multiple: true }
-      - name: Upload (waits for the release page that is created together with the tag)
-        env:
-          GH_TOKEN: ${{ github.token }}
-          TAG: ${{ github.ref_name }}
-        run: |
-          ls -la dl
-          for i in $(seq 1 40); do gh release view "$TAG" -R "$GITHUB_REPOSITORY" >/dev/null 2>&1 && break; sleep 30; done
-          gh release upload "$TAG" dl/* -R "$GITHUB_REPOSITORY" --clobber
