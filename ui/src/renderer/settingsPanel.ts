@@ -175,6 +175,7 @@ export function createSettingsPanel(root: HTMLElement, deps: SettingsDeps, initi
       { id: 'colors', title: L('Цвета', 'Colors', '颜色'), render: renderColors },
       ...(deps.language ? [{ id: 'language', title: L('Язык', 'Language', '语言'), render: renderLanguage }] : []),
       ...(deps.permissions ? [{ id: 'permissions', title: L('Разрешения', 'Permissions', '权限'), render: renderPermissions }] : []), ...(deps.tabs ?? [])];
+    const keepScroll = lastShown === tab ? (root.querySelector('.s-body') as HTMLElement | null)?.scrollTop ?? 0 : 0; // a change inside a tab redraws it: stay where the user scrolled
     const head = el('div', 's-head');
     const bar = el('div', 's-tabs'); bar.setAttribute('role', 'tablist');
     for (const t of tabs) {
@@ -189,6 +190,7 @@ export function createSettingsPanel(root: HTMLElement, deps: SettingsDeps, initi
     const body = el('div', 's-body');
     (tabs.find((t) => t.id === tab) ?? tabs[0]).render(body);
     root.replaceChildren(head, body);
+    if (keepScroll) body.scrollTop = keepScroll;
     if (lastShown !== tab && !matchMedia('(prefers-reduced-motion: reduce)').matches) {
       gsap.fromTo(body.children, { opacity: 0, y: 8 }, { opacity: 1, y: 0, duration: 0.28, stagger: 0.04, ease: 'power2.out', clearProps: 'opacity,transform' });
     }
