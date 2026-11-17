@@ -131,6 +131,26 @@ describe('bridge', () => {
     expect(last(out, 'hooks')).toMatchObject({ type: 'hooks', diff: '', applied: false });
   });
 
+  it('statusline: plan shows the diff, apply writes with a backup, a foreign line is wrapped and restored on remove', async () => {
+    const { bridge, out, settingsPath } = setup();
+    writeFileSync(settingsPath, '{"statusLine":{"type":"command","command":"my-line.sh"}}');
+    await bridge.handle({ type: 'statusline' });
+    expect(last(out, 'statusline')).toMatchObject({ applied: false, kind: 'none', diff: expect.stringContaining('--chain') });
+    expect(readFileSync(settingsPath, 'utf8')).toBe('{"statusLine":{"type":"command","command":"my-line.sh"}}');
+    await bridge.handle({ type: 'statusline', apply: true });
+    expect(last(out, 'statusline')).toMatchObject({ applied: true, kind: 'chained' });
+    expect(existsSync(settingsPath + '.bak')).toBe(true);
+    await bridge.handle({ type: 'statusline' });
+    expect(last(out, 'statusline')).toMatchObject({ diff: '', kind: 'chained' });
+    await bridge.handle({ type: 'statusline', apply: true, remove: true });
+    expect(JSON.parse(readFileSync(settingsPath, 'utf8'))).toEqual({ statusLine: { type: 'command', command: 'my-line.sh' } });
+  });
+  it('statusline is unsupported where there is no node (the Windows host)', async () => {
+    const { bridge, out, settingsPath } = setup({ hooks: { settingsPath: '', hookPath: '', nodePath: '' } } as any);
+    await bridge.handle({ type: 'statusline' });
+    expect(last(out, 'statusline')).toMatchObject({ error: 'unsupported' });
+  });
+
   it('hooks status: missing / present / stale (points to a file that no longer exists)', async () => {
     const { bridge, out, settingsPath } = setup();
     await bridge.handle({ type: 'hooks', apply: false });

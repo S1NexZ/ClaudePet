@@ -9,12 +9,16 @@ export interface HostState {
   port?: number;
   distro?: string;
   settingsPath?: string;
+  /** Claude Code's status line (feeds the limits ring): ours, wrapping the user's own, or not connected; undefined where it does not apply */
+  statusLine?: 'none' | 'ours' | 'chained';
+  statusLineDiff?: string;
+  statusLineError?: string;
 }
 export interface ConnectionsState { answerPermissions: boolean; helper: boolean; /** full path of pet-helper.exe (for the PowerShell wrapper line) */ helperPath?: string; windows: HostState; wsl: HostState; /** other WSL distros that are followed */ others?: Array<HostState & { id: string }> }
 export interface ConnectionsHost {
   copy?(text: string): void;
   get(): Promise<ConnectionsState>;
-  apply(host: string, action: 'connect' | 'disconnect'): Promise<ConnectionsState>;
+  apply(host: string, action: 'connect' | 'disconnect' | 'statusline' | 'statusline-off'): Promise<ConnectionsState>;
   answerPermissions(on: boolean): Promise<ConnectionsState>;
 }
 
@@ -57,6 +61,16 @@ export function createConnectionsTab(host: ConnectionsHost) {
       line.append(off);
     }
     row.append(line);
+    if (h.statusLine !== undefined && !h.statusLineError) {
+      const sl = el('div', 'c-sl');
+      const on = h.statusLine !== 'none';
+      sl.append(chip(on, L('лимиты через статус-строку', 'limits via the status line', '通过状态栏获取额度')));
+      if (h.statusLine === 'chained') sl.append(el('span', 's-hint', L(' (ваша строка сохранена и продолжает работать)', ' (your own line is kept and keeps working)', '（您自己的状态栏已保留并继续工作）')));
+      const b = el('button', `s-btn${on ? '' : ' primary'}`, on ? L('Отключить', 'Disconnect', '断开') : L('Подключить', 'Connect', '连接')); b.type = 'button'; b.disabled = busy;
+      b.addEventListener('click', () => void run(host.apply(id, on ? 'statusline-off' : 'statusline')));
+      sl.append(b);
+      row.append(sl);
+    }
     return row;
   };
 

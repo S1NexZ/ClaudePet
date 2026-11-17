@@ -80,13 +80,12 @@ export interface PanelModel { header: string; status: UsageStatus; rows: RowMode
 const unavailableText = (u: UsageInfo | null): string => {
   if (!u) return L('Нет связи с мостом питомца: лимиты недоступны.', 'No connection to the pet bridge: limits are unavailable.', '与宠物桥接无连接：无法获取额度。');
   const why = errorText(u.lastError);
-  if (u.lastError === 'invalid') return L('Ответ сервера лимитов не распознан, данных нет. Повторю через минуту.', 'The limits response was not understood, no data. Retrying in a minute.', '无法理解额度响应，暂无数据。一分钟后重试。');
+  if (u.lastError === 'invalid') return L('Ответ сервера лимитов не распознан, данных нет. Нажмите на кружок, чтобы повторить.', 'The limits response was not understood, no data. Click the ring to retry.', '无法理解额度响应，暂无数据。点击圆环重试。');
   if (u.lastError === 'unavailable') return L('Лимиты плана недоступны для этого входа (нужна подписка Pro/Max через вход claude.ai).', 'Plan limits are not available for this login (needs a Pro/Max subscription signed in via claude.ai).', '此登录方式无法获取套餐额度（需要通过 claude.ai 登录的 Pro/Max 订阅）。');
   if (u.lastError === 'unsupported') return L('Эта версия Claude Code не поддерживает запрос лимитов.', 'This Claude Code version does not support the limits query.', '此 Claude Code 版本不支持额度查询。');
-  if (u.liveActive && u.lastError) return L(`Не удалось получить лимиты (${why}). Повторю через минуту.`, `Could not get the limits (${why}). Retrying in a minute.`, `无法获取额度（${why}）。一分钟后重试。`);
-  if (u.liveActive) return L('Запрашиваю данные о лимитах…', 'Requesting limit data…', '正在请求额度数据…');
-  if (u.statusLine === 'other') return L('В Claude Code уже настроена другая строка состояния: питомец её не заменяет, лимиты недоступны.', 'Claude Code already has another status line: the pet does not replace it, so limits are unavailable.', 'Claude Code 已有另一个状态栏：宠物不会替换它，因此无法获取额度。');
-  if (u.statusLine === 'none') return L('Лимиты недоступны: строка состояния Claude Code не подключена к питомцу.', 'Limits unavailable: the Claude Code status line is not connected to the pet.', '额度不可用：Claude Code 状态栏未连接到宠物。');
+  if (u.lastError) return L(`Не удалось получить лимиты (${why}). Нажмите на кружок, чтобы повторить.`, `Could not get the limits (${why}). Click the ring to retry.`, `无法获取额度（${why}）。点击圆环重试。`);
+  if (u.refreshing || u.liveActive) return L('Запрашиваю данные о лимитах…', 'Requesting limit data…', '正在请求额度数据…');
+  if (u.statusLine === 'none') return L('Данных пока нет. Нажмите на кружок, чтобы запросить их, или подключите статус-строку (Настройки → Подключения): тогда кружок будет обновляться сам.', 'No data yet. Click the ring to request it, or connect the status line (Settings → Connections) so the ring updates by itself.', '暂无数据。点击圆环请求，或连接状态栏（设置 → 连接），圆环就会自动更新。');
   return L('Данных пока нет. Они приходят после первого ответа Claude в любой сессии (только для подписок Pro/Max).', 'No data yet. It arrives after Claude’s first answer in any session (Pro/Max subscriptions only).', '暂无数据。在任意会话中 Claude 首次回答后会获得（仅限 Pro/Max 订阅）。');
 };
 
@@ -105,7 +104,7 @@ export function panelModel(u: UsageInfo | null, now: number): PanelModel {
   const at = u!.updatedAt as number;
   const src = u!.source === 'live' ? L('запрос Claude Code', 'Claude Code query', 'Claude Code 查询') : u!.source === 'statusline' ? L('строка состояния', 'status line', '状态栏') : '';
   const footer = `${status === 'stale' ? L('Данные устарели · последнее', 'Data is stale · last', '数据已过期 · 上次') : L('Последнее', 'Last', '上次')} ${L('успешное обновление', 'successful update', '成功更新')}: ${clockSec(at)} (${fmtAge(at, now)})${src ? ' · ' + src : ''}`;
-  const note = u!.lastError ? L(`Последний запрос не удался: ${errorText(u!.lastError)}. Показаны сохранённые данные.`, `The last request failed: ${errorText(u!.lastError)}. Showing saved data.`, `上次请求失败：${errorText(u!.lastError)}。显示已保存的数据。`) : '';
+  const note = u!.refreshing ? L('Обновляю данные…', 'Updating…', '正在更新…') : u!.lastError ? L(`Последний запрос не удался: ${errorText(u!.lastError)}. Показаны сохранённые данные.`, `The last request failed: ${errorText(u!.lastError)}. Showing saved data.`, `上次请求失败：${errorText(u!.lastError)}。显示已保存的数据。`) : '';
   return { header, status, rows, message: '', footer, note };
 }
 

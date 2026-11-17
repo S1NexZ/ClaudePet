@@ -165,7 +165,7 @@ async function main() {
     const r = ringModel(usage, now);
     usageRing.dataset.level = r.level;
     usageRing.classList.toggle('stale', r.stale);
-    usageRing.title = r.title;
+    usageRing.title = r.title; usageRing.setAttribute('aria-label', r.title);
     $('usage-ring-text').textContent = r.text;
     usageRing.querySelector('.arc')!.setAttribute('stroke-dasharray', `${r.pct ?? 0} 100`);
     if (!usageOpen) return;
@@ -191,7 +191,7 @@ async function main() {
     usageOpen = open;
     usagePanel.hidden = !open;
     usageRing.setAttribute('aria-expanded', String(open));
-    if (open) host.send({ type: 'usage' }); // fresh read of the limits file (bridge-local, no network)
+    if (open) host.send({ type: 'usage-refresh' }); // the user looks: one live query (at most one a minute) on top of the status-line file
     renderUsage();
   };
   usageRing.addEventListener('click', () => setUsageOpen(!usageOpen));

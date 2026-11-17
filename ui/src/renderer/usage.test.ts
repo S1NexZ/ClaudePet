@@ -86,9 +86,9 @@ describe('panel', () => {
   });
   it('unavailable explains why, per statusLine state, and unknown plan is not Pro', () => {
     expect(panelModel(null, NOW).message).toMatch(/мостом/);
-    expect(panelModel(info({ updatedAt: null, fiveHour: null, sevenDay: null, statusLine: 'none' }), NOW).message).toMatch(/не подключена/);
+    expect(panelModel(info({ updatedAt: null, fiveHour: null, sevenDay: null, statusLine: 'none' }), NOW).message).toMatch(/подключите статус-строку/);
     expect(panelModel(info({ updatedAt: null, fiveHour: null, sevenDay: null, statusLine: 'ours' }), NOW).message).toMatch(/первого ответа/);
-    expect(panelModel(info({ updatedAt: null, fiveHour: null, sevenDay: null, statusLine: 'other' }), NOW).message).toMatch(/другая/);
+    expect(panelModel(info({ updatedAt: null, fiveHour: null, sevenDay: null, statusLine: 'other' }), NOW).message).toMatch(/Данных пока нет/);
     expect(panelModel(info({ plan: null }), NOW).header).toBe('Лимиты использования плана · План неизвестен');
   });
 });
@@ -138,12 +138,26 @@ describe('periodic query states', () => {
     expect(panelModel(live({ ...none, lastError: 'unsupported' }), NOW).message).toMatch(/не поддерживает/);
     expect(panelModel(live({ ...none, lastError: 'unavailable' }), NOW).message).toMatch(/недоступны для этого входа/);
     expect(panelModel(live({ ...none, lastError: null, lastAttemptAt: null }), NOW).message).toMatch(/Запрашиваю/);
-    expect(panelModel(live({ ...none, lastError: 'timeout' }), NOW).message).toMatch(/таймаут запроса.*через минуту/);
+    expect(panelModel(live({ ...none, lastError: 'timeout' }), NOW).message).toMatch(/таймаут запроса.*Нажмите на кружок/);
     expect(ringModel(live({ ...none, lastError: 'invalid' }), NOW)).toMatchObject({ pct: null, level: 'none' });
   });
   it('error texts', () => {
     expect(errorText(null)).toBe('');
     expect(errorText('spawn')).toMatch(/запустить/);
     expect(errorText('weird')).toBe('ошибка запроса');
+  });
+});
+
+describe('manual refresh', () => {
+  const base: any = { plan: 'pro', updatedAt: Date.now() - 120_000, fiveHour: { usedPct: 23, resetsAt: Math.floor(Date.now() / 1000) + 3600 }, sevenDay: null, statusLine: 'ours', source: 'statusline', liveActive: false };
+  it('says it is updating while a manual query runs, and nothing about retrying every minute', () => {
+    const m = panelModel({ ...base, refreshing: true }, Date.now());
+    expect(m.note).toMatch(/Обновляю|Updating|更新/);
+    expect(panelModel({ ...base, lastError: 'timeout', lastAttemptAt: Date.now() }, Date.now()).note).not.toMatch(/минуту|minute/);
+  });
+  it('the ring keeps the numbers in its title (the ring itself shows no number)', () => {
+    const r = ringModel(base, Date.now());
+    expect(r.title).toContain('23%');
+    expect(r.level).toBe('ok');
   });
 });

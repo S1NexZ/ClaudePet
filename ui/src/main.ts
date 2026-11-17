@@ -333,7 +333,8 @@ if (primary) app.whenReady().then(async () => {
   const wslRequest = (cmd: object, host: WslHost = primary()): Promise<any> => host.request(cmd);
   const hostRowState = async (h: WslHost) => {
     const w = await wslRequest({ type: 'hooks', apply: false, permissions: settings.answerPermissions }, h);
-    return { id: h.id, up: h.isUp(), distro: h.name(), port: h.secondary ? h.port : undefined, events: !!w?.events, mailbox: !!w?.mailbox, permissions: !!w?.permissions, diff: String(w?.diff ?? ''), error: w?.error as string | undefined };
+    const sl = h.secondary ? null : await h.request({ type: 'statusline' }, 'statusline'); // the limits ring is fed from the default distro's status line
+    return { id: h.id, statusLine: sl?.kind as string | undefined, statusLineDiff: String(sl?.diff ?? ''), statusLineError: sl?.error as string | undefined, up: h.isUp(), distro: h.name(), port: h.secondary ? h.port : undefined, events: !!w?.events, mailbox: !!w?.mailbox, permissions: !!w?.permissions, diff: String(w?.diff ?? ''), error: w?.error as string | undefined };
   };
   const connectionsState = async () => {
     const hosts = await Promise.all([...wslHosts.values()].map(hostRowState));
@@ -360,6 +361,14 @@ if (primary) app.whenReady().then(async () => {
       if (diff && await confirmHooks(remove ? L('Отключить Windows от питомца?', 'Disconnect Windows from the pet?', '断开 Windows 与宠物的连接？') : L('Подключить Windows-сессии Claude Code?', 'Connect Windows Claude Code sessions?', '连接 Windows 的 Claude Code 会话？'), [{ file: windowsSettings, diff }])) {
         try { remove ? winHost.remove() : winHost.apply(settings.answerPermissions); } catch (e) { void info(L('Не удалось записать настройки', 'Could not write the settings', '无法写入设置'), (e as Error).message); }
       }
+    } else if (typeof hostId === 'string' && wslHosts.has(hostId) && (action === 'statusline' || action === 'statusline-off')) {
+      const h = wslHosts.get(hostId)!;
+      const off = action === 'statusline-off';
+      const p = await h.request({ type: 'statusline', remove: off }, 'statusline');
+      if (p?.error) { void info(L('Не удалось прочитать settings.json', 'Could not read settings.json', '无法读取 settings.json'), String(p.error)); return connectionsState(); }
+      const label = h.name() ? `WSL: ${h.name()}` : 'WSL';
+      if (p?.diff && await confirmHooks(off ? L('Отключить статус-строку от питомца?', 'Disconnect the status line from the pet?', '断开状态栏与宠物的连接？') : L('Подключить статус-строку (лимиты)?', 'Connect the status line (limits)?', '连接状态栏（额度）？'), [{ file: `~/.claude/settings.json (${label})`, diff: String(p.diff) }]))
+        await h.request({ type: 'statusline', apply: true, remove: off }, 'statusline');
     } else if (typeof hostId === 'string' && wslHosts.has(hostId)) {
       const h = wslHosts.get(hostId)!;
       const p = await wslRequest({ type: 'hooks', apply: false, remove, permissions: settings.answerPermissions }, h);

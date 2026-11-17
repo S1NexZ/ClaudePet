@@ -78,12 +78,14 @@ export type AppCommand =
   | { type: 'dismiss'; sessionId: string }
   | { type: 'term-mark'; sessionId: string; text: string }
   | { type: 'usage-refresh' }
+  | { type: 'statusline'; apply?: boolean; remove?: boolean }
   | { type: 'end'; sessionId: string }
   | { type: 'usage' };
 
 export type BridgeMessage =
   | Snapshot
   | { type: 'termMark'; sessionId: string; ok: boolean }
+  | { type: 'statusline'; diff: string; applied: boolean; kind: 'none' | 'ours' | 'chained'; error?: string }
   | { type: 'chat'; sessionId: string; event: ChatEvent }
   | { type: 'history'; sessionId: string; items: ChatItem[] }
   | { type: 'started'; sessionId: string }

@@ -1,3 +1,4 @@
+import { join, dirname } from 'node:path';
 import { readFileSync, existsSync, readlinkSync, writeFileSync } from 'node:fs';
 import type { SessionStore } from './sessionStore.js';
 import type { HookPayload } from './hookSocket.js';
@@ -7,6 +8,7 @@ import type { Mailbox } from './mailbox.js';
 import { summarize } from './summary.js';
 import { sendPrompt, sendEsc, PtyGoneError } from './ptySend.js';
 import { planHooks, removeHooks, lineDiff } from './installHooks.js';
+import { planStatusLine, removeStatusLine, statusLineState } from './installStatusLine.js';
 import { planHostHooks, removeHostHooks, hooksStatus, readSettingsFile, writeSettingsFile } from './hookConfig.js';
 import type { AppCommand, BridgeMessage, ChatEvent, ChatItem, Snapshot, UsageInfo } from '../../shared/src/types.js';
 import { L, setLang } from '../../shared/src/i18n.js';
@@ -179,6 +181,17 @@ export function createBridge(o: {
             break;
           }
           case 'history': await history(String(cmd.sessionId)); return;
+          case 'statusline': { // Claude Code's statusLine feeds the limits ring (always with the diff in the app's dialog and a backup)
+            if (!o.hooks.nodePath) { o.out({ type: 'statusline', diff: '', applied: false, kind: 'none', error: 'unsupported' }); return; }
+            try {
+              const { current, raw } = readSettingsFile(o.hooks.settingsPath);
+              const script = join(dirname(o.hooks.hookPath), 'pet-statusline.mjs');
+              const r = cmd.remove === true ? removeStatusLine(current) : planStatusLine(current, script, o.hooks.nodePath);
+              if (cmd.apply === true && r.diff) writeSettingsFile(o.hooks.settingsPath, r.next, raw !== undefined);
+              o.out({ type: 'statusline', diff: cmd.apply === true ? '' : r.diff, applied: cmd.apply === true && !!r.diff, kind: statusLineState(cmd.apply === true || !r.diff ? r.next : current) });
+            } catch (e) { o.out({ type: 'statusline', diff: '', applied: false, kind: 'none', error: (e as Error).message }); }
+            return;
+          }
           case 'usage-refresh': { // the user clicked the limits ring: one live query (throttled by the source); its start and end push the numbers
             if (o.usage) { o.usage.refresh?.(); usageVersion = o.usage.version(); o.out({ type: 'usage', usage: await o.usage.read() }); }
             return;

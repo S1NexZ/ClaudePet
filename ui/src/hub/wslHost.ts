@@ -32,8 +32,8 @@ export interface WslHost {
   start(): void;
   stop(): void;
   send(cmd: object): void;
-  /** send a `hooks` command and wait for its answer (null: no answer in time / bridge down) */
-  request(cmd: object): Promise<any>;
+  /** send a command and wait for its answer message of `replyType` (default `hooks`); null: no answer in time / bridge down */
+  request(cmd: object, replyType?: 'hooks' | 'statusline'): Promise<any>;
   /** give the session's terminal tab a recognisable title (false: no live terminal) */
   markTerminal(sessionId: string, text: string): Promise<boolean>;
 }
@@ -42,7 +42,7 @@ export interface WslHost {
 export function createWslHost(o: WslHostOptions): WslHost {
   let child: ChildProcess | null = null;
   let rest = '', up = false, stopped = false, backoff = 1000, claude = '', name = o.distro;
-  let hooksWaiter: ((m: any) => void) | null = null;
+  const replyWaiters = new Map<string, (m: any) => void>();
   const markWaiters = new Map<string, (ok: boolean) => void>();
 
   const send = (cmd: object) => { if (child?.stdin?.writable) child.stdin.write(JSON.stringify(cmd) + '\n'); };
@@ -54,10 +54,10 @@ export function createWslHost(o: WslHostOptions): WslHost {
     start() { stopped = false; spawnBridge(); },
     stop() { stopped = true; child?.stdin?.end(); const c = child; setTimeout(() => c?.kill(), 500); },
     send,
-    request: (cmd) => new Promise((resolve) => {
+    request: (cmd, replyType = 'hooks') => new Promise((resolve) => {
       if (!up) { resolve(null); return; }
-      const t = setTimeout(() => { hooksWaiter = null; resolve(null); }, 4000);
-      hooksWaiter = (m) => { clearTimeout(t); resolve(m); };
+      const t = setTimeout(() => { replyWaiters.delete(replyType); resolve(null); }, 4000);
+      replyWaiters.set(replyType, (m) => { clearTimeout(t); resolve(m); });
       send(cmd);
     }),
     markTerminal: (sessionId, text) => new Promise((resolve) => {
@@ -78,7 +78,8 @@ export function createWslHost(o: WslHostOptions): WslHost {
       return;
     }
     if (m.type === 'termMark') { const w = markWaiters.get(String(m.sessionId)); if (w) { markWaiters.delete(String(m.sessionId)); w(!!m.ok); } return; }
-    if (m.type === 'hooks') { if (hooksWaiter) { const w = hooksWaiter; hooksWaiter = null; w(m); return; } o.onHooks(host, m); return; }
+    if (m.type === 'statusline') { const w = replyWaiters.get('statusline'); if (w) { replyWaiters.delete('statusline'); w(m); } return; }
+    if (m.type === 'hooks') { const w = replyWaiters.get('hooks'); if (w) { replyWaiters.delete('hooks'); w(m); return; } o.onHooks(host, m); return; }
     if (m.type === 'snapshot') { o.onSnapshot(m); return; }
     o.onMessage(m);
   };
