@@ -69,4 +69,25 @@ describe('pet-hook.mjs wait (the mailbox waiter)', () => {
     mailbox.send('s1', 'wake');
     expect(await exitOf(p)).toBe(2);
   });
+  it('the pet is down (restarting): the waiter keeps trying while claude lives, and gets the message once the pet is back', async () => {
+    const home = mkdtempSync(join(tmpdir(), 'wt-'));
+    const probe = await startHookServer({ port: 0, token: 'abcdef0123456789', onEvent: () => {}, mailbox: createMailbox(), waitMs: 300 });
+    const port = probe.port; await probe.close();
+    mkdirSync(join(home, '.claude-pet'), { recursive: true });
+    writeFileSync(join(home, '.claude-pet', 'hub.json'), JSON.stringify({ port, token: 'abcdef0123456789' }));
+    const p = spawn(process.execPath, [script, 'wait'], { env: { ...process.env, HOME: home, USERPROFILE: home, CLAUDE_PET_WAIT_RETRY_MS: '200' }, stdio: ['pipe', 'pipe', 'pipe'] });
+    let err = ''; p.stderr.on('data', (d) => { err += d; });
+    p.stdin.end(JSON.stringify({ session_id: 's1' }));
+    const done = new Promise<number | null>((r) => p.on('close', r));
+    await new Promise((r) => setTimeout(r, 600));
+    expect(p.exitCode).toBeNull(); // still waiting, not gone
+    const mailbox = createMailbox();
+    const srv = await startHookServer({ port, token: 'abcdef0123456789', onEvent: () => {}, mailbox, waitMs: 300 });
+    closers.push(srv.close);
+    await new Promise((r) => setTimeout(r, 500));
+    mailbox.send('s1', 'back again');
+    expect(await done).toBe(2);
+    expect(err).toBe('back again');
+  });
 });
+

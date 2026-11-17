@@ -115,6 +115,9 @@ static class PetHelper
         // the session's folder: the pet learns about the session from its waiter even when no SessionStart HTTP hook reached it
         string cwd = JsonString(json, "cwd");
         if (!string.IsNullOrEmpty(cwd) && cwd.Length <= 1024) url += (url.Contains("?") ? "&" : "?") + "cwd=" + Uri.EscapeDataString(cwd);
+        // which front end started claude (cli, claude-vscode, claude-desktop, ...): the pet labels the session before any transcript exists
+        string src = Environment.GetEnvironmentVariable("CLAUDE_CODE_ENTRYPOINT");
+        if (!string.IsNullOrEmpty(src) && Regex.IsMatch(src, "^[a-z0-9-]{1,32}$")) url += (url.Contains("?") ? "&" : "?") + "src=" + src;
         int parent = ParentPid();
         if (OneShotParent(parent)) return 0;
         while (Alive(parent))
@@ -143,7 +146,9 @@ static class PetHelper
             {
                 var r = e.Response as HttpWebResponse;
                 if (r != null && r.StatusCode == HttpStatusCode.NoContent) continue;
-                return 0; // 409, 404, connection refused (the pet is not running), timeout of a stalled connection...
+                if (r != null) return 0; // 409 = another waiter, 404 = another pet install / token
+                // no answer at all: the pet is not running (or restarting). Keep the session reachable: try again while claude lives.
+                Thread.Sleep(10000);
             }
             catch { return 0; }
         }

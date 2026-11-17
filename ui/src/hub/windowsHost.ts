@@ -92,7 +92,10 @@ export function createWindowsHost(o: WindowsHostOpts) {
     /** starts the receiver; resolves false (and reports why) when the port is taken */
     async start(): Promise<boolean> {
       try {
-        server = await startHookServer({ port: o.port, token, mailbox, onWaiter: (sid, cwd) => { if (!store.get(sid)) bridge.onHook({ hook_event_name: 'SessionStart', session_id: sid, cwd }); }, onPty: attachPty, onEvent: (e) => bridge.onHook(e), onReply: (e) => bridge.hookReply(e), onPermission: (e) => bridge.onPermission(e) });
+        server = await startHookServer({ port: o.port, token, mailbox, onWaiter: (sid, cwd, src) => {
+          if (!store.get(sid)) bridge.onHook({ hook_event_name: 'SessionStart', session_id: sid, cwd });
+          if (src && !store.get(sid)?.source) { store.setSource(sid, src); bridge.snapshot(); }
+        }, onPty: attachPty, onEvent: (e) => bridge.onHook(e), onReply: (e) => bridge.hookReply(e), onPermission: (e) => bridge.onPermission(e) });
         bridge.snapshot();
         return true;
       } catch (e) {

@@ -129,12 +129,12 @@ describe('windows host: adoption', () => {
     const { host, out } = boot();
     await host.start();
     const ctl = new AbortController();
-    void fetch(`http://127.0.0.1:${host.port}/mailbox/${host.token}/w9?pty=${encodeURIComponent('\\\\.\\pipe\\claude-pet-77')}&cwd=${encodeURIComponent('C:\\x\\proj')}`, { signal: ctl.signal }).catch(() => {});
+    void fetch(`http://127.0.0.1:${host.port}/mailbox/${host.token}/w9?pty=${encodeURIComponent('\\\\.\\pipe\\claude-pet-77')}&cwd=${encodeURIComponent('C:\\x\\proj')}&src=claude-vscode`, { signal: ctl.signal }).catch(() => {});
     await new Promise((r) => setTimeout(r, 150));
     ctl.abort();
     host.tick(Date.now());
     const snap = [...out].reverse().find((m) => m.type === 'snapshot') as any;
-    expect(snap.sessions.find((x: any) => x.id === 'w9')).toMatchObject({ project: 'proj', state: 'idle', pty: '\\\\.\\pipe\\claude-pet-77' });
+    expect(snap.sessions.find((x: any) => x.id === 'w9')).toMatchObject({ project: 'proj', state: 'idle', source: 'claude-vscode', pty: '\\\\.\\pipe\\claude-pet-77' });
   });
 });
 

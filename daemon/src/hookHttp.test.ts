@@ -50,12 +50,12 @@ describe('hook http receiver', () => {
   });
   it('a waiter that says its folder introduces the session (SessionStart may not reach the pet as an HTTP hook)', async () => {
     const seen: any[] = [];
-    const { base } = await boot({ onWaiter: (sid: string, cwd: string) => seen.push([sid, cwd]) });
+    const { base } = await boot({ onWaiter: (sid: string, cwd: string, src?: string) => seen.push([sid, cwd, src]) });
     const ctl = new AbortController();
-    void fetch(`${base}/mailbox/tok/s9?cwd=${encodeURIComponent('C:\\Users\\u\\Мой проект')}`, { signal: ctl.signal }).catch(() => {});
+    void fetch(`${base}/mailbox/tok/s9?cwd=${encodeURIComponent('C:\\Users\\u\\Мой проект')}&src=claude-vscode`, { signal: ctl.signal }).catch(() => {});
     await new Promise((r) => setTimeout(r, 100));
     ctl.abort();
-    expect(seen).toEqual([['s9', 'C:\\Users\\u\\Мой проект']]);
+    expect(seen).toEqual([['s9', 'C:\\Users\\u\\Мой проект', 'claude-vscode']]);
   });
   it('answers a PermissionRequest with the pet\'s decision in the format Claude Code expects', async () => {
     const { base } = await boot({ onPermission: async () => 'deny' });

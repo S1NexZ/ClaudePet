@@ -35,14 +35,17 @@ if (process.argv[2] === 'wait') {
   process.stdin.on('end', () => {
     let sid = '';
     try { sid = JSON.parse(raw).session_id; } catch { return stop(); }
-    let hub;
-    try { hub = JSON.parse(readFileSync(join(homedir(), '.claude-pet', 'hub.json'), 'utf8')); } catch { return stop(); }
-    if (!sid || !/^[\w-]{1,100}$/.test(sid) || !hub?.port || !hub?.token) return stop();
+    const readHub = () => { try { return JSON.parse(readFileSync(join(homedir(), '.claude-pet', 'hub.json'), 'utf8')); } catch { return null; } };
+    if (!sid || !/^[\w-]{1,100}$/.test(sid) || !readHub()?.port) return stop();
     const parent = process.ppid;
     if (oneShot(parent)) return stop(); // `claude -p "…"` waits for its async hooks before exiting: a waiter there would hang it
     const alive = () => { try { process.kill(parent, 0); return true; } catch { return false; } };
+    // no answer (the pet is not running or restarting): try again later while claude lives, so the session stays reachable
+    const later = () => setTimeout(poll, Number(process.env.CLAUDE_PET_WAIT_RETRY_MS) || 10000);
     const poll = () => {
       if (!alive()) return stop();
+      const hub = readHub();
+      if (!hub?.port || !hub?.token) return later();
       const req = request({ host: '127.0.0.1', port: hub.port, path: `/mailbox/${hub.token}/${sid}`, method: 'GET', timeout: 70000 }, (res) => {
         let body = '';
         res.setEncoding('utf8');
@@ -54,7 +57,7 @@ if (process.argv[2] === 'wait') {
         });
       });
       req.on('timeout', () => { req.destroy(); poll(); });
-      req.on('error', stop);
+      req.on('error', later);
       req.end();
     };
     poll();
