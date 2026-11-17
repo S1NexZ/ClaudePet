@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Claude Code statusLine command: saves the account's real rate limits for Claude Pet and prints a short line.
+// Claude Code statusLine command: saves the account's real rate limits for ccPet and prints a short line.
 // Claude Code passes them (documented: rate_limits.five_hour / seven_day, used_percentage + resets_at) on stdin for
 // Pro/Max/Ultra subscribers, after the first API response of a session. Nothing is invented: if a window is absent, it is not written.
 // Must never fail or slow Claude Code down: always exits 0.

@@ -1,4 +1,4 @@
-# Claude Pet — design
+# ccPet — design
 
 Date: 2026-11-15 · Status: awaiting approval
 

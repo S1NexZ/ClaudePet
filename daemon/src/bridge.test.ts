@@ -435,7 +435,7 @@ describe('bridge: mailbox and hook permissions', () => {
     const w = mailbox.wait('s9', 1000);
     await bridge.handle({ type: 'send', sessionId: 's9', text: 'сделай тесты' });
     const delivered = await w;
-    expect(delivered).toContain('[Claude Pet message] сделай тесты');
+    expect(delivered).toContain('[ccPet message] сделай тесты');
     expect(calls.filter((c) => c[0] === 'send')).toEqual([]);
     expect(out.find((m) => m.type === 'chat')).toEqual({ type: 'chat', sessionId: 's9', event: { kind: 'user', text: 'сделай тесты' } });
     expect(store.get('s9')?.state).toBe('thinking');

@@ -11,12 +11,12 @@
     "electron": "^33.0.0",
     "electron-builder": "^25.1.8"
   },
-  "productName": "Claude Pet",
-  "description": "Claude Pet: a desktop pet that shares live Claude Code sessions with the terminal",
+  "productName": "ccPet",
+  "description": "ccPet: a desktop pet that shares live Claude Code sessions with the terminal",
   "author": "S1NexZ",
   "build": {
     "appId": "local.claudepet.app",
-    "productName": "Claude Pet",
+    "productName": "ccPet",
     "directories": {
       "output": "release"
     },
@@ -72,10 +72,10 @@
     "nsis": {
       "oneClick": true,
       "perMachine": false,
-      "shortcutName": "Claude Pet",
+      "shortcutName": "ccPet",
       "runAfterFinish": true
     },
-    "artifactName": "Claude-Pet-Setup-${version}.exe",
+    "artifactName": "ccPet-Setup-${version}.exe",
     "publish": null
   },
   "license": "MIT",

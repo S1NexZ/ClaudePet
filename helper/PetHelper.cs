@@ -1,4 +1,4 @@
-// pet-helper.exe: small native helper of Claude Pet (no runtime to install: compiled with the .NET Framework that ships with Windows).
+// pet-helper.exe: small native helper of ccPet (no runtime to install: compiled with the .NET Framework that ships with Windows).
 //   pet-helper.exe wait <mailboxUrl>   the mailbox waiter: an `asyncRewake` hook of Claude Code.
 //     Reads the hook JSON from stdin (session_id), long-polls <mailboxUrl>/<session_id>. A message (HTTP 200) is written to stderr and the
 //     process exits with code 2: Claude Code then wakes the session with that text. Everything else (no pet, 409 = another waiter,

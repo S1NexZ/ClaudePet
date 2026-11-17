@@ -10,9 +10,11 @@ const textOf = (content: unknown): string =>
       : '';
 
 /** A message the pet delivered through the mailbox arrives as a hook-feedback record: this marker precedes the user's own text. */
-export const PET_MARKER = '[Claude Pet message]';
+/** The marker our mailbox messages carry; messages written by older versions ("Claude Pet") are still recognised. */
+export const PET_MARKER = '[ccPet message]';
+const LEGACY_MARKER = '[Claude Pet message]';
 export const petMessageOf = (t: string): string | null => {
-  const m = /\[Claude Pet message\]\s*([\s\S]*?)\s*(?:<\/system-reminder>|$)/.exec(t);
+  const m = /\[(?:ccPet|Claude Pet) message\]\s*([\s\S]*?)\s*(?:<\/system-reminder>|$)/.exec(t);
   return m && m[1] ? m[1] : null;
 };
 
@@ -44,7 +46,7 @@ export function parseTranscript(jsonl: string, limit = 40): ChatItem[] {
     if (e?.type === 'user') {
       const t = textOf(e.message?.content).trim();
       if (t && !t.startsWith('<')) out.push({ role: 'user', text: t });
-      else if (t.includes(PET_MARKER)) { const m = petMessageOf(t); if (m) out.push({ role: 'user', text: m }); }
+      else if (t.includes(PET_MARKER) || t.includes(LEGACY_MARKER)) { const m = petMessageOf(t); if (m) out.push({ role: 'user', text: m }); }
     } else if (e?.type === 'assistant') {
       for (const b of Array.isArray(e.message?.content) ? e.message.content : []) {
         if (b?.type === 'text' && b.text?.trim()) out.push({ role: 'assistant', text: b.text.trim() });

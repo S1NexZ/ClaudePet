@@ -1,19 +1,19 @@
-# Claude Pet
+# ccPet
 
-**Claude Pet** is a Windows desktop pet for [Claude Code](https://code.claude.com) running in WSL, Windows terminals and the Claude desktop app. It shows what your Claude Code sessions are doing, has a chat,
+**ccPet** is a Windows desktop pet for [Claude Code](https://code.claude.com) running in WSL, Windows terminals and the Claude desktop app. It shows what your Claude Code sessions are doing, has a chat,
 and — its main trick — **shares one live Claude Code session with your terminal**: type from the pet or from the terminal, both talk to the same process and the same transcript.
 *(The app interface is available in **English, Russian and Chinese** — it follows the system language, or pick one in Settings → Appearance. The documentation below is in Russian; the English summary is in the requirements and quick start sections.)*
 
-Claude Pet — настольный питомец для Claude Code в WSL, терминалах Windows и десктопном приложении Claude. Он показывает, что делают ваши сессии, содержит чат и **работает с той же живой сессией, что и ваш терминал**:
+ccPet — настольный питомец для Claude Code в WSL, терминалах Windows и десктопном приложении Claude. Он показывает, что делают ваши сессии, содержит чат и **работает с той же живой сессией, что и ваш терминал**:
 пишете из питомца или из терминала, а отвечает один и тот же процесс Claude Code с одним транскриптом.
 
-> Неофициальный независимый проект, не связан с Anthropic. Лицензия MIT распространяется только на исходный код (см. [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)).
+> Неофициальный независимый проект, не связан с Anthropic; «cc» в названии — сокращение от «Claude Code», а не знак связи. Запуск Claude Code через Agent SDK (новые чаты из питомца) выключен по умолчанию и включается в «Настройки → Подключения». Лицензия MIT распространяется только на исходный код (см. [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)).
 
 ## Что умеет
 
 Всё перечисленное проверено на Windows 11 + WSL2 (Ubuntu), Claude Code 2.1.325, подписка Pro.
 
-- **Общая сессия с терминалом.** Если `claude` запущен через обёртку Claude Pet, питомец печатает прямо в тот же процесс (через PTY и unix-сокет). Ответ виден и в терминале, и в чате питомца; транскрипт и ID сессии одни.
+- **Общая сессия с терминалом.** Если `claude` запущен через обёртку ccPet, питомец печатает прямо в тот же процесс (через PTY и unix-сокет). Ответ виден и в терминале, и в чате питомца; транскрипт и ID сессии одни.
 - **Кнопки по наведению.** В покое под питомцем только тень; при наведении из неё вырастает плашка (чат, настройки, сессии). Размер питомца — 60–180% (настройки или трей → «Размер питомца»).
 - **Состояния питомца** по хукам Claude Code: думает, читает, пишет, запускает команды, тестирует, ждёт разрешения, ошибка, готово, спит.
 - **Чат и кнопка «Стоп»** (посылает Esc в тот же процесс). Esc или Ctrl+C, нажатые в терминале, питомец тоже замечает.
@@ -37,7 +37,7 @@ Claude Pet — настольный питомец для Claude Code в WSL, т
 
 ## Быстрый старт
 
-1. Скачайте `Claude-Pet-Setup-<версия>.exe` со страницы [Releases](https://github.com/S1NexZ/ClaudePet/releases) и запустите. Установка в один шаг, после неё питомец запустится сам.
+1. Скачайте `ccPet-Setup-<версия>.exe` со страницы [Releases](https://github.com/S1NexZ/ClaudePet/releases) и запустите. Установка в один шаг, после неё питомец запустится сам.
 2. **Подключите хуки Claude Code**: «Настройки → Подключения» (отдельно для Windows и WSL; в трее есть то же самое). Питомец покажет точное изменение `settings.json`, сохранит копию `.bak` и применит его только после вашего согласия. Без хуков питомец не видит сессии. Так подключаются PowerShell/CMD/Windows Terminal, VS Code и десктопное приложение Claude; сообщения из чата доходят до таких сессий через «почтовый ящик» (фоновый хук будит сессию).
 3. **Подключите терминал** (трей → «Подключить терминал (WSL)…»): приложение покажет одну команду для WSL-терминала. Скрипт покажет изменение `~/.bashrc`, спросит подтверждение, сделает резервную копию и его можно отменить (`--uninstall`).
    Без этого шага питомец тоже работает, но писать в терминальную сессию сможет только через запасной путь SDK.
@@ -63,12 +63,12 @@ Claude Pet — настольный питомец для Claude Code в WSL, т
 Шестерёнка → «Модели»:
 - **Выбор и предпросмотр**: выбор показывает модель на питомце сразу; «Применить» сохраняет, «Отмена» (или закрытие панели) возвращает прежнюю. Перезапуск не нужен.
 - **Download**: выберите ZIP или перетащите его в панель. Архив проверяется до установки (нет путей наружу, ссылок, скриптов и исполняемых файлов, нужный размер листа, ограничения размера); ничего из архива не запускается.
-- **NPM**: показывает команду стороннего установщика `npx codex-pets add <pet-id>` (пакет `codex-pets`, MIT, не связан с Claude Pet) и умеет импортировать то, что он положил в `~/.codex/pets` в Windows. Claude Pet сам npm не запускает; **собственного npm-пакета у Claude Pet пока нет**.
+- **NPM**: показывает команду стороннего установщика `npx codex-pets add <pet-id>` (пакет `codex-pets`, MIT, не связан с ccPet) и умеет импортировать то, что он положил в `~/.codex/pets` в Windows. ccPet сам npm не запускает; **собственного npm-пакета у ccPet пока нет**.
 - **Удаление** своих моделей — с подтверждением; встроенные удалить нельзя.
 
 ## Обновление и удаление
 - **Обновление**: скачайте новый установщик и запустите — он заменит программу; настройки и ваши модели лежат в `%APPDATA%\Claude Pet` и сохраняются.
-- **Удаление**: «Параметры → Приложения» либо `Uninstall Claude Pet.exe` в папке программы. Перед удалением выполните `bash …/install-shell-integration.sh --uninstall` (иначе блок в `~/.bashrc` останется; он безвреден: если файла обёртки нет, `claude` запускается как обычно).
+- **Удаление**: «Параметры → Приложения» либо `Uninstall ccPet.exe` в папке программы. Перед удалением выполните `bash …/install-shell-integration.sh --uninstall` (иначе блок в `~/.bashrc` останется; он безвреден: если файла обёртки нет, `claude` запускается как обычно).
   Хуки в `~/.claude/settings.json` останутся и ничего не ломают (команда заканчивается `|| true`); удалите их вручную, если нужно.
 - Данные питомца: см. [docs/privacy.md](docs/privacy.md).
 
@@ -94,9 +94,9 @@ npm run build                                # мост (build/bridge) и инт
 npm test                                     # Vitest
 npm run test:py                              # проверки обёртки и скрипта интеграции с терминалом
 npx tsc --noEmit -p .                        # типы
-npm run dist                                 # установщик: ui/release/Claude-Pet-Setup-<версия>.exe
+npm run dist                                 # установщик: ui/release/ccPet-Setup-<версия>.exe
 ```
 Подробности устройства — в [CLAUDE.md](CLAUDE.md) и [docs/design.md](docs/design.md). История изменений — [CHANGELOG.md](CHANGELOG.md).
 
 ## Лицензия
-Код Claude Pet — [MIT](LICENSE). Сторонние ресурсы (модель Clawd, Claude Agent SDK, Electron) — на своих условиях, см. [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+Код ccPet — [MIT](LICENSE). Сторонние ресурсы (модель Clawd, Claude Agent SDK, Electron) — на своих условиях, см. [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).

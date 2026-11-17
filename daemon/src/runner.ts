@@ -181,7 +181,7 @@ export class SessionRunner {
     this.emit(p.sid, 'PostToolUse', { tool_response: {} });
     p.resolve(allow
       ? { behavior: 'allow', updatedInput: p.input }
-      : { behavior: 'deny', message: L('Отклонено в Claude Pet', 'Denied in Claude Pet', '已在 Claude Pet 中拒绝') });
+      : { behavior: 'deny', message: L('Отклонено в ccPet', 'Denied in ccPet', '已在 ccPet 中拒绝') });
     this.o.onChange?.();
   }
 

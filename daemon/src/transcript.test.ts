@@ -83,9 +83,13 @@ describe('readOriginalCwd', () => {
 
 describe('pet messages in transcripts', () => {
   it('shows a message delivered through the mailbox as the user\'s own', () => {
-    const rec = { type: 'user', message: { role: 'user', content: '<task-notification>\n<summary>Stop hook feedback</summary>\n</task-notification>\n<system-reminder>\nStop hook blocking error from command "x": The user wrote this through Claude Pet.\n[Claude Pet message] напиши тесты\n</system-reminder>' } };
+    const rec = { type: 'user', message: { role: 'user', content: '<task-notification>\n<summary>Stop hook feedback</summary>\n</task-notification>\n<system-reminder>\nStop hook blocking error from command "x": The user wrote this through ccPet.\n[ccPet message] напиши тесты\n</system-reminder>' } };
     const items = parseTranscript(JSON.stringify(rec));
     expect(items).toEqual([{ role: 'user', text: 'напиши тесты' }]);
+  });
+  it('still shows messages written by older versions (marker "Claude Pet")', () => {
+    const rec = { type: 'user', message: { role: 'user', content: '<system-reminder>\nStop hook blocking error: x\n[Claude Pet message] старое сообщение\n</system-reminder>' } };
+    expect(parseTranscript(JSON.stringify(rec))).toEqual([{ role: 'user', text: 'старое сообщение' }]);
   });
   it('petMessageOf returns null for other reminders', () => {
     expect(petMessageOf('<system-reminder>something else</system-reminder>')).toBeNull();

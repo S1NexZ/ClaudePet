@@ -7,7 +7,7 @@
 export interface Confirm { type: 'warning' | 'question'; message: string; detail: string; action: string; cancel: string }
 
 export function confirmOptions(c: Confirm) {
-  return { type: c.type, title: 'Claude Pet', message: c.message, detail: c.detail,
+  return { type: c.type, title: 'ccPet', message: c.message, detail: c.detail,
     buttons: [c.cancel, c.action], defaultId: 0, cancelId: 0, noLink: true };
 }
 

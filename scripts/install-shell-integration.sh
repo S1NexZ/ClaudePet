@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Claude Pet: connects the terminal. Adds (or removes) one `claude` function to ~/.bashrc, so that a normal `claude`
-# starts Claude Code through Claude Pet's PTY wrapper (the pet and the terminal then share ONE live session).
+# ccPet: connects the terminal. Adds (or removes) one `claude` function to ~/.bashrc, so that a normal `claude`
+# starts Claude Code through ccPet's PTY wrapper (the pet and the terminal then share ONE live session).
 #
 #   bash install-shell-integration.sh               show the change, ask, back up ~/.bashrc, apply
 #   bash install-shell-integration.sh --yes         same without the question
@@ -36,7 +36,7 @@ q() { printf "'%s'" "${1//\'/\'\\\'\'}"; }   # shell-quote a path (it may contai
 block() {
   cat <<BLOCK
 $begin
-# Starts interactive \`claude\` sessions through the Claude Pet PTY wrapper so the pet can type into them.
+# Starts interactive \`claude\` sessions through the ccPet PTY wrapper so the pet can type into them.
 # Bypass: \`command claude ...\`, \`\\claude ...\` or CLAUDE_PET_BYPASS=1 claude ...
 claude() {
   local pet=$(q "$pet")
@@ -110,7 +110,7 @@ printf '%s\n' "$new" > "$tmp"
 if [ -f "$rc" ]; then chmod --reference="$rc" "$tmp" 2>/dev/null || true; fi
 mv "$tmp" "$rc"
 if [ "$mode" = install ]; then
-  echo "$(m "Готово. Откройте новое окно терминала: обычная команда \`claude\` теперь запускается через Claude Pet." "Done. Open a new terminal window: the plain \`claude\` command now runs through Claude Pet.")"
+  echo "$(m "Готово. Откройте новое окно терминала: обычная команда \`claude\` теперь запускается через ccPet." "Done. Open a new terminal window: the plain \`claude\` command now runs through ccPet.")"
   echo "$(m "Откат" "Undo"): bash \"$here/install-shell-integration.sh\" --uninstall"
 else
   echo "$(m "Готово: блок claude-pet удалён." "Done: the claude-pet block was removed.")"

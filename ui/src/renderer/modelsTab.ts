@@ -148,7 +148,7 @@ export function createModelsTab(host: ModelsHost, api: { show(data: PetData): Pr
 
   const renderNpm = (box: HTMLElement) => {
     box.append(el('div', 's-title', L('Установка через npm', 'Install via npm', '通过 npm 安装')));
-    box.append(el('div', 's-hint', L('Модели формата Codex ставит сторонний пакет codex-pets (лицензия MIT, не связан с Claude Pet). Он кладёт модель в папку ~/.codex/pets, а Claude Pet устанавливает её оттуда после проверки.', 'Codex-format models are installed by the third-party package codex-pets (MIT license, not affiliated with Claude Pet). It puts the model into ~/.codex/pets and Claude Pet installs it from there after validation.', 'Codex 格式的模型由第三方包 codex-pets 安装（MIT 许可，与 Claude Pet 无关联）。它会把模型放入 ~/.codex/pets，Claude Pet 在验证后从那里安装。')));
+    box.append(el('div', 's-hint', L('Модели формата Codex ставит сторонний пакет codex-pets (лицензия MIT, не связан с ccPet). Он кладёт модель в папку ~/.codex/pets, а ccPet устанавливает её оттуда после проверки.', 'Codex-format models are installed by the third-party package codex-pets (MIT license, not affiliated with ccPet). It puts the model into ~/.codex/pets and ccPet installs it from there after validation.', 'Codex 格式的模型由第三方包 codex-pets 安装（MIT 许可，与 ccPet 无关联）。它会把模型放入 ~/.codex/pets，ccPet 在验证后从那里安装。')));
     const code = el('div', 'm-code');
     code.append(el('code', '', NPM_COMMAND), btn(L('Копировать', 'Copy', '复制'), 's-btn', () => { host.copyText(NPM_COMMAND); message = { kind: 'ok', text: L('Команда скопирована.', 'Command copied.', '命令已复制。') }; rerender(); }));
     box.append(code);
@@ -167,7 +167,7 @@ export function createModelsTab(host: ModelsHost, api: { show(data: PetData): Pr
         box.append(r);
       }
     }
-    box.append(el('div', 's-hint', L('Claude Pet сам npm не запускает и ничего не публикует. Собственного npm-пакета моделей у Claude Pet пока нет.', 'Claude Pet never runs npm itself and publishes nothing. Claude Pet has no npm model package of its own yet.', 'Claude Pet 自己从不运行 npm，也不会发布任何内容。Claude Pet 目前还没有自己的 npm 模型包。')));
+    box.append(el('div', 's-hint', L('ccPet сам npm не запускает и ничего не публикует. Собственного npm-пакета моделей у ccPet пока нет.', 'ccPet never runs npm itself and publishes nothing. ccPet has no npm model package of its own yet.', 'ccPet 自己从不运行 npm，也不会发布任何内容。ccPet 目前还没有自己的 npm 模型包。')));
   };
 
   const renderDownload = (box: HTMLElement) => {

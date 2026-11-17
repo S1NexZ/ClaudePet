@@ -53,7 +53,7 @@ export function createWindowsHost(o: WindowsHostOpts) {
       setModel: no('Сменить модель можно в самой сессии', 'Change the model inside the session', '请在会话内切换模型'),
       btw: no('/btw доступен только для сессий в WSL', '/btw works only for sessions in WSL', '/btw 仅适用于 WSL 中的会话'),
       start: no('Новые чаты запускаются в WSL', 'New chats start in WSL', '新聊天在 WSL 中启动'),
-      send: no('Эту сессию нельзя разбудить: в ней не подключены хуки Claude Pet', 'This session cannot be reached: Claude Pet hooks are not connected in it', '无法连接此会话：其中未连接 Claude Pet 钩子'),
+      send: no('Эту сессию нельзя разбудить: в ней не подключены хуки ccPet', 'This session cannot be reached: ccPet hooks are not connected in it', '无法连接此会话：其中未连接 ccPet 钩子'),
       interrupt: no('Остановить можно только сессию в терминале-обёртке', 'Only a session in the wrapper terminal can be stopped', '只能停止包装终端中的会话'),
     },
     proc: { name: () => null, kill: () => {} },

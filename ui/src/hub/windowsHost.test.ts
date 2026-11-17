@@ -41,7 +41,7 @@ describe('windows host', () => {
     await host.handle({ type: 'send', sessionId: 'w1', text: 'привет' });
     const r = await poll;
     expect(r.status).toBe(200);
-    expect(await r.text()).toContain('[Claude Pet message] привет');
+    expect(await r.text()).toContain('[ccPet message] привет');
   });
   it('answers a PermissionRequest from the pet only when the setting is on', async () => {
     const { host } = boot({ permissions: true });

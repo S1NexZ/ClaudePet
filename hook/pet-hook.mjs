@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Claude Code hook: forwards the event JSON to the Claude Pet bridge over a unix socket.
+// Claude Code hook: forwards the event JSON to the ccPet bridge over a unix socket.
 // Must never block or fail Claude Code: always exits 0, prints nothing, gives up after 150 ms.
 import { connect } from 'node:net';
 import { request } from 'node:http';

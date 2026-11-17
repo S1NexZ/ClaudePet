@@ -1,6 +1,6 @@
 # Third-party notices
 
-The MIT license in `LICENSE` covers **only the original source code of Claude Pet**. It does **not** apply to the items below,
+The MIT license in `LICENSE` covers **only the original source code of ccPet**. It does **not** apply to the items below,
 which keep their own licenses and rights.
 
 ## Pet model: Clawd (`models/clawd`)
@@ -14,7 +14,7 @@ which keep their own licenses and rights.
 ## Claude Agent SDK (`@anthropic-ai/claude-agent-sdk`)
 - © Anthropic PBC. All rights reserved. Use is subject to Anthropic's legal agreements: https://code.claude.com/docs/en/legal-and-compliance
 - It is bundled into the application's WSL bridge (`resources/bridge/bridge.cjs`) and is **not** MIT-licensed.
-- Claude Pet uses it to resume sessions (fallback path) and to read plan usage limits (an experimental SDK method).
+- ccPet uses it to resume sessions (fallback path) and to read plan usage limits (an experimental SDK method).
 
 ## GSAP
 - GSAP 3 (GreenSock) — bundled into the renderer for the hover and state animations. It is **not** MIT-licensed: it is used under the GreenSock Standard "no charge" license (https://gsap.com/standard-license), which allows free use, including commercial. Only the core engine is used (no premium plugins).
@@ -26,8 +26,8 @@ which keep their own licenses and rights.
 electron-builder, esbuild, TypeScript, tsx, Vitest and their dependencies, each under its own license (see their packages).
 
 ## Third-party pet models you install yourself
-Models installed through the model manager (ZIP or an npm pet installer) are not part of Claude Pet. Each belongs to its author; check its license before sharing it.
-The npm package `codex-pets` mentioned in the model manager is a separate third-party project (MIT) and is not affiliated with Claude Pet.
+Models installed through the model manager (ZIP or an npm pet installer) are not part of ccPet. Each belongs to its author; check its license before sharing it.
+The npm package `codex-pets` mentioned in the model manager is a separate third-party project (MIT) and is not affiliated with ccPet.
 
 ## Names
-"Claude" and "Claude Code" are trademarks of Anthropic. Claude Pet is an independent, unofficial project and is not affiliated with or endorsed by Anthropic.
+"Claude" and "Claude Code" are trademarks of Anthropic. ccPet is an independent, unofficial project and is not affiliated with or endorsed by Anthropic.

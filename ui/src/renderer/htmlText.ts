@@ -13,7 +13,7 @@ export function localizeHtml(doc: Document = document): void {
   set('usage-ring', { title: L('Лимиты плана: данных нет', 'Plan limits: no data', '套餐额度：无数据') });
   set('btn-allow', { text: L('Разрешить', 'Allow', '允许') });
   set('btn-deny', { text: L('Отклонить', 'Deny', '拒绝') });
-  set('settings', { aria: L('Настройки Claude Pet', 'Claude Pet settings', 'Claude Pet 设置') });
+  set('settings', { aria: L('Настройки ccPet', 'ccPet settings', 'ccPet 设置') });
   set('usage', { aria: L('Лимиты использования плана', 'Plan usage limits', '套餐用量额度') });
   set('chat-switch', { title: L('Сменить чат (Ctrl+Tab)', 'Switch chat (Ctrl+Tab)', '切换聊天 (Ctrl+Tab)') });
   set('btn-term', { title: L('Открыть в терминале', 'Open in terminal', '在终端中打开'), aria: L('Открыть в терминале', 'Open in terminal', '在终端中打开') });

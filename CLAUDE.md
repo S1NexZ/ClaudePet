@@ -1,6 +1,6 @@
-# Claude Pet — developer notes (also read by Claude Code sessions working on this repo)
+# ccPet — developer notes (also read by Claude Code sessions working on this repo)
 
-Claude Pet is a Windows (Electron) desktop pet for Claude Code sessions running in WSL: it shows what the sessions do, has a chat, shares one live
+ccPet is a Windows (Electron) desktop pet for Claude Code sessions running in WSL: it shows what the sessions do, has a chat, shares one live
 session with the terminal through a PTY wrapper, and shows subscription usage limits. User-facing docs are in `README.md` (Russian); this file is for developers.
 Chat language with the project owner: Russian (code and comments may be English). The source of truth is the code, not these notes.
 
@@ -28,7 +28,7 @@ Closing the pet never kills Claude Code (the bridge exits on stdin EOF).
 - `shared/src/types.ts`: bridge command/message types.
 - `ui/src/`: `main.ts` (window, tray, hotkey, IPC, dialogs), `settings.ts`, `appearance.ts`, `dialogs.ts`, `models/` (registry, zip, install, images), `sprite/` (loader, animator, cell cleanup, `fringe.ts`), `renderer/` (`app.ts`, `settingsPanel.ts`, `modelsTab.ts`, `usage.ts`, `compose.ts`, `chatStore.ts`, …).
 - `scripts/`: `pet-claude.py` (PTY wrapper), `install-shell-integration.sh` (guided `~/.bashrc` block), `start.sh`, `pet.sh`, `anim-test.sh`, tests `test-pet-claude.py`, `test-shell-integration.py`.
-- `models/clawd/`: the bundled default pet (third-party asset, see `THIRD_PARTY_NOTICES.md`). User models live in `%APPDATA%\Claude Pet\models`.
+- `models/clawd/`: the bundled default pet (third-party asset, see `THIRD_PARTY_NOTICES.md`). User models live in `%APPDATA%\ccPet\models`.
 
 ### Claude Code integration
 - **PTY wrapper** `scripts/pet-claude.py` runs `claude` as one process on a PTY; the terminal and clients of `~/.claude-pet/pty/<wrapper pid>.sock` (dir 0700, socket 0600) share one PTY. The hook adds `pet_pty` (from `PET_PTY_SOCK`) to events; `SessionEnd` clears it. If `claude` is not on PATH it falls back to `~/.local/bin/claude`.
@@ -39,7 +39,7 @@ Closing the pet never kills Claude Code (the bridge exits on stdin EOF).
 
 ### Universal integration (Windows host, mailbox)
 Windows terminals and the Claude desktop app are served by a **Windows host** inside Electron main (`ui/src/hub/windowsHost.ts`: the same transport-free `createBridge` with `mailboxOnly`, fed by Claude Code `http` hooks on `127.0.0.1:47821`; the WSL bridge has its own receiver on `47822`, port/token in `~/.claude-pet/hub.json`). `ui/src/hub/merge.ts` merges the host snapshots (sessions carry `host`, `source`, `mailbox`) and routes commands by session id. Hook entries live next to the user's own ones in `settings.json` and are recognised by URL / command, never by extra keys (`daemon/src/hookConfig.ts`); install/remove always shows the diff and keeps a `.bak` (Settings → Connections).
-**Mailbox** (`daemon/src/mailbox.ts`, `hookHttp.ts`): a background `asyncRewake` command hook (`pet-helper.exe wait` on Windows, `pet-hook.mjs wait` in WSL) long-polls `/mailbox/<token>/<session>`; a message makes it exit 2 and Claude Code wakes even an idle session with the stderr text (marker `[Claude Pet message]`, shown as the user's message by `transcript.ts`). One-shot: re-armed on `Stop`; a second waiter gets 409. `PermissionRequest` answers (opt-in) go through the same receiver.
+**Mailbox** (`daemon/src/mailbox.ts`, `hookHttp.ts`): a background `asyncRewake` command hook (`pet-helper.exe wait` on Windows, `pet-hook.mjs wait` in WSL) long-polls `/mailbox/<token>/<session>`; a message makes it exit 2 and Claude Code wakes even an idle session with the stderr text (marker `[ccPet message]`, shown as the user's message by `transcript.ts`). One-shot: re-armed on `Stop`; a second waiter gets 409. `PermissionRequest` answers (opt-in) go through the same receiver.
 `pet-helper.exe` is built from `helper/PetHelper.cs` by `scripts/build-helper.mjs` (.NET Framework `csc.exe`, run by `npm run dist`).
 
 **Several WSL distros** (`ui/src/hub/wslHost.ts`): one bridge process per followed distro (`createWslHost`), host ids `wsl` (default distro, owns usage/models/new chats) and `wsl:<name>`; WSL 2 distros share one network namespace, so a secondary bridge gets its own `CLAUDE_PET_HOOK_PORT` (47900-47999, `portForDistro`) and no usage poller. Discovery: `wsl.exe -l -v` every 30 s, only *running* distros (we never start one).
@@ -63,10 +63,10 @@ npm run build          # bridge + UI bundles
 npm test               # Vitest
 npm run test:py        # PTY wrapper + shell integration checks
 npx tsc --noEmit -p .  # 2 known errors in ui/src/sprite/loadPet.test.ts (import.meta in a test), harmless
-npm run dist           # build + installer: ui/release/Claude-Pet-Setup-<version>.exe (run from WSL; uses cmd.exe)
+npm run dist           # build + installer: ui/release/ccPet-Setup-<version>.exe (run from WSL; uses cmd.exe)
 ```
 Run the installer normally (one-click NSIS, per-user, installs to `%LOCALAPPDATA%\Programs\claude-pet` and starts the app); `/S` hung in earlier tests.
-To test the real UI: start `Claude Pet.exe --remote-debugging-port=9333` (listens on Windows localhost only; drive it with Windows `node.exe`); `--user-data-dir=<dir>` gives a clean profile.
+To test the real UI: start `ccPet.exe --remote-debugging-port=9333` (listens on Windows localhost only; drive it with Windows `node.exe`); `--user-data-dir=<dir>` gives a clean profile.
 
 ## Decisions (do not revisit without a reason)
 - The Agent SDK cannot attach to a running `claude`; tmux/reptyr do not work (ptrace_scope=1); `messagingSocketPath` in `~/.claude/sessions` is undocumented and not a user-input channel.

@@ -41,6 +41,8 @@ if (theme === 'light' || theme === 'dark') nativeTheme.themeSource = theme;
 
 /** the only addresses the app opens in a browser (npm pages of the pet installers it documents) */
 const OPEN_URLS = new Set(['https://www.npmjs.com/package/codex-pets', 'https://www.npmjs.com/package/@codex-pets/cli']);
+// the app was called "Claude Pet": its settings, models and log stay in that folder so a rename loses nothing
+app.setPath('userData', join(app.getPath('appData'), 'Claude Pet'));
 const userFile = (n: string) => join(app.getPath('userData'), n);
 const log = (m: string) => { try { appendFileSync(userFile('pet.log'), `${new Date().toISOString()} ${m}\n`); } catch { /* non-fatal */ } };
 
@@ -97,7 +99,7 @@ if (primary) app.whenReady().then(async () => {
     permissionsFromPet: () => settings.answerPermissions,
     out: (m) => { if (m.type === 'snapshot') { winSnap = m; pushSnapshot(); } else win.webContents.send('pet:msg', m); },
   });
-  const info = (message: string, detail = '') => dialog.showMessageBox(win, { type: 'info', title: 'Claude Pet', message, detail });
+  const info = (message: string, detail = '') => dialog.showMessageBox(win, { type: 'info', title: 'ccPet', message, detail });
 
   const onHooks = async (m: { diff: string; applied: boolean; installed: boolean; stale: boolean }) => {
     if (m.applied) { void info(L('Хуки подключены', 'Hooks connected', '钩子已连接'), L('Новые сессии Claude Code будут видны питомцу. Уже открытые терминалы нужно перезапустить.', 'New Claude Code sessions will be visible to the pet. Terminals that are already open need a restart.', '新的 Claude Code 会话将对宠物可见。已打开的终端需要重启。')); return; }
@@ -178,7 +180,7 @@ if (primary) app.whenReady().then(async () => {
     catch (e) { log(`hotkey: invalid accelerator ${settings.hotkey}: ${(e as Error).message}`); }
     log(`hotkey: ${settings.hotkey} registered=${ok}`);
     if (!ok && Notification.isSupported())
-      new Notification({ title: 'Claude Pet', body: L(`Горячая клавиша ${settings.hotkey} недоступна (занята другим приложением)`, `The hotkey ${settings.hotkey} is unavailable (taken by another app)`, `快捷键 ${settings.hotkey} 不可用（已被其他应用占用）`) }).show();
+      new Notification({ title: 'ccPet', body: L(`Горячая клавиша ${settings.hotkey} недоступна (занята другим приложением)`, `The hotkey ${settings.hotkey} is unavailable (taken by another app)`, `快捷键 ${settings.hotkey} 不可用（已被其他应用占用）`) }).show();
   };
   const toggleWindow = () => (win.isVisible() ? win.hide() : (win.showInactive(), win.setAlwaysOnTop(true, 'floating')));
   /** Guided terminal setup: shows the one command to run in WSL (it asks before changing ~/.bashrc, backs it up, can be undone). */
@@ -187,7 +189,7 @@ if (primary) app.whenReady().then(async () => {
     const cmd = `bash '${toWslPath(script).replace(/'/g, `'\\''`)}'`;
     const r = await dialog.showMessageBox(win, confirmOptions({
       type: 'question', action: L('Копировать команду', 'Copy command', '复制命令'), cancel: L('Закрыть', 'Close', '关闭'), message: L('Подключить терминал (WSL)', 'Connect the terminal (WSL)', '连接终端（WSL）'),
-      detail: L('Чтобы обычная команда `claude` запускалась через Claude Pet (общая сессия с питомцем), выполните в окне WSL-терминала:', 'To make the plain `claude` command run through Claude Pet (one shared session with the pet), run this in a WSL terminal:', '要让普通的 `claude` 命令通过 Claude Pet 运行（与宠物共用一个会话），请在 WSL 终端中运行：') + '\n\n' + cmd +
+      detail: L('Чтобы обычная команда `claude` запускалась через ccPet (общая сессия с питомцем), выполните в окне WSL-терминала:', 'To make the plain `claude` command run through ccPet (one shared session with the pet), run this in a WSL terminal:', '要让普通的 `claude` 命令通过 ccPet 运行（与宠物共用一个会话），请在 WSL 终端中运行：') + '\n\n' + cmd +
         L('\n\nСкрипт покажет изменение, спросит подтверждение, сохранит копию ~/.bashrc и его можно отменить: добавьте --uninstall. Без этого питомец тоже работает, но писать в терминальную сессию сможет только через запасной путь.', '\n\nThe script shows the change, asks for confirmation, keeps a copy of ~/.bashrc and can be undone with --uninstall. The pet works without it too, but can write into a terminal session only through a fallback path.', '\n\n脚本会显示改动并请求确认，保留 ~/.bashrc 的备份，可用 --uninstall 撤销。没有它宠物也能工作，但只能通过备用途径向终端会话写入。'),
     }));
     if (isConfirmed(r)) clipboard.writeText(cmd);
@@ -210,7 +212,7 @@ if (primary) app.whenReady().then(async () => {
     { label: L('Выйти', 'Quit', '退出'), click: () => app.quit() },
   ]);
   const tray = new Tray(nativeImage.createFromPath(join(__dirname, 'icon.png')).resize({ width: 32, height: 32 }));
-  tray.setToolTip('Claude Pet');
+  tray.setToolTip('ccPet');
   tray.on('click', toggleWindow);
   tray.on('right-click', () => tray.popUpContextMenu(trayMenu()));
 

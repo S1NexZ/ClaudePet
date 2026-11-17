@@ -161,7 +161,7 @@ export function createBridge(o: {
             if (o.mailbox && s && !s.owned && (o.mailboxOnly || o.mailbox.hasWaiter(id))) {
               // no PTY: wake the session through its mailbox waiter (the text goes out as a hook-feedback reminder)
               const text = String(cmd.text);
-              const r = o.mailbox.send(id, `${L('Пользователь написал это через Claude Pet. Считай это его сообщением и ответь на него.', 'The user wrote this through Claude Pet. Treat it as their message and answer it.', '用户通过 Claude Pet 写了这条消息。请把它当作用户的消息并回答。')}\n${PET_MARKER} ${text}`);
+              const r = o.mailbox.send(id, `${L('Пользователь написал это через ccPet. Считай это его сообщением и ответь на него.', 'The user wrote this through ccPet. Treat it as their message and answer it.', '用户通过 ccPet 写了这条消息。请把它当作用户的消息并回答。')}\n${PET_MARKER} ${text}`);
               o.out({ type: 'chat', sessionId: id, event: { kind: 'user', text } });
               if (r === 'delivered') o.store.apply({ hook_event_name: 'UserPromptSubmit', session_id: id, cwd: s.cwd });
               break;

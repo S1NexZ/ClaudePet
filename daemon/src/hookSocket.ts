@@ -16,7 +16,7 @@ const isLive = (path: string) => new Promise<boolean>((resolve) => {
 
 /** Listens on a unix socket for hook events (one JSON document per connection). */
 export async function listenHooks(path: string, onEvent: (e: HookPayload) => void): Promise<{ close(): Promise<void> }> {
-  if (await isLive(path)) throw new Error(`Claude Pet bridge is already running (${path})`);
+  if (await isLive(path)) throw new Error(`ccPet bridge is already running (${path})`);
   mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
   rmSync(path, { force: true }); // stale socket from a crash
   const server = createServer((conn) => {
