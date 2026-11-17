@@ -123,3 +123,32 @@ describe('Animator drag (run while the window is dragged)', () => {
     expect(a.frame(0).row).toBe(0);
   });
 });
+
+describe('msToNextFrame (the render loop sleeps until then)', () => {
+  it('time left in the current frame', () => {
+    const a = plain();
+    a.setState('thinking');
+    a.frame(0);
+    expect(a.msToNextFrame(0)).toBe(100);
+    expect(a.msToNextFrame(30)).toBe(70);
+    // the frame really changes at that moment
+    expect(a.frame(30 + a.msToNextFrame(30) - 1).col).toBe(0);
+    expect(a.frame(30 + a.msToNextFrame(30)).col).toBe(1);
+  });
+  it('a wanted state waiting for the hold time wakes the loop when the hold ends', () => {
+    const a = new Animator({ frameMs: 400, minHoldMs: 900 });
+    a.setState('thinking'); a.frame(0);
+    a.setState('reading');
+    expect(a.msToNextFrame(100)).toBe(300); // next frame comes first
+    a.frame(800);
+    expect(a.msToNextFrame(850)).toBe(50); // the hold ends at 900, before the next frame (1200)
+  });
+  it('while dragged and in the done sequence it still answers', () => {
+    const a = plain();
+    a.setDrag('right'); a.frame(0);
+    expect(a.msToNextFrame(40)).toBe(60);
+    const b = plain(); b.setState('done'); b.frame(0);
+    expect(b.msToNextFrame(10)).toBe(90);
+  });
+});
+

@@ -69,6 +69,24 @@ export class Animator {
     return this.cycle(row, elapsed);
   }
 
+  /**
+   * Milliseconds until frame() may return something else: the end of the current frame, or the end of the hold before a wanted state.
+   * The render loop sleeps until then instead of waking 60 times a second.
+   */
+  msToNextFrame(now: number): number {
+    let step: number, elapsed: number;
+    if (this.drag) {
+      const row = RUN_ROW[this.drag] < this.rowFrames.length ? RUN_ROW[this.drag] : 0;
+      step = this.stepMs(row); elapsed = now - (this.dragStartedAt ?? now);
+    } else {
+      const started = this.startedAt ?? now;
+      const row = this.shown === 'done' ? DONE_JUMP_ROW : rowForState(this.shown);
+      step = this.stepMs(row < this.rowFrames.length ? row : 0); elapsed = now - started;
+      if (this.want !== this.shown) return URGENT.has(this.want) ? 0 : Math.max(0, Math.min(step - (elapsed % step), this.minHoldMs - elapsed));
+    }
+    return step - (elapsed % step);
+  }
+
   private cycle(row: number, elapsed: number): { row: number; col: number } {
     return { row, col: Math.floor(elapsed / this.stepMs(row)) % this.rowFrames[row] };
   }

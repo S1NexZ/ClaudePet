@@ -204,9 +204,12 @@ async function main() {
   }, true);
   setInterval(renderUsage, 60_000); // only repaints (age, "stale", expired windows); no I/O
 
-  host.onBridge((up) => { connected = up; if (!up) raw = null; if (up) host.send({ type: 'usage' }); });
+  /** wakes the frame loop at once (it sleeps between sprite frames); anything that can change what is on screen calls it */
+  let wake: () => void = () => {};
+  host.onBridge((up) => { connected = up; if (!up) raw = null; if (up) host.send({ type: 'usage' }); wake(); });
   if (connected) host.send({ type: 'usage' });
   host.onMsg((m) => {
+    wake();
     if (m.type === 'snapshot') raw = m;
     else if (m.type === 'chat') chats.set(m.sessionId, applyChat(chats.get(m.sessionId) ?? [], m.event));
     else if (m.type === 'history') chats.set(m.sessionId, mergeHistory(chats.get(m.sessionId), m.items));
@@ -322,7 +325,7 @@ async function main() {
   };
   // the pet runs the way the window is being dragged (the OS moves it; main reports each step)
   let movedAt = 0;
-  host.onMoving((dx) => { movedAt = performance.now(); anim.setDrag(dx > 0 ? 'right' : 'left'); });
+  host.onMoving((dx) => { movedAt = performance.now(); anim.setDrag(dx > 0 ? 'right' : 'left'); wake(); });
 
   // ---- chat + composer ----
   const input = $('input') as HTMLInputElement;
@@ -496,7 +499,8 @@ async function main() {
   let peek = false, peekOff: ReturnType<typeof setTimeout> | undefined;
   host.onHover((h) => {
     clearTimeout(peekOff);
-    if (h) peek = true; else peekOff = setTimeout(() => { peek = false; }, 380); // a short grace: no flicker on the way to the buttons
+    if (h) peek = true; else peekOff = setTimeout(() => { peek = false; wake(); }, 380); // a short grace: no flicker on the way to the buttons
+    wake();
   });
   let hoverSent = '';
   const reportHover = () => {
@@ -514,8 +518,8 @@ async function main() {
   const reduceMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false;
   animatePanels(['notice', 'perm', 'sessions', 'settings', 'usage', 'chat', 'chat-menu', 'models'].map((id) => document.getElementById(id)), reduceMotion);
   const motion = createMotion({ sprite, dockPill, chip: $('chip'), ring: usageRing }, reduceMotion);
-  usageRing.addEventListener('mouseenter', () => { ringHover = true; });
-  usageRing.addEventListener('mouseleave', () => { ringHover = false; });
+  usageRing.addEventListener('mouseenter', () => { ringHover = true; wake(); });
+  usageRing.addEventListener('mouseleave', () => { ringHover = false; wake(); });
   const FRAME_FADE_MS = 100, STATE_FADE_MS = 190;
   let curRow = -1, curCol = -1, prevRow = -1, prevCol = -1, fadeStart = 0, fadeMs = 0, fading = false, lastAtlasV = -1, lastSizeV = -1, drawnFade = 1;
   const smooth = (p: number) => p * p * (3 - 2 * p);
@@ -526,7 +530,8 @@ async function main() {
   };
   let lastTick = 0;
   const tick = (t: number) => {
-    if (t - lastTick < 15) { requestAnimationFrame(tick); return; } // high-refresh displays (144 Hz+): ~60 updates a second are plenty
+    own = true; queueMicrotask(() => { own = false; });
+    if (t - lastTick < 15) { schedule(t); return; } // high-refresh displays (144 Hz+): ~60 updates a second are plenty
     lastTick = t;
     const snap = eff();
     const s = snap?.sessions.find((x) => x.id === snap.attention) ?? null;
@@ -566,8 +571,9 @@ async function main() {
       motion.setPulse(v.state !== 'idle' && v.state !== 'done' && v.state !== 'sleeping');
       $('chip').classList.toggle('offline', !connected);
     }
-    // the heavy DOM work (panels, chat, rects, window size) does not need 60 fps: ~15 Hz is plenty and keeps an idle pet quiet
-    if (t - lastHeavy < 66) { requestAnimationFrame(tick); return; }
+    // the heavy DOM work (panels, chat, rects, window size): when something changed (dirty), and once a second for the running clocks
+    if (!dirty && t - lastHeavy < 1000) { schedule(t); return; }
+    dirty = false;
     lastHeavy = t;
     const pp = s?.pendingPermission;
     $('perm').hidden = !pp;
@@ -592,8 +598,29 @@ async function main() {
     fitWindow();
     reportRects();
     reportHover();
-    requestAnimationFrame(tick);
+    schedule(t);
   };
-  requestAnimationFrame(tick);
+  /**
+   * The loop sleeps until something can change: the next sprite frame, the end of a cross-fade, the next second (elapsed-time labels),
+   * the end of a drag. Events wake it at once (wake()). Before this it ran 60 times a second even for a pet sitting still.
+   */
+  let timer: ReturnType<typeof setTimeout> | undefined, queued = false, dirty = true;
+  const runSoon = () => { if (!queued) { queued = true; requestAnimationFrame((t) => { queued = false; tick(t); }); } };
+  function schedule(t: number) {
+    if (fading || dirty) { runSoon(); return; }
+    let ms = Math.min(anim.msToNextFrame(t), 1000 - (Date.now() % 1000) + 5);
+    if (movedAt) ms = Math.min(ms, Math.max(0, 180 - (t - movedAt)));
+    if (ms < 17) { runSoon(); return; }
+    clearTimeout(timer);
+    timer = setTimeout(runSoon, ms - 8); // wake just before the frame is due; rAF then aligns it to the display
+  }
+  wake = () => { dirty = true; clearTimeout(timer); runSoon(); };
+  // anything the user does in the window, and any element shown, hidden or resized, may change the layout: recompute at once
+  for (const ev of ['pointerdown', 'pointerover', 'pointerout', 'keydown', 'input', 'focusin', 'focusout', 'wheel', 'transitionend', 'animationend']) document.addEventListener(ev, () => wake(), { capture: true, passive: true });
+  // the loop's own DOM writes must not wake it again (that would spin it at 60 fps): their records arrive before `own` is cleared
+  let own = false;
+  new MutationObserver(() => { if (!own) wake(); }).observe(document.body, { subtree: true, childList: true, attributes: true, attributeFilter: ['hidden', 'class'] });
+  new ResizeObserver(() => { if (!own) wake(); }).observe(document.body);
+  runSoon();
 }
 void main();
