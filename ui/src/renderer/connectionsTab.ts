@@ -13,6 +13,8 @@ export interface HostState {
   statusLine?: 'none' | 'ours' | 'chained';
   statusLineDiff?: string;
   statusLineError?: string;
+  /** newest hook activity from this host (ms), null = none since the pet started */
+  lastEventAt?: number | null;
 }
 export interface WrapperState { state: 'none' | 'ours' | 'partial' | 'stale'; files: string[]; policy: string | null }
 export interface ConnectionsState { answerPermissions: boolean; sdkChats?: boolean; /** where new chats start (terminal sessions) */ newChatIn?: 'wsl' | 'windows'; helper: boolean; /** the claude wrapper in the PowerShell profiles */ wrapper?: WrapperState | null; /** full path of pet-helper.exe (for the PowerShell wrapper line) */ helperPath?: string; windows: HostState; wsl: HostState; /** other WSL distros that are followed */ others?: Array<HostState & { id: string }> }
@@ -23,6 +25,8 @@ export interface ConnectionsHost {
   answerPermissions(on: boolean): Promise<ConnectionsState>;
   sdkChats(on: boolean): Promise<ConnectionsState>;
   newChatIn?(where: 'wsl' | 'windows'): Promise<ConnectionsState>;
+  /** builds the report and puts it on the clipboard */
+  diagnostics?(): Promise<string>;
 }
 
 const el = <K extends keyof HTMLElementTagNameMap>(tag: K, cls = '', text = ''): HTMLElementTagNameMap[K] => {
@@ -51,6 +55,13 @@ export function createConnectionsTab(host: ConnectionsHost) {
     const chips = el('div', 'c-chips');
     chips.append(chip(h.events, L('события', 'events', '事件')), chip(h.mailbox, L('сообщения в сессии', 'messages to sessions', '向会话发消息')), chip(h.permissions, L('разрешения', 'permissions', '权限')));
     row.append(chips);
+    if (connected) {
+      const at = h.lastEventAt;
+      const mins = at ? Math.round((Date.now() - at) / 60000) : 0;
+      row.append(el('div', 's-hint', at
+        ? L(`Последнее событие от Claude Code: ${mins < 1 ? 'только что' : `${mins} мин назад`}`, `Last event from Claude Code: ${mins < 1 ? 'just now' : `${mins} min ago`}`, `Claude Code 最近事件：${mins < 1 ? '刚刚' : `${mins} 分钟前`}`)
+        : L('Событий от Claude Code пока не было: запустите или перезапустите сессию здесь.', 'No events from Claude Code yet: start or restart a session here.', '尚未收到 Claude Code 事件：请在此启动或重启会话。')));
+    }
     if (h.error) row.append(el('div', 's-hint c-err', h.error));
     const line = el('div', 's-swatches');
     const needsUpdate = connected && !!h.diff;
@@ -123,6 +134,16 @@ export function createConnectionsTab(host: ConnectionsHost) {
       }
       nc.append(el('div', 's-hint', L('Новый чат открывает окно терминала с Claude Code в выбранной папке. Если WSL недоступен, чат стартует в Windows.', 'A new chat opens a terminal window with Claude Code in the chosen folder. If WSL is unavailable, it starts on Windows.', '新聊天会在所选文件夹中打开一个运行 Claude Code 的终端窗口。如果 WSL 不可用，则在 Windows 中启动。')));
       box.append(nc);
+    }
+    if (host.diagnostics) {
+      const d = el('div', 's-section');
+      d.append(el('div', 's-title', L('Не видно сессию?', 'A session is missing?', '看不到会话？')));
+      d.append(el('div', 's-hint', L('Отчёт со всеми проверками подключений (без имени пользователя и токенов) копируется в буфер обмена.', 'A report of every connection check (no user name or tokens) is copied to the clipboard.', '包含所有连接检查的报告（不含用户名和令牌）会复制到剪贴板。')));
+      const b = el('button', 's-btn', L('Скопировать отчёт', 'Copy the report', '复制报告')); b.type = 'button';
+      const out = el('pre', 'c-code c-report'); out.hidden = true;
+      b.addEventListener('click', () => void host.diagnostics!().then((t) => { out.textContent = t; out.hidden = false; b.textContent = L('Скопировано', 'Copied', '已复制'); }));
+      d.append(b, out);
+      box.append(d);
     }
     const sdk = el('label', 's-radio'); sdk.style.display = 'block';
     const sb = el('input'); sb.type = 'checkbox'; sb.checked = !!state.sdkChats; sb.disabled = busy;

@@ -1,7 +1,7 @@
 import { app, BrowserWindow, clipboard, dialog, globalShortcut, ipcMain, Menu, Notification, shell, Tray, nativeImage, nativeTheme, screen } from 'electron';
 import { confirmOptions, isConfirmed } from './dialogs.js';
 import { join, dirname } from 'node:path';
-import { homedir } from 'node:os';
+import { homedir, userInfo } from 'node:os';
 import { mkdirSync } from 'node:fs';
 import { spawn, execFile } from 'node:child_process';
 import { appendFileSync, existsSync, readFileSync, writeFileSync } from 'node:fs';
@@ -10,6 +10,7 @@ import { listModels, pickModel, MODEL_ID, DEFAULT_MODEL } from './models/registr
 import { installModelFromZip, installModelFromDir, removeModel, scanPetFolder, ModelError } from './models/install.js';
 import { loadSettings, saveSettings } from './settings.js';
 import { focusByTitle, focusDesktopApp } from './focusWindow.js';
+import { formatDiagnostics, lastEventByHost } from './diagnostics.js';
 import { planProfile, removeFromProfile, profileState, profilePaths, readProfile, applyProfile } from './psProfile.js';
 import { overAny, type Rect } from './hitTest.js';
 import { placeStage, restoreAnchor, IDLE_H, type Anchor } from './placement.js';
@@ -22,7 +23,7 @@ import { pickAttention } from '../../daemon/src/sessionStore.js';
 import { toWslPath } from '../../daemon/src/paths.js';
 import { cleanAppearance } from './appearance.js';
 import { clampScale, PET_SCALE_MIN, PET_SCALE_MAX } from './petScale.js';
-import { PERMISSION_POLICIES, type PermissionPolicy, type BridgeMessage, type UsageInfo } from '../../shared/src/types.js';
+import { PERMISSION_POLICIES, type PermissionPolicy, type BridgeMessage, type UsageInfo, type Session } from '../../shared/src/types.js';
 import { L, setLang, getLang, resolveLang, LANG_PREFS, type LangPref } from '../../shared/src/i18n.js';
 
 /** Width is constant; the height starts at the pet's own part and the renderer grows it downwards when a panel opens (see pet:resize). */
@@ -393,10 +394,11 @@ if (primary) app.whenReady().then(async () => {
     return { id: h.id, statusLine: sl?.kind as string | undefined, statusLineDiff: String(sl?.diff ?? ''), statusLineError: sl?.error as string | undefined, up: h.isUp(), distro: h.name(), port: h.secondary ? h.port : undefined, events: !!w?.events, mailbox: !!w?.mailbox, permissions: !!w?.permissions, diff: String(w?.diff ?? ''), error: w?.error as string | undefined };
   };
   const connectionsState = async () => {
-    const hosts = await Promise.all([...wslHosts.values()].map(hostRowState));
+    const last = lastEventByHost(lastSnapshot?.sessions ?? []);
+    const hosts = (await Promise.all([...wslHosts.values()].map(hostRowState))).map((h) => ({ ...h, lastEventAt: last[h.id] ?? null }));
     return {
       answerPermissions: settings.answerPermissions, sdkChats: settings.sdkChats, newChatIn: settings.newChatIn, helper: !!helperPath, helperPath, wrapper: wrapperState(),
-      windows: (() => { const sl = winHost.statusLine({}); return { ...winHost.state(settings.answerPermissions), port: winHost.port, up: winUp, statusLine: sl.kind, statusLineDiff: sl.diff, statusLineError: sl.error }; })(),
+      windows: (() => { const sl = winHost.statusLine({}); return { ...winHost.state(settings.answerPermissions), port: winHost.port, up: winUp, statusLine: sl.kind, statusLineDiff: sl.diff, statusLineError: sl.error, lastEventAt: last.windows ?? null }; })(),
       wsl: hosts.find((x) => x.id === 'wsl')!,
       others: hosts.filter((x) => x.id !== 'wsl'),
     };
@@ -436,6 +438,24 @@ if (primary) app.whenReady().then(async () => {
     } catch (e) { log(`windows repair: ${(e as Error).message}`); }
   };
   ipcMain.handle('pet:connections', () => connectionsState());
+  // "why don't I see my session": every check in one copyable report (no user name, tokens or e-mail in it)
+  ipcMain.handle('pet:diagnostics', async () => {
+    const c = await connectionsState();
+    const sessions: Session[] = lastSnapshot?.sessions ?? [];
+    const of = (id: string) => sessions.filter((x) => (x.host === 'windows' ? 'windows' : x.distro ? `wsl:${x.distro}` : 'wsl') === id);
+    const row = (id: string, h: any) => ({
+      id, distro: h.distro, up: !!h.up, events: !!h.events, mailbox: !!h.mailbox, permissions: !!h.permissions, statusLine: h.statusLine,
+      lastEventAt: h.lastEventAt ?? null, sessions: of(id).length, sources: [...new Set(of(id).map((x) => x.source ?? '?'))] as string[], error: h.error,
+    });
+    const text = formatDiagnostics({
+      version: app.getVersion(), os: `${process.platform} ${process.getSystemVersion()}`, now: Date.now(), user: userInfo().username,
+      hosts: [row('windows', c.windows), row(c.wsl.id, c.wsl), ...(c.others ?? []).map((o) => row(o.id, o))],
+      helper: !!helperPath, wrapper: c.wrapper?.state ?? null, policy: c.wrapper?.policy ?? null,
+      desktopChats: new Set([...desktopEntries().values()].map((e) => e.desktopId)).size, newChatIn: settings.newChatIn, sdkChats: settings.sdkChats,
+    });
+    clipboard.writeText(text);
+    return text;
+  });
   ipcMain.handle('pet:connections-apply', async (_e, hostId: unknown, action: unknown) => {
     const remove = action === 'disconnect';
     if (hostId === 'windows' && (action === 'wrapper' || action === 'wrapper-off') && helperPath) {

@@ -286,6 +286,7 @@ body { font-family: "Segoe UI", "Microsoft YaHei UI", system-ui, sans-serif; col
 .row.group.open .chev { transform: translateY(1px) rotate(-135deg); }
 .row.group:hover { color: var(--text); }
 .c-code { display: block; margin: 4px 0 6px; padding: 6px 8px; border-radius: 8px; background: var(--hover); font: 11px/1.4 ui-monospace, Consolas, monospace; overflow-wrap: anywhere; user-select: text; }
+.c-report { white-space: pre-wrap; max-height: 180px; overflow-y: auto; }
 .c-sl { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
 /* the ring is only an arc: the numbers live in its tooltip and in the panel opened by a click */
 #usage-ring-text { display: none; }
