@@ -1,12 +1,15 @@
 import { describe, it, expect } from 'vitest';
 import { fileURLToPath } from 'node:url';
-import { mkdtempSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, writeFileSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, isAbsolute } from 'node:path';
 import { loadPet } from './loadPet.js';
 
+// sprites/ is a local-only folder (not in the repository): those two tests run where it exists
+const hasMiku = existsSync(fileURLToPath(new URL('../../../sprites/shy-miku/pet.json', import.meta.url)));
+
 describe('loadPet', () => {
-  it('loads the bundled shy-miku pack', async () => {
+  it.skipIf(!hasMiku)('loads the bundled shy-miku pack', async () => {
     const dir = fileURLToPath(new URL('../../../sprites/shy-miku', import.meta.url));
     const pet = await loadPet(dir);
     expect(pet.id).toBe('shy-miku');
@@ -25,7 +28,7 @@ describe('loadPet', () => {
     await expect(loadPet(noSheet)).rejects.toThrow(/nope\.webp/);
   });
 
-  it('reads optional tweaks.json (trim half-widths per row); bundled miku trims the idle row', async () => {
+  it.skipIf(!hasMiku)('reads optional tweaks.json (trim half-widths per row); bundled miku trims the idle row', async () => {
     const dir = fileURLToPath(new URL('../../../sprites/shy-miku', import.meta.url));
     expect((await loadPet(dir)).tweaks).toEqual({ trimHalfWidth: { '0': 60 } });
     const plain = mkdtempSync(join(tmpdir(), 'pet-'));

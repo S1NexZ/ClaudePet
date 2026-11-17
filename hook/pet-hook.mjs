@@ -26,7 +26,14 @@ function parentOf(pid) {
 /** Command line of a process: /proc on Linux, `ps` on macOS. */
 function cmdlineOf(pid) {
   if (process.platform === 'linux') return readFileSync(`/proc/${pid}/cmdline`, 'utf8').split('\0');
-  return execFileSync('ps', ['-o', 'command=', '-p', String(pid)], { encoding: 'utf8', timeout: 2000, stdio: ['ignore', 'pipe', 'ignore'] }).trim().split(/\s+/);
+  // `ps` flattens the command line, so an argument with spaces ("explain the -p flag") falls apart into words: only options before the first
+  // positional word count (a missed one-shot just keeps a harmless waiter; a false one-shot would lose the user's mailbox)
+  const t = execFileSync('ps', ['-o', 'command=', '-p', String(pid)], { encoding: 'utf8', timeout: 2000, stdio: ['ignore', 'pipe', 'ignore'] }).trim().split(/\s+/);
+  const i = t.findIndex((x) => /(^|\/)claude(\.exe)?$|claude-code\/cli\.js$/i.test(x));
+  if (i < 0) return t;
+  let end = i + 1;
+  while (end < t.length && (t[end].startsWith('-') || t[end - 1].startsWith('-'))) end++;
+  return t.slice(0, end);
 }
 function oneShot(pid) {
   for (let i = 0; i < 3 && pid > 1; i++) {
