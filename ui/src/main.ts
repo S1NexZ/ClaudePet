@@ -9,13 +9,15 @@ import { loadPet } from './sprite/loadPet.js';
 import { listModels, pickModel, MODEL_ID, DEFAULT_MODEL } from './models/registry.js';
 import { installModelFromZip, installModelFromDir, removeModel, scanPetFolder, ModelError } from './models/install.js';
 import { loadSettings, saveSettings } from './settings.js';
-import { focusByTitle } from './focusWindow.js';
+import { focusByTitle, focusDesktopApp } from './focusWindow.js';
 import { overAny, type Rect } from './hitTest.js';
 import { placeStage, restoreAnchor, IDLE_H, type Anchor } from './placement.js';
 import { terminalCommand, windowsTerminalCommand, newSessionCommand } from './terminal.js';
 import { createWindowsHost, WINDOWS_HOST_PORT } from './hub/windowsHost.js';
 import { createWslHost, parseDistroList, secondaryDistros, portForDistro, type WslHost } from './hub/wslHost.js';
 import { mergeSnapshots, hostOf, hostOfPermission, type HostPart } from './hub/merge.js';
+import { createDesktopRegistry, findRegistryRoots, decorateDesktop, type DesktopEntry } from './hub/desktopRegistry.js';
+import { pickAttention } from '../../daemon/src/sessionStore.js';
 import { toWslPath } from '../../daemon/src/paths.js';
 import { cleanAppearance } from './appearance.js';
 import { clampScale, PET_SCALE_MIN, PET_SCALE_MAX } from './petScale.js';
@@ -91,7 +93,20 @@ if (primary) app.whenReady().then(async () => {
     ...[...wslHosts.values()].map((h) => ({ host: h.id, snap: hostSnap.get(h.id) ?? null, distro: h.secondary || wslHosts.size > 1 ? h.name() : undefined })),
     { host: 'windows', snap: winSnap },
   ];
-  const pushSnapshot = () => { lastSnapshot = mergeSnapshots(hostParts()); win.webContents.send('pet:msg', lastSnapshot); };
+  // the desktop app's own session list: chat titles, archived chats, ids to open them in the app (re-read at most every 5 s, changed files only)
+  const desktopReg = createDesktopRegistry(() => findRegistryRoots(process.env.LOCALAPPDATA ?? '', process.env.APPDATA ?? ''));
+  let desktopMap = new Map<string, DesktopEntry>();
+  let desktopAt = 0;
+  const desktopEntries = () => {
+    if (Date.now() - desktopAt > 5000) { desktopAt = Date.now(); try { desktopMap = desktopReg.byCliId(); } catch (e) { log(`desktop registry: ${(e as Error).message}`); } }
+    return desktopMap;
+  };
+  const pushSnapshot = () => {
+    const m = mergeSnapshots(hostParts());
+    const sessions = decorateDesktop(m.sessions, desktopEntries());
+    lastSnapshot = { ...m, sessions, attention: sessions.some((x) => x.id === m.attention) ? m.attention : pickAttention(sessions)?.id ?? null };
+    win.webContents.send('pet:msg', lastSnapshot);
+  };
   const sendUp = () => { up = winUp || [...hostUp.values()].some(Boolean); win.webContents.send('pet:bridge', up); };
   const helperPath = (() => { const p = app.isPackaged ? join(process.resourcesPath, 'helper', 'pet-helper.exe') : join(__dirname, '..', 'helper', 'pet-helper.exe'); return existsSync(p) ? p : undefined; })();
   const winHost = createWindowsHost({
@@ -426,6 +441,10 @@ if (primary) app.whenReady().then(async () => {
   ipcMain.on('pet:open-terminal', (_e, sessionId: string) => {
     const s = sessionById(String(sessionId));
     if (!s) return;
+    if (s.desktopId) { // a desktop app session: open that very chat in the app (its own deep link), never a second claude
+      void shell.openExternal(`claude://code/continue?session=${encodeURIComponent(s.desktopId)}`).then(() => focusDesktopApp()).catch((e) => log(`desktop link: ${(e as Error).message}`));
+      return;
+    }
     if (s.host === 'windows') {
       const launchWin = (useWt: boolean) => {
         const c = windowsTerminalCommand({ cwd: s.cwd, sessionId: s.id }, useWt);

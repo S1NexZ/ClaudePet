@@ -408,6 +408,8 @@ async function main() {
     const title = newChat ? `${L('Новый чат', 'New chat', '新聊天')} · ${folder!.replace(/[\\/]+$/, '').split(/[\\/]/).pop()}` : s ? `${s.project} · ${STATE_LABEL[s.state]}` : L('Чат', 'Chat', '聊天');
     if ($('chat-title').textContent !== title) $('chat-title').textContent = title;
     $('btn-term').hidden = !sid; $('btn-end').hidden = !sid;
+    const openLabel = s?.desktopId ? L('Открыть в приложении Claude', 'Open in the Claude app', '在 Claude 应用中打开') : L('Открыть в терминале', 'Open in terminal', '在终端中打开');
+    if ($('btn-term').getAttribute('aria-label') !== openLabel) { $('btn-term').title = openLabel; $('btn-term').setAttribute('aria-label', openLabel); }
     // ask for the transcript once per opening of this chat (even if /btw already put messages there)
     if (sid && !historyAsked.has(sid)) { historyAsked.add(sid); host.send({ type: 'history', sessionId: sid }); }
     const items = sid ? chats.get(sid) ?? [] : [];
