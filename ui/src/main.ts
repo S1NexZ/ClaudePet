@@ -386,6 +386,23 @@ if (primary) app.whenReady().then(async () => {
     return isConfirmed(r);
   };
   const windowsSettings = join(homedir(), '.claude', 'settings.json');
+  /**
+   * Our Windows entries are there but out of date (the app moved, the helper changed, the token is new): offer to update them once per
+   * start, with the diff. Absent entries are never offered here (connecting is the user's choice in Connections).
+   */
+  const offerWindowsRepair = async () => {
+    try {
+      const st = winHost.state(settings.answerPermissions);
+      const sl = winHost.statusLine({});
+      const items: Array<{ file: string; diff: string }> = [];
+      if (!st.error && (st.events || st.mailbox) && st.diff) items.push({ file: windowsSettings, diff: st.diff });
+      if (!sl.error && sl.kind !== 'none' && sl.diff) items.push({ file: `${windowsSettings} (statusLine)`, diff: sl.diff });
+      if (!items.length) return;
+      if (!(await confirmHooks(L('Обновить подключение Windows?', 'Update the Windows connection?', '更新 Windows 连接？'), items))) return;
+      if (items.some((i) => i.diff === st.diff)) winHost.apply(settings.answerPermissions);
+      if (sl.kind !== 'none' && sl.diff) winHost.statusLine({ apply: true });
+    } catch (e) { log(`windows repair: ${(e as Error).message}`); }
+  };
   ipcMain.handle('pet:connections', () => connectionsState());
   ipcMain.handle('pet:connections-apply', async (_e, hostId: unknown, action: unknown) => {
     const remove = action === 'disconnect';
@@ -580,7 +597,7 @@ if (primary) app.whenReady().then(async () => {
   await win.loadFile(join(__dirname, 'index.html'));
   win.showInactive();
   log(`window bounds=${JSON.stringify(win.getBounds())} scale=${screen.getDisplayMatching(win.getBounds()).scaleFactor}`);
-  void winHost.start().then((ok) => { winUp = ok; sendUp(); if (ok) void winHost.pushUsage(); log(`windows host ${ok ? `listening on 127.0.0.1:${winHost.port}` : 'not started'}`); });
+  void winHost.start().then((ok) => { winUp = ok; sendUp(); if (ok) { void winHost.pushUsage(); void offerWindowsRepair(); }log(`windows host ${ok ? `listening on 127.0.0.1:${winHost.port}` : 'not started'}`); });
   const winTimer = setInterval(() => winHost.tick(Date.now()), 1500);
   registerHotkey();
   app.on('second-instance', summon);
