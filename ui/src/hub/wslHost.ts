@@ -9,6 +9,8 @@ export interface WslHostOptions {
   /** TCP port of this bridge's hook receiver (distros share one network namespace, so every bridge needs its own) */
   port: number;
   bridgePath: string;
+  /** Linux / macOS: the bridge runs on this machine, inside the app's own runtime (no wsl.exe) */
+  native?: boolean;
   /** a secondary host only follows sessions: no usage polling */
   secondary: boolean;
   log(line: string): void;
@@ -86,7 +88,8 @@ export function createWslHost(o: WslHostOptions): WslHost {
 
   const spawnBridge = () => {
     rest = '';
-    child = spawn('wsl.exe', wslBridgeArgs(o.bridgePath, { distro: o.distro || undefined, port: o.secondary ? o.port : undefined, noUsage: o.secondary }), { windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] });
+    if (o.native) { const n = nativeBridgeSpawn(o.bridgePath); child = spawn(n.file, n.args, { env: n.env, stdio: ['pipe', 'pipe', 'pipe'] }); }
+    else child = spawn('wsl.exe', wslBridgeArgs(o.bridgePath, { distro: o.distro || undefined, port: o.secondary ? o.port : undefined, noUsage: o.secondary }), { windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] });
     child.stdin!.on('error', (e) => o.log(`bridge ${o.id} stdin: ${e.message}`)); // EPIPE if it just died; the exit handler restarts it
     child.stdout!.setEncoding('utf8');
     child.stdout!.on('data', (chunk: string) => { const r = splitLines(rest, chunk); rest = r.rest; r.lines.forEach(onLine); });
@@ -123,4 +126,9 @@ export function portForDistro(name: string, taken: Set<number>): number {
 /** Distros worth following besides the default: running WSL 2 ones (we never start a stopped distro), not Docker's internal ones. */
 export function secondaryDistros(list: ReturnType<typeof parseDistroList>): string[] {
   return list.filter((d) => d.running && !d.isDefault && d.version === 2 && !/^docker-desktop/i.test(d.name)).map((d) => d.name);
+}
+
+/** How the bridge starts on Linux / macOS: the app's own executable acting as Node (Electron's ELECTRON_RUN_AS_NODE), talking JSON lines over stdio. */
+export function nativeBridgeSpawn(bridgePath: string, execPath: string = process.execPath, env: NodeJS.ProcessEnv = process.env): { file: string; args: string[]; env: NodeJS.ProcessEnv } {
+  return { file: execPath, args: [bridgePath], env: { ...env, ELECTRON_RUN_AS_NODE: '1' } };
 }

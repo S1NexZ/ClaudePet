@@ -29,3 +29,11 @@ describe('wsl distro discovery', () => {
     expect(portForDistro('Debian', new Set([a]))).not.toBe(a);
   });
 });
+
+import { nativeBridgeSpawn } from './wslHost.js';
+describe('nativeBridgeSpawn', () => {
+  it('runs the bridge in the app\'s own runtime as Node, keeping the rest of the environment', () => {
+    const r = nativeBridgeSpawn('/app/bridge.cjs', '/opt/ccPet/ccpet', { HOME: '/h' });
+    expect(r).toEqual({ file: '/opt/ccPet/ccpet', args: ['/app/bridge.cjs'], env: { HOME: '/h', ELECTRON_RUN_AS_NODE: '1' } });
+  });
+});

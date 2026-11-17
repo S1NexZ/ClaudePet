@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# ccPet: connects the terminal. Adds (or removes) one `claude` function to ~/.bashrc, so that a normal `claude`
+# ccPet: connects the terminal. Adds (or removes) one `claude` function to ~/.bashrc (~/.zshrc under zsh), so that a normal `claude`
 # starts Claude Code through ccPet's PTY wrapper (the pet and the terminal then share ONE live session).
 #
 #   bash install-shell-integration.sh               show the change, ask, back up ~/.bashrc, apply
@@ -17,7 +17,9 @@ m() { if [ "$_ru" = 1 ]; then printf '%s' "$1"; else printf '%s' "$2"; fi; }
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 pet="$here/pet-claude.py"
-rc="${CLAUDE_PET_BASHRC:-$HOME/.bashrc}"
+# zsh (the macOS default) reads ~/.zshrc, bash reads ~/.bashrc; CLAUDE_PET_BASHRC overrides either
+case "${SHELL:-}" in */zsh) _rc="$HOME/.zshrc" ;; *) _rc="$HOME/.bashrc" ;; esac
+rc="${CLAUDE_PET_BASHRC:-$_rc}"
 begin='# >>> claude-pet >>>'
 end='# <<< claude-pet <<<'
 mode=install; yes=0

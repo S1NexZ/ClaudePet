@@ -1,5 +1,6 @@
 import { readFileSync, writeFileSync, copyFileSync, existsSync, mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
+import { nodeCmd } from './nodeCmd.js';
 
 export const HOOK_EVENTS = [
   'UserPromptSubmit', 'PreToolUse', 'PostToolUse', 'Notification',
@@ -28,7 +29,7 @@ export function lineDiff(a: string[], b: string[]): string {
 /** Returns settings with our hook added for every event (idempotent) and a +/- line diff ('' if unchanged). */
 export function planHooks(current: Settings, hookPath: string, nodePath: string): { next: Settings; diff: string } {
   // `|| true`: if the app is ever removed, a missing hook file must not surface as hook errors in Claude Code
-  const command = `"${nodePath}" "${hookPath}" 2>/dev/null || true`;
+  const command = `${nodeCmd(nodePath)} "${hookPath}" 2>/dev/null || true`;
   const next: Settings = JSON.parse(JSON.stringify(current));
   next.hooks ??= {};
   for (const ev of HOOK_EVENTS) {

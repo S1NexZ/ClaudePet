@@ -6,6 +6,7 @@ import { execFileSync } from 'node:child_process';
 import { homedir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { stableHookDir, stableRuntime } from './nodeCmd.js';
 import { SessionStore } from './sessionStore.js';
 import { SessionRunner } from './runner.js';
 import { createBridge } from './bridge.js';
@@ -21,13 +22,13 @@ import type { AppCommand, BridgeMessage } from '../../shared/src/types.js';
 const send = (m: BridgeMessage | { type: 'ready'; claude: string | null; distro: string }) => process.stdout.write(JSON.stringify(m) + '\n');
 
 function findClaude(): string | undefined {
-  const candidates = [process.env.CLAUDE_PET_CLAUDE_BIN, join(homedir(), '.local/bin/claude'), join(homedir(), '.claude/local/claude')];
+  const candidates = [process.env.CLAUDE_PET_CLAUDE_BIN, join(homedir(), '.local/bin/claude'), join(homedir(), '.claude/local/claude'), '/opt/homebrew/bin/claude', '/usr/local/bin/claude', join(homedir(), '.npm-global/bin/claude'), join(homedir(), '.bun/bin/claude')];
   for (const c of candidates) if (c && existsSync(c)) return c;
-  try { return execFileSync('bash', ['-lc', 'command -v claude'], { encoding: 'utf8' }).trim() || undefined; } catch { return undefined; }
+  try { return execFileSync(process.env.SHELL && /\/(ba|z|da)?sh$/.test(process.env.SHELL) ? process.env.SHELL : 'bash', ['-lc', 'command -v claude'], { encoding: 'utf8' }).trim() || undefined; } catch { return undefined; }
 }
 
 const here = dirname(typeof __filename === 'string' ? __filename : fileURLToPath(import.meta.url));
-const hookPath = process.env.CLAUDE_PET_HOOK ?? join(here, '../hook/pet-hook.mjs');
+const hookPath = process.env.CLAUDE_PET_HOOK ?? join(stableHookDir(join(here, '../hook'), join(homedir(), '.claude-pet', 'bin')), 'pet-hook.mjs');
 const claude = findClaude();
 const store = new SessionStore();
 let bridge: ReturnType<typeof createBridge>;
@@ -50,7 +51,7 @@ const poller = process.env.CLAUDE_PET_LIVE_USAGE === '0' ? null
 bridge = createBridge({
   store, runner, out: send, readTranscript,
   usage: createUsageSource({ settingsPath: join(homedir(), '.claude', 'settings.json'), claudePath: claude, live: poller ?? undefined }),
-  hooks: { settingsPath: join(homedir(), '.claude', 'settings.json'), hookPath, nodePath: process.execPath },
+  hooks: { settingsPath: join(homedir(), '.claude', 'settings.json'), hookPath, nodePath: stableRuntime() },
   mailbox, permissionIdPrefix: 'hl-',
   hostHooks: { origin: `http://127.0.0.1:${hubPort}`, token: hubToken },
 });

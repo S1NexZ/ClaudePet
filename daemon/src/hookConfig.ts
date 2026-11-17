@@ -1,5 +1,6 @@
 import { readFileSync, writeFileSync, copyFileSync, existsSync, mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
+import { nodeCmd } from './nodeCmd.js';
 import { HOOK_EVENTS, lineDiff } from './installHooks.js';
 
 /**
@@ -67,7 +68,7 @@ export function planHostHooks(current: Settings, o: HookPlanOpts): { next: Setti
       for (const ev of ['SessionStart', 'Stop']) add(next, ev, { ...waiter });
     }
   } else if (o.nodePath && o.hookPath) {
-    const waiter = { type: 'command', command: `"${o.nodePath}" "${o.hookPath}" wait`, asyncRewake: true };
+    const waiter = { type: 'command', command: `${nodeCmd(o.nodePath)} "${o.hookPath}" wait`, asyncRewake: true };
     for (const ev of ['SessionStart', 'Stop']) add(next, ev, { ...waiter });
   }
   if (o.permissions) add(next, 'PermissionRequest', { type: 'http', url: `${o.origin}/hook/${o.token}/PermissionRequest`, timeout: 35 });

@@ -19,7 +19,7 @@ export interface HostState {
 import { wrapperLine } from '../psLine.js';
 
 export interface WrapperState { state: 'none' | 'ours' | 'partial' | 'stale' | 'ansi'; files: string[]; policy: string | null }
-export interface ConnectionsState { answerPermissions: boolean; sdkChats?: boolean; /** where new chats start (terminal sessions) */ newChatIn?: 'wsl' | 'windows' | 'desktop'; /** how a message to a Claude desktop chat is delivered */ desktopSend?: 'real' | 'hook'; helper: boolean; /** the claude wrapper in the PowerShell profiles */ wrapper?: WrapperState | null; /** full path of pet-helper.exe (for the PowerShell wrapper line) */ helperPath?: string; windows: HostState; wsl: HostState; /** other WSL distros that are followed */ others?: Array<HostState & { id: string }> }
+export interface ConnectionsState { /** Linux / macOS: one local host, none of the Windows parts */ native?: boolean; answerPermissions: boolean; sdkChats?: boolean; /** where new chats start (terminal sessions) */ newChatIn?: 'wsl' | 'windows' | 'desktop'; /** how a message to a Claude desktop chat is delivered */ desktopSend?: 'real' | 'hook'; helper: boolean; /** the claude wrapper in the PowerShell profiles */ wrapper?: WrapperState | null; /** full path of pet-helper.exe (for the PowerShell wrapper line) */ helperPath?: string; windows: HostState; wsl: HostState; /** other WSL distros that are followed */ others?: Array<HostState & { id: string }> }
 export interface ConnectionsHost {
   copy?(text: string): void;
   get(): Promise<ConnectionsState>;
@@ -52,9 +52,9 @@ export function createConnectionsTab(host: ConnectionsHost) {
     const connected = h.events;
     const title = id === 'windows'
       ? L('Windows: PowerShell, CMD, терминалы, приложение Claude', 'Windows: PowerShell, CMD, terminals, the Claude app', 'Windows：PowerShell、CMD、终端、Claude 应用')
-      : `WSL${h.distro ? ` (${h.distro})` : ''}${h.port ? ` · ${L('порт', 'port', '端口')} ${h.port}` : ''}`;
+      : `${state?.native ? L('Этот компьютер', 'This computer', '本机') : `WSL${h.distro ? ` (${h.distro})` : ''}`}${h.port ? ` · ${L('порт', 'port', '端口')} ${h.port}` : ''}`;
     row.append(el('div', 's-title', title));
-    if (!h.up) { row.append(el('div', 's-hint', id === 'windows' ? L('Приёмник не запущен (порт занят?).', 'The receiver is not running (port busy?).', '接收器未运行（端口被占用？）') : L('Нет связи с WSL.', 'No connection to WSL.', '无法连接 WSL。'))); return row; }
+    if (!h.up) { row.append(el('div', 's-hint', id === 'windows' ? L('Приёмник не запущен (порт занят?).', 'The receiver is not running (port busy?).', '接收器未运行（端口被占用？）') : state?.native ? L('Мост питомца не запущен.', 'The pet bridge is not running.', '宠物桥接未运行。') : L('Нет связи с WSL.', 'No connection to WSL.', '无法连接 WSL。'))); return row; }
     const chips = el('div', 'c-chips');
     chips.append(chip(h.events, L('события', 'events', '事件')), chip(h.mailbox, L('сообщения в сессии', 'messages to sessions', '向会话发消息')), chip(h.permissions, L('разрешения', 'permissions', '权限')));
     row.append(chips);
@@ -94,8 +94,8 @@ export function createConnectionsTab(host: ConnectionsHost) {
   const render = (box: HTMLElement) => {
     if (!state) { box.append(el('div', 's-hint', L('Загрузка…', 'Loading…', '加载中…'))); void load(); return; }
     box.append(el('div', 's-hint', L('Питомец видит сессии Claude Code там, где подключены хуки. Хуки пишутся в ~/.claude/settings.json с показом изменений и копией файла.', 'The pet sees Claude Code sessions wherever the hooks are connected. They are written to ~/.claude/settings.json after showing the changes, with a backup.', '宠物能看到已连接钩子的 Claude Code 会话。钩子会在显示改动后写入 ~/.claude/settings.json，并保留备份。')));
-    box.append(hostRow('windows', state.windows));
-    if (state.helperPath && host.copy) {
+    if (!state.native) box.append(hostRow('windows', state.windows));
+    if (!state.native && state.helperPath && host.copy) {
       const w = el('div', 's-section c-host');
       w.append(el('div', 's-title', L('Windows: Esc, «Стоп» и ввод из питомца', 'Windows: Esc, Stop and typing from the pet', 'Windows：从宠物按 Esc、停止和输入')));
       const wr = state.wrapper;
@@ -119,13 +119,13 @@ export function createConnectionsTab(host: ConnectionsHost) {
     }
     box.append(hostRow('wsl', state.wsl));
     for (const o of state.others ?? []) box.append(hostRow(o.id, o));
-    if (!state.helper) box.append(el('div', 's-hint c-err', L('pet-helper.exe не найден: сообщения в Windows-сессии доставляться не будут.', 'pet-helper.exe was not found: messages to Windows sessions cannot be delivered.', '未找到 pet-helper.exe：无法向 Windows 会话发送消息。')));
+    if (!state.native && !state.helper) box.append(el('div', 's-hint c-err', L('pet-helper.exe не найден: сообщения в Windows-сессии доставляться не будут.', 'pet-helper.exe was not found: messages to Windows sessions cannot be delivered.', '未找到 pet-helper.exe：无法向 Windows 会话发送消息。')));
     const perm = el('label', 's-radio'); perm.style.display = 'block';
     const cb = el('input'); cb.type = 'checkbox'; cb.checked = state.answerPermissions; cb.disabled = busy;
     cb.addEventListener('change', () => void run(host.answerPermissions(cb.checked)));
     perm.append(cb, el('span', '', ` ${L('Отвечать на запросы разрешений в питомце', 'Answer permission questions in the pet', '在宠物中回答权限请求')}`));
     box.append(perm, el('div', 's-hint', L('Выключено по умолчанию. Если питомец не ответил за 30 с, Claude Code покажет обычный диалог.', 'Off by default. If the pet does not answer within 30 s, Claude Code shows its normal dialog.', '默认关闭。如果宠物在 30 秒内未回答，Claude Code 会显示常规对话框。')));
-    if (host.newChatIn) {
+    if (host.newChatIn && !state.native) {
       const nc = el('div', 's-section');
       nc.append(el('div', 's-title', L('Где запускать новые чаты', 'Where new chats start', '新聊天在哪里启动')));
       const opts: Array<['wsl' | 'windows' | 'desktop', string]> = [['wsl', 'WSL'], ['windows', L('Windows (через обёртку)', 'Windows (through the wrapper)', 'Windows（通过包装器）')], ['desktop', L('Приложение Claude (нужна папка Windows)', 'The Claude app (needs a Windows folder)', 'Claude 应用（需要 Windows 文件夹）')]];
@@ -139,7 +139,7 @@ export function createConnectionsTab(host: ConnectionsHost) {
       nc.append(el('div', 's-hint', L('Новый чат открывает окно терминала с Claude Code в выбранной папке. Если WSL недоступен, чат стартует в Windows.', 'A new chat opens a terminal window with Claude Code in the chosen folder. If WSL is unavailable, it starts on Windows.', '新聊天会在所选文件夹中打开一个运行 Claude Code 的终端窗口。如果 WSL 不可用，则在 Windows 中启动。')));
       box.append(nc);
     }
-    if (host.desktopSend) {
+    if (host.desktopSend && !state.native) {
       const ds = el('div', 's-section');
       ds.append(el('div', 's-title', L('Сообщения в чат приложения Claude', 'Messages to a Claude app chat', '发送到 Claude 应用聊天的消息')));
       const dopts: Array<['real' | 'hook', string]> = [['real', L('Как обычное сообщение (окно приложения может выйти вперёд)', 'As a normal message (the app window may come forward)', '作为普通消息（应用窗口可能会弹到前台）')], ['hook', L('Тихо через хук (в приложении бледной плашкой)', 'Quietly through the hook (faint text in the app)', '通过钩子静默发送（在应用中显示为淡色文字）')]];

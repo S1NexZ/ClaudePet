@@ -4,7 +4,7 @@ import { join, dirname } from 'node:path';
 import { homedir, userInfo } from 'node:os';
 import { mkdirSync, watch, type FSWatcher } from 'node:fs';
 import { spawn, execFile } from 'node:child_process';
-import { appendFileSync, existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { appendFileSync, existsSync, readFileSync, writeFileSync, unlinkSync } from 'node:fs';
 import { loadPet } from './sprite/loadPet.js';
 import { listModels, pickModel, MODEL_ID, DEFAULT_MODEL } from './models/registry.js';
 import { installModelFromZip, installModelFromDir, removeModel, scanPetFolder, ModelError } from './models/install.js';
@@ -17,6 +17,7 @@ import { checkLatest } from './updates.js';
 import { planProfile, removeFromProfile, profileState, profilePaths, readProfile, applyProfile } from './psProfile.js';
 import { overAny, type Rect } from './hitTest.js';
 import { placeStage, restoreAnchor, IDLE_H, type Anchor } from './placement.js';
+import { nativeTerminalCommand, nativeFocusCommand } from './nativeTerminal.js';
 import { terminalCommand, windowsTerminalCommand, newSessionCommand, windowsNewSessionCommand, matchNewSession } from './terminal.js';
 import { createWindowsHost, WINDOWS_HOST_PORT } from './hub/windowsHost.js';
 import { createWslHost, parseDistroList, secondaryDistros, portForDistro, type WslHost } from './hub/wslHost.js';
@@ -43,6 +44,14 @@ const panelArg = process.argv.includes('--panel');
 const iconArg = arg('dump-icon');
 const atlasArg = arg('dump-atlas'), shotArg = arg('screenshot'), shotDelay = Number(arg('shot-delay') ?? 3000);
 const demo = process.env.CLAUDE_PET_DEMO_PROMPT ? { prompt: process.env.CLAUDE_PET_DEMO_PROMPT, cwd: process.env.CLAUDE_PET_DEMO_CWD ?? '' } : null;
+/** Linux and macOS: one local bridge, no WSL, no Windows host, no desktop-app automation */
+const NATIVE = process.platform !== 'win32';
+if (process.platform === 'linux') { // a transparent, always-on-top overlay needs X11 (XWayland under Wayland) and a transparent visual
+  app.commandLine.appendSwitch('ozone-platform', 'x11');
+  app.commandLine.appendSwitch('enable-transparent-visuals');
+  app.commandLine.appendSwitch('disable-gpu-compositing');
+}
+const onPath = (bin: string) => (process.env.PATH ?? '').split(':').some((d) => d && existsSync(join(d, bin)));
 const theme = process.env.CLAUDE_PET_THEME;
 if (theme === 'light' || theme === 'dark') nativeTheme.themeSource = theme;
 
@@ -83,6 +92,8 @@ if (primary) app.whenReady().then(async () => {
     webPreferences: { preload: join(__dirname, 'preload.cjs'), contextIsolation: true, sandbox: true },
   });
   win.setAlwaysOnTop(true, 'floating');
+  if (NATIVE) win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true, skipTransformProcessType: true }); // the pet follows the user across desktops
+  if (process.platform === 'darwin') app.dock?.hide(); // a menu-bar style app: no Dock icon
   win.setIgnoreMouseEvents(true, { forward: true }); // click-through except over the pet's own elements
 
   // ---- hosts: a bridge process in every followed WSL distro (the default one is the primary), plus the Windows host (this process); the renderer sees one merged session list ----
@@ -96,10 +107,10 @@ if (primary) app.whenReady().then(async () => {
   const toAllBridges = (cmd: object) => { for (const h of wslHosts.values()) h.send(cmd); };
   const hostParts = (): HostPart[] => [
     ...[...wslHosts.values()].map((h) => ({ host: h.id, snap: hostSnap.get(h.id) ?? null, distro: h.secondary || wslHosts.size > 1 ? h.name() : undefined })),
-    { host: 'windows', snap: winSnap },
+    ...(NATIVE ? [] : [{ host: 'windows', snap: winSnap }]),
   ];
   // the desktop app's own session list: chat titles, archived chats, ids to open them in the app (re-read at most every 5 s, changed files only)
-  const desktopReg = createDesktopRegistry(() => findRegistryRoots(process.env.LOCALAPPDATA ?? '', process.env.APPDATA ?? ''));
+  const desktopReg = createDesktopRegistry(() => (NATIVE ? [] : findRegistryRoots(process.env.LOCALAPPDATA ?? '', process.env.APPDATA ?? '')));
   let desktopMap = new Map<string, DesktopEntry>();
   let desktopAt = 0;
   const desktopEntries = () => {
@@ -129,7 +140,7 @@ if (primary) app.whenReady().then(async () => {
   const regWatchers = new Map<string, FSWatcher>();
   let regTimer: NodeJS.Timeout | null = null;
   const watchRegistry = () => {
-    for (const r of findRegistryRoots(process.env.LOCALAPPDATA ?? '', process.env.APPDATA ?? '')) {
+    for (const r of (NATIVE ? [] : findRegistryRoots(process.env.LOCALAPPDATA ?? '', process.env.APPDATA ?? ''))) {
       if (regWatchers.has(r)) continue;
       try {
         const w = watch(r, { recursive: true }, () => { if (!regTimer) regTimer = setTimeout(() => { regTimer = null; desktopAt = 0; pushSnapshot(); }, 400); });
@@ -145,11 +156,11 @@ if (primary) app.whenReady().then(async () => {
   // the install folder must stay replaceable by the next installer). A busy copy is refreshed later.
   const installedHelper = app.isPackaged ? join(process.resourcesPath, 'helper', 'pet-helper.exe') : join(__dirname, '..', 'helper', 'pet-helper.exe');
   const helperDir = join(process.env.LOCALAPPDATA ?? app.getPath('userData'), 'ccPet', 'bin');
-  const firstSync = syncHelper(installedHelper, helperDir);
+  const firstSync = NATIVE ? { path: undefined as string | undefined, error: undefined as string | undefined, updated: false } : syncHelper(installedHelper, helperDir);
   if (firstSync.error) log(`pet-helper copy: ${firstSync.error}`);
   const helperPath = firstSync.path;
   if (firstSync.error && helperPath !== installedHelper) setInterval(() => { const r = syncHelper(installedHelper, helperDir); if (r.updated) log('pet-helper copy updated'); }, 10 * 60_000).unref();
-  const winHost = createWindowsHost({
+  const winHost = NATIVE ? (nullWindowsHost() as unknown as ReturnType<typeof createWindowsHost>) : createWindowsHost({
     dataDir: app.getPath('userData'), claudeHome: join(homedir(), '.claude'), port: WINDOWS_HOST_PORT, helperPath,
     permissionsFromPet: () => settings.answerPermissions,
     out: (m) => { if (m.type === 'snapshot') { winSnap = m; pushSnapshot(); } else hostMessage('windows', m); },
@@ -175,19 +186,33 @@ if (primary) app.whenReady().then(async () => {
     const host = wslHosts.get(hostOf(s.id, hostParts()) ?? 'wsl') ?? primary();
     if (!(await host.markTerminal(s.id, mark))) return false;
     await new Promise((r) => setTimeout(r, 350)); // let the terminal apply the title
+    if (NATIVE) return focusNative(mark);
     return focusByTitle(mark);
+  };
+  const focusNative = (title: string): Promise<boolean> => new Promise((resolve) => {
+    const c = nativeFocusCommand(process.platform, title, onPath);
+    if (!c) { resolve(false); return; }
+    execFile(c.file, c.args, { timeout: 5000 }, (err, out) => resolve(!err && !/none/.test(String(out))));
+  });
+  const openNativeTerminal = (o: { cwd: string; claude: string; sessionId?: string; prompt?: string }): boolean => {
+    const c = nativeTerminalCommand(process.platform, o, onPath);
+    if (!c) { void info(L('Не найден терминал', 'No terminal found', '未找到终端'), L('Установите эмулятор терминала (gnome-terminal, konsole, xterm…), чтобы питомец мог открывать сессии.', 'Install a terminal emulator (gnome-terminal, konsole, xterm…) so the pet can open sessions.', '请安装终端模拟器（gnome-terminal、konsole、xterm…），宠物才能打开会话。')); return false; }
+    const p = spawn(c.file, c.args, { detached: true, stdio: 'ignore' });
+    p.on('error', (e) => log(`terminal (${c.file}) failed: ${e.message}`));
+    p.unref();
+    return true;
   };
   const startHost = (o: { distro: string; port: number }) => {
     const id = o.distro ? `wsl:${o.distro}` : 'wsl';
     if (wslHosts.has(id)) return;
     const h = createWslHost({
-      id, distro: o.distro, port: o.port, bridgePath, secondary: !!o.distro, log,
+      id, distro: o.distro, port: o.port, bridgePath, native: NATIVE, secondary: !!o.distro, log,
       onSnapshot: (snap) => { if (snap) hostSnap.set(id, snap); else hostSnap.delete(id); pushSnapshot(); },
       onMessage: (m) => hostMessage(id, m),
       onUp: (v) => { hostUp.set(id, v); sendUp(); },
       onReady: (host, r) => {
         if (!host.secondary) {
-          if (!r.claude) void info(L('Claude Code не найден в WSL', 'Claude Code not found in WSL', '在 WSL 中未找到 Claude Code'), L('Установи Claude Code в WSL, чтобы питомец мог запускать сессии.', 'Install Claude Code in WSL so the pet can start sessions.', '请在 WSL 中安装 Claude Code，宠物才能启动会话。'));
+          if (!r.claude) void info(NATIVE ? L('Claude Code не найден', 'Claude Code not found', '未找到 Claude Code') : L('Claude Code не найден в WSL', 'Claude Code not found in WSL', '在 WSL 中未找到 Claude Code'), NATIVE ? L('Установи Claude Code (claude.com/claude-code), чтобы питомец мог запускать сессии.', 'Install Claude Code (claude.com/claude-code) so the pet can start sessions.', '请安装 Claude Code（claude.com/claude-code），宠物才能启动会话。') : L('Установи Claude Code в WSL, чтобы питомец мог запускать сессии.', 'Install Claude Code in WSL so the pet can start sessions.', '请在 WSL 中安装 Claude Code，宠物才能启动会话。'));
           hooksManual = false;
         }
         host.send({ type: 'language', lang: getLang() });
@@ -217,13 +242,13 @@ if (primary) app.whenReady().then(async () => {
       startHost({ distro: name, port: portForDistro(name, taken) });
     }
   });
-  const distroTimer = setInterval(scanDistros, 30_000);
-  setTimeout(scanDistros, 4000);
+  const distroTimer = NATIVE ? setInterval(() => undefined, 1 << 30) : setInterval(scanDistros, 30_000);
+  if (!NATIVE) setTimeout(scanDistros, 4000);
 
   // ---- settings, tray, hotkey ----
   const applySettings = () => {
     saveSettings(userFile('settings.json'), settings);
-    if (app.isPackaged) app.setLoginItemSettings({ openAtLogin: settings.autostart });
+    if (app.isPackaged) { if (process.platform === 'linux') setLinuxAutostart(settings.autostart); else app.setLoginItemSettings({ openAtLogin: settings.autostart }); }
   };
   /** Bring the pet to the front with the chat open (hotkey, second launch, /pet skill). */
   const summon = () => { win.show(); win.setAlwaysOnTop(true, 'floating'); win.focus(); win.webContents.send('pet:summon'); };
@@ -241,7 +266,7 @@ if (primary) app.whenReady().then(async () => {
   /** Guided terminal setup: shows the one command to run in WSL (it asks before changing ~/.bashrc, backs it up, can be undone). */
   const showTerminalSetup = async () => {
     const script = app.isPackaged ? join(process.resourcesPath, 'scripts', 'install-shell-integration.sh') : join(__dirname, '../..', 'scripts', 'install-shell-integration.sh');
-    const cmd = `bash '${toWslPath(script).replace(/'/g, `'\\''`)}'`;
+    const cmd = `bash '${(NATIVE ? script : toWslPath(script)).replace(/'/g, `'\\''`)}'`;
     const r = await dialog.showMessageBox(win, confirmOptions({
       type: 'question', action: L('Копировать команду', 'Copy command', '复制命令'), cancel: L('Закрыть', 'Close', '关闭'), message: L('Подключить терминал (WSL)', 'Connect the terminal (WSL)', '连接终端（WSL）'),
       detail: L('Чтобы обычная команда `claude` запускалась через ccPet (общая сессия с питомцем), выполните в окне WSL-терминала:', 'To make the plain `claude` command run through ccPet (one shared session with the pet), run this in a WSL terminal:', '要让普通的 `claude` 命令通过 ccPet 运行（与宠物共用一个会话），请在 WSL 终端中运行：') + '\n\n' + cmd +
@@ -285,7 +310,7 @@ if (primary) app.whenReady().then(async () => {
     { type: 'separator' },
     { label: L('Выйти', 'Quit', '退出'), click: () => app.quit() },
   ]);
-  const tray = new Tray(nativeImage.createFromPath(join(__dirname, 'icon.png')).resize({ width: 32, height: 32 }));
+  const tray = new Tray(nativeImage.createFromPath(join(__dirname, 'icon.png')).resize({ width: process.platform === 'darwin' ? 18 : 32, height: process.platform === 'darwin' ? 18 : 32 }));
   tray.setToolTip('ccPet');
   tray.on('click', toggleWindow);
   tray.on('right-click', () => tray.popUpContextMenu(trayMenu()));
@@ -393,6 +418,10 @@ if (primary) app.whenReady().then(async () => {
       if (!prompt) { void shell.openExternal(`claude://code/new?folder=${encodeURIComponent(String(cmd.cwd))}`).then(() => focusDesktopApp()).catch(() => undefined); return; }
       log('new chat in the desktop app needs a Windows folder; starting it in a terminal instead');
     }
+    if (cmd.type === 'start' && !settings.sdkChats && NATIVE) {
+      openNativeTerminal({ cwd: String(cmd.cwd), claude: primary().claude(), prompt: String(cmd.prompt ?? '') });
+      return;
+    }
     if (cmd.type === 'start' && !settings.sdkChats) { // no Agent SDK: a new chat is a new session in a real terminal (the pet sees it through the hooks)
       if (settings.newChatIn === 'windows' || !primary().isUp()) {
         const prompt = String(cmd.prompt ?? '').trim();
@@ -469,7 +498,7 @@ if (primary) app.whenReady().then(async () => {
     const last = lastEventByHost(lastSnapshot?.sessions ?? []);
     const hosts = (await Promise.all([...wslHosts.values()].map(hostRowState))).map((h) => ({ ...h, lastEventAt: last[h.id] ?? null }));
     return {
-      answerPermissions: settings.answerPermissions, sdkChats: settings.sdkChats, newChatIn: settings.newChatIn, desktopSend: settings.desktopSend, helper: !!helperPath, helperPath, wrapper: wrapperState(),
+      native: NATIVE, answerPermissions: settings.answerPermissions, sdkChats: settings.sdkChats, newChatIn: settings.newChatIn, desktopSend: settings.desktopSend, helper: !!helperPath, helperPath, wrapper: wrapperState(),
       windows: (() => { const sl = winHost.statusLine({}); return { ...winHost.state(settings.answerPermissions), port: winHost.port, up: winUp, statusLine: sl.kind, statusLineDiff: sl.diff, statusLineError: sl.error, lastEventAt: last.windows ?? null }; })(),
       wsl: hosts.find((x) => x.id === 'wsl')!,
       others: hosts.filter((x) => x.id !== 'wsl'),
@@ -485,7 +514,7 @@ if (primary) app.whenReady().then(async () => {
   const psProfiles = () => profilePaths(app.getPath('documents')).filter((p, i) => i === 0 || existsSync(dirname(p)));
   /** profiles do not run under the Restricted / AllSigned execution policy: then the wrapper line has no effect (we never change the policy) */
   let psPolicy: string | null = null;
-  execFile('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', 'Get-ExecutionPolicy'], { windowsHide: true, timeout: 15000 }, (err, out) => { if (!err) psPolicy = String(out).trim(); });
+  if (!NATIVE) execFile('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', 'Get-ExecutionPolicy'], { windowsHide: true, timeout: 15000 }, (err, out) => { if (!err) psPolicy = String(out).trim(); });
   const wrapperState = () => {
     if (!helperPath) return null;
     const states = psProfiles().map((p) => { try { return profileState(readProfile(p), helperPath); } catch { return 'ansi' as const; } });
@@ -640,6 +669,7 @@ if (primary) app.whenReady().then(async () => {
   });
   const openWslTerminal = (s: { id: string; cwd: string; owned: boolean }) => {
     const th = wslHosts.get(hostOf(s.id, hostParts()) ?? 'wsl') ?? primary();
+    if (NATIVE) { setTimeout(() => openNativeTerminal({ cwd: s.cwd, claude: th.claude(), sessionId: s.id }), s.owned ? 500 : 0); return; }
     const launch = (useWt: boolean) => {
       const c = terminalCommand({ distro: th.name(), cwd: s.cwd, claude: th.claude(), sessionId: s.id }, useWt);
       const p = spawn(c.file, c.args, { detached: true, stdio: 'ignore' });
@@ -750,12 +780,12 @@ if (primary) app.whenReady().then(async () => {
   if (iconArg) setTimeout(async () => {
     // app icon: the pet's face on a dark rounded tile, cut from the cleaned atlas
     const url: string = await win.webContents.executeJavaScript(`new Promise((ok) => { const t = setInterval(() => { if (!window.__petAtlasReady) return; clearInterval(t); ok((() => {
-      const c = document.createElement('canvas'); c.width = c.height = 256;
+      const c = document.createElement('canvas'); c.width = c.height = 512;
       const x = c.getContext('2d');
-      x.beginPath(); x.roundRect(0, 0, 256, 256, 56); x.clip();
-      x.fillStyle = '#1e1e22'; x.fillRect(0, 0, 256, 256);
+      x.beginPath(); x.roundRect(0, 0, 512, 512, 112); x.clip();
+      x.fillStyle = '#1e1e22'; x.fillRect(0, 0, 512, 512);
       x.imageSmoothingQuality = 'high';
-      x.drawImage(window.__petAtlas, 26, 0, 140, 140, 8, 20, 240, 240);
+      x.drawImage(window.__petAtlas, 26, 0, 140, 140, 16, 40, 480, 480);
       return c.toDataURL('image/png');
     })()); }, 50); })`);
     writeFileSync(iconArg, Buffer.from(url.split(',')[1], 'base64'));
@@ -773,3 +803,24 @@ if (primary) app.whenReady().then(async () => {
 });
 app.on('will-quit', () => globalShortcut.unregisterAll());
 app.on('window-all-closed', () => app.quit());
+
+/** Stand-in for the Windows host on Linux / macOS: reports "nothing there" so the shared code paths need no special cases. */
+function nullWindowsHost() {
+  const st = { installed: false, events: false, mailbox: false, permissions: false, stale: false, diff: '', settingsPath: '', error: undefined as string | undefined };
+  return {
+    port: 0, start: async () => false, stop: async () => undefined, tick: () => undefined, handle: async () => undefined, pushUsage: async () => undefined,
+    state: () => st, statusLine: () => ({ kind: 'none', diff: '', error: undefined as string | undefined }), apply: () => undefined, remove: () => undefined, removeDiff: () => '',
+    markTerminal: async () => false,
+  };
+}
+
+/** Linux has no login-item API in Electron: a .desktop file in the XDG autostart folder does the same. */
+function setLinuxAutostart(on: boolean): void {
+  const f = join(process.env.XDG_CONFIG_HOME || join(homedir(), '.config'), 'autostart', 'ccpet.desktop');
+  try {
+    if (!on) { if (existsSync(f)) unlinkSync(f); return; }
+    mkdirSync(dirname(f), { recursive: true });
+    const exe = process.env.APPIMAGE || process.execPath;
+    writeFileSync(f, `[Desktop Entry]\nType=Application\nName=ccPet\nExec="${exe}"\nX-GNOME-Autostart-enabled=true\n`);
+  } catch { /* non-fatal */ }
+}

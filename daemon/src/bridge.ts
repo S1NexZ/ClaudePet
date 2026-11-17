@@ -3,6 +3,7 @@ import { readFileSync, existsSync, readlinkSync, writeFileSync } from 'node:fs';
 import type { SessionStore } from './sessionStore.js';
 import type { HookPayload } from './hookSocket.js';
 import { toWslPath } from './paths.js';
+import { procName, ttyPath } from './procinfo.js';
 import { interruptedSince, readOriginalCwd, readEntrypoint, PET_MARKER } from './transcript.js';
 import type { Mailbox } from './mailbox.js';
 import { summarize } from './summary.js';
@@ -34,8 +35,8 @@ export function snapshotOf(store: SessionStore): Snapshot {
 /** Writes a title-setting escape sequence to the terminal (pty) a process is attached to. */
 export function setTtyTitle(pid: number, text: string): boolean {
   try {
-    const tty = readlinkSync(`/proc/${pid}/fd/0`);
-    if (!tty.startsWith('/dev/pts/')) return false;
+    const tty = ttyPath(pid);
+    if (!tty) return false;
     writeFileSync(tty, `\x1b]0;${text.replace(/[\x00-\x1f\x7f]/g, ' ')}\x07`);
     return true;
   } catch { return false; }
@@ -83,7 +84,7 @@ export function createBridge(o: {
   const needSdk = () => { if (!sdkOn) throw new Error(L('Запуск Claude Code через Agent SDK выключен. Включите его в «Настройки → Подключения» или работайте через терминал.', 'Starting Claude Code through the Agent SDK is off. Turn it on in Settings → Connections, or work in a terminal.', '通过 Agent SDK 启动 Claude Code 已关闭。请在“设置 → 连接”中开启，或在终端中使用。')); };
   const WORKING = new Set(['thinking', 'reading', 'writing', 'running', 'testing', 'waiting', 'subagent']);
   const proc = o.proc ?? {
-    name: (pid: number) => { try { return readFileSync(`/proc/${pid}/comm`, 'utf8').trim(); } catch { return null; } },
+    name: procName,
     kill: (pid: number) => { process.kill(pid, 'SIGTERM'); },
   };
   const transcripts = new Map<string, string>();

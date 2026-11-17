@@ -4,6 +4,7 @@
 import { connect } from 'node:net';
 import { request } from 'node:http';
 import { readFileSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 
@@ -15,14 +16,25 @@ function isOneShot(args) {
   const streamIn = args.some((a, i) => a === '--input-format=stream-json' || (a === '--input-format' && args[i + 1] === 'stream-json'));
   return print && !streamIn;
 }
+/** Parent pid (0 if unknown): /proc on Linux, `ps` on macOS. */
+function parentOf(pid) {
+  try {
+    if (process.platform === 'linux') { const st = readFileSync(`/proc/${pid}/stat`, 'utf8'); return Number(st.slice(st.lastIndexOf(')') + 2).split(' ')[1]) || 0; }
+    return Number(execFileSync('ps', ['-o', 'ppid=', '-p', String(pid)], { encoding: 'utf8', timeout: 2000, stdio: ['ignore', 'pipe', 'ignore'] }).trim()) || 0;
+  } catch { return 0; }
+}
+/** Command line of a process: /proc on Linux, `ps` on macOS. */
+function cmdlineOf(pid) {
+  if (process.platform === 'linux') return readFileSync(`/proc/${pid}/cmdline`, 'utf8').split('\0');
+  return execFileSync('ps', ['-o', 'command=', '-p', String(pid)], { encoding: 'utf8', timeout: 2000, stdio: ['ignore', 'pipe', 'ignore'] }).trim().split(/\s+/);
+}
 function oneShot(pid) {
   for (let i = 0; i < 3 && pid > 1; i++) {
     try {
-      const args = readFileSync(`/proc/${pid}/cmdline`, 'utf8').split('\0');
+      const args = cmdlineOf(pid);
       // only claude's own command line counts (a shell or another ancestor may have a -p option of its own)
       if (args.some((x) => /(^|\/)claude(\.exe)?$|claude-code\/cli\.js$/i.test(x)) && isOneShot(args)) return true;
-      const st = readFileSync(`/proc/${pid}/stat`, 'utf8');
-      pid = Number(st.slice(st.lastIndexOf(')') + 2).split(' ')[1]) || 0;
+      pid = parentOf(pid);
     } catch { return false; }
   }
   return false;
@@ -83,11 +95,6 @@ let input = '';
 process.stdin.setEncoding('utf8');
 process.stdin.on('data', (d) => { input += d; });
 process.stdin.on('error', done);
-/** Parent pid from /proc (0 if unknown). */
-const parentOf = (pid) => {
-  try { const st = readFileSync(`/proc/${pid}/stat`, 'utf8'); return Number(st.slice(st.lastIndexOf(')') + 2).split(' ')[1]) || 0; }
-  catch { return 0; }
-};
 
 process.stdin.on('end', () => {
   let event;

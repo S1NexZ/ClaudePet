@@ -1,4 +1,5 @@
 import { readFileSync, writeFileSync, copyFileSync, existsSync, mkdirSync } from 'node:fs';
+import { nodeCmd } from './nodeCmd.js';
 import { dirname } from 'node:path';
 import { lineDiff } from './installHooks.js';
 
@@ -31,7 +32,7 @@ export function planStatusLine(current: Settings, scriptPath: string, nodePath: 
   // Windows: Claude Code runs the line with Git Bash, or PowerShell when there is none. An unquoted forward-slash path runs in both
   // (a quoted path followed by an argument is a syntax error in PowerShell); paths with spaces must come in their short 8.3 form.
   if (opts.exe && /\s/.test(opts.exe)) throw new Error('statusLine helper path must not contain spaces (use the short 8.3 path)');
-  const base = opts.exe ? `${opts.exe.replace(/\\/g, '/')} statusline` : `"${nodePath}" "${scriptPath}"`;
+  const base = opts.exe ? `${opts.exe.replace(/\\/g, '/')} statusline` : `${nodeCmd(nodePath)} "${scriptPath}"`;
   const tail = opts.exe ? '' : ' 2>/dev/null || true';
   const orig = isOurs(existing) ? chainedOriginal(existing) : existing ?? null;
   const next: Settings = JSON.parse(JSON.stringify(current));

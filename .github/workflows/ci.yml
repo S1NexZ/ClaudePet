@@ -1,0 +1,78 @@
+name: CI
+
+on:
+  push:
+    branches: [v0.3-dev, main]
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Tests (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: npm }
+      - run: npm ci
+      - run: npm test
+      - run: npm run build
+      - name: Python wrapper tests
+        if: runner.os != 'Windows'
+        run: python3 scripts/test-pet-claude.py
+
+  package:
+    name: Package (${{ matrix.name }})
+    needs: test
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { name: linux, os: ubuntu-latest, script: 'dist:linux' }
+          - { name: macos, os: macos-latest, script: 'dist:mac' }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - run: npm ci
+      - run: cd ui && npm ci
+      - run: npm run ${{ matrix.script }}
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ccPet-${{ matrix.name }}
+          path: |
+            ui/release/*.AppImage
+            ui/release/*.deb
+            ui/release/*.dmg
+            ui/release/*.zip
+          if-no-files-found: error
+
+  smoke-linux:
+    name: Starts and connects (Linux)
+    needs: package
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with: { name: ccPet-linux, path: dl }
+      - name: Install a fake claude and run the app under Xvfb
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq xvfb libfuse2t64 || sudo apt-get install -y -qq xvfb libfuse2
+          chmod +x dl/*.AppImage
+          mkdir -p "$HOME/.local/bin" && printf '#!/bin/sh\necho claude\n' > "$HOME/.local/bin/claude" && chmod +x "$HOME/.local/bin/claude"
+          xvfb-run -a dl/*.AppImage --appimage-extract-and-run --no-sandbox --screenshot=/tmp/shot.png --shot-delay=9000 || true
+          test -s /tmp/shot.png
+          LOG="$HOME/.config/Claude Pet/pet.log"
+          cat "$LOG"
+          grep -q "bridge wsl ready" "$LOG"

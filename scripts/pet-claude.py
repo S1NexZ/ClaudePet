@@ -27,7 +27,7 @@ def parse_args(argv):
 def resolve_command(cmd):
     """`claude` is often only on PATH in interactive shells (~/.local/bin is added by .bashrc/.profile): fall back to the usual install places."""
     if cmd[0] == 'claude' and not shutil.which('claude'):
-        for p in ('~/.local/bin/claude', '~/.claude/local/claude'):
+        for p in ('~/.local/bin/claude', '~/.claude/local/claude', '/opt/homebrew/bin/claude', '/usr/local/bin/claude'):
             p = os.path.expanduser(p)
             if os.path.isfile(p) and os.access(p, os.X_OK):
                 return [p] + cmd[1:]
