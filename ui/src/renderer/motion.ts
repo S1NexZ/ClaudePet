@@ -28,10 +28,13 @@ export function createMotion(p: MotionParts, reduce: boolean) {
   const dot = p.chip.querySelector<HTMLElement>('#dot')!;
   gsap.set(label, { maxWidth: 0, marginLeft: -8, autoAlpha: 0 });
   gsap.set(detail, { maxWidth: 0, marginLeft: -8, autoAlpha: 0 });
-  gsap.set(dot, { scale: 1.3 });
+  // at rest the dot and the ring are the same size (REST px) and sized by layout, not by transform scale: both are centred by the flex row,
+  // so they stay level on any display scaling (separately scaled layers were snapped to whole pixels differently)
+  const REST = 15;
+  gsap.set(dot, { width: REST, height: REST });
   const chip = gsap.timeline({ paused: true, defaults: { ease: EASE } })
     .to(p.chip, { y: 0, '--bgo': 1, duration: 0.42 }, 0)
-    .to(dot, { scale: 1, duration: 0.4 }, 0)
+    .to(dot, { width: 10, height: 10, duration: 0.4 }, 0)
     .to(label, { maxWidth: 220, marginLeft: 0, duration: 0.4 }, 0.02)
     .to(label, { autoAlpha: 1, duration: 0.3 }, 0.1)
     .to(detail, { maxWidth: 260, marginLeft: 0, duration: 0.42 }, 0.08)
@@ -39,10 +42,10 @@ export function createMotion(p: MotionParts, reduce: boolean) {
   chip.timeScale(speed).progress(0);
 
   // ---- the usage ring: a small quiet arc by the pet; it grows and shows its number when awake ----
-  gsap.set(p.ring, { scale: 0.7, opacity: 1, transformOrigin: '50% 50%' });
+  gsap.set(p.ring, { width: REST, height: REST, opacity: 1 });
   gsap.set(ringText, { opacity: 0 });
   const ring = gsap.timeline({ paused: true, defaults: { ease: EASE } })
-    .to(p.ring, { scale: 1, opacity: 1, duration: 0.4, ease: 'back.out(1.4)' }, 0)
+    .to(p.ring, { width: 24, height: 24, opacity: 1, duration: 0.4, ease: 'back.out(1.4)' }, 0)
     .to(ringText, { opacity: 1, duration: 0.25 }, 0.1);
   ring.timeScale(speed).progress(0);
 
