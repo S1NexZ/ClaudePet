@@ -14,11 +14,12 @@ export interface HostState {
   statusLineDiff?: string;
   statusLineError?: string;
 }
-export interface ConnectionsState { answerPermissions: boolean; sdkChats?: boolean; helper: boolean; /** full path of pet-helper.exe (for the PowerShell wrapper line) */ helperPath?: string; windows: HostState; wsl: HostState; /** other WSL distros that are followed */ others?: Array<HostState & { id: string }> }
+export interface WrapperState { state: 'none' | 'ours' | 'partial' | 'stale'; files: string[]; policy: string | null }
+export interface ConnectionsState { answerPermissions: boolean; sdkChats?: boolean; helper: boolean; /** the claude wrapper in the PowerShell profiles */ wrapper?: WrapperState | null; /** full path of pet-helper.exe (for the PowerShell wrapper line) */ helperPath?: string; windows: HostState; wsl: HostState; /** other WSL distros that are followed */ others?: Array<HostState & { id: string }> }
 export interface ConnectionsHost {
   copy?(text: string): void;
   get(): Promise<ConnectionsState>;
-  apply(host: string, action: 'connect' | 'disconnect' | 'statusline' | 'statusline-off'): Promise<ConnectionsState>;
+  apply(host: string, action: 'connect' | 'disconnect' | 'statusline' | 'statusline-off' | 'wrapper' | 'wrapper-off'): Promise<ConnectionsState>;
   answerPermissions(on: boolean): Promise<ConnectionsState>;
   sdkChats(on: boolean): Promise<ConnectionsState>;
 }
@@ -82,7 +83,17 @@ export function createConnectionsTab(host: ConnectionsHost) {
     if (state.helperPath && host.copy) {
       const w = el('div', 's-section c-host');
       w.append(el('div', 's-title', L('Windows: Esc, «Стоп» и ввод из питомца', 'Windows: Esc, Stop and typing from the pet', 'Windows：从宠物按 Esc、停止和输入')));
-      w.append(el('div', 's-hint', L('Чтобы питомец мог прерывать и печатать в Windows-сессии как в терминале, запускайте claude через обёртку. Добавьте эту строку в профиль PowerShell (notepad $PROFILE):', 'To let the pet interrupt and type into a Windows session like a terminal, start claude through the wrapper. Add this line to your PowerShell profile (notepad $PROFILE):', '要让宠物像终端一样中断并向 Windows 会话输入，请通过包装器启动 claude。把这一行加入 PowerShell 配置文件（notepad $PROFILE）：')));
+      const wr = state.wrapper;
+      const on = wr?.state === 'ours';
+      w.append(el('div', 's-hint', L('Чтобы питомец мог нажимать Esc, «Стоп» и печатать в Windows-сессии как в терминале, claude запускается через обёртку. Питомец может добавить её в профиль PowerShell сам (с показом изменений и копией файла).', 'To let the pet press Esc, Stop and type into a Windows session like a terminal, claude starts through the wrapper. The pet can add it to your PowerShell profile (showing the changes, with a backup).', '要让宠物像终端一样在 Windows 会话中按 Esc、停止和输入，claude 需通过包装器启动。宠物可以把它添加到 PowerShell 配置文件（显示改动并保留备份）。')));
+      const wline = el('div', 'c-sl');
+      wline.append(chip(on, wr?.state === 'stale' ? L('обёртка устарела', 'wrapper is out of date', '包装器已过期') : L('обёртка в профиле PowerShell', 'wrapper in the PowerShell profile', 'PowerShell 配置文件中的包装器')));
+      const wb = el('button', `s-btn${on ? '' : ' primary'}`, on ? L('Убрать', 'Remove', '移除') : wr?.state === 'stale' || wr?.state === 'partial' ? L('Обновить', 'Update', '更新') : L('Добавить', 'Add', '添加')); wb.type = 'button'; wb.disabled = busy;
+      wb.addEventListener('click', () => void run(host.apply('windows', on ? 'wrapper-off' : 'wrapper')));
+      wline.append(wb);
+      w.append(wline);
+      if (wr?.policy && /^(Restricted|AllSigned|Undefined)$/i.test(wr.policy)) w.append(el('div', 's-hint c-err', L(`Политика выполнения PowerShell «${wr.policy}» не даёт запускать профиль: обёртка не сработает. Разрешить можно командой: Set-ExecutionPolicy -Scope CurrentUser RemoteSigned`, `The PowerShell execution policy "${wr.policy}" does not run profiles, so the wrapper will not work. You can allow it with: Set-ExecutionPolicy -Scope CurrentUser RemoteSigned`, `PowerShell 执行策略“${wr.policy}”不允许运行配置文件，包装器不会生效。可用以下命令允许：Set-ExecutionPolicy -Scope CurrentUser RemoteSigned`)));
+      w.append(el('div', 's-hint', L('Или добавьте строку вручную (notepad $PROFILE):', 'Or add the line yourself (notepad $PROFILE):', '或手动添加这一行（notepad $PROFILE）：')));
       const line = `function claude { & '${state.helperPath.replace(/'/g, "''")}' pty claude @args }`;
       const code = el('code', 'c-code', line);
       const cp = el('button', 's-btn', L('Копировать строку', 'Copy the line', '复制该行')); cp.type = 'button';

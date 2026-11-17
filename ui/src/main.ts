@@ -1,6 +1,6 @@
 import { app, BrowserWindow, clipboard, dialog, globalShortcut, ipcMain, Menu, Notification, shell, Tray, nativeImage, nativeTheme, screen } from 'electron';
 import { confirmOptions, isConfirmed } from './dialogs.js';
-import { join } from 'node:path';
+import { join, dirname } from 'node:path';
 import { homedir } from 'node:os';
 import { mkdirSync } from 'node:fs';
 import { spawn, execFile } from 'node:child_process';
@@ -10,6 +10,7 @@ import { listModels, pickModel, MODEL_ID, DEFAULT_MODEL } from './models/registr
 import { installModelFromZip, installModelFromDir, removeModel, scanPetFolder, ModelError } from './models/install.js';
 import { loadSettings, saveSettings } from './settings.js';
 import { focusByTitle, focusDesktopApp } from './focusWindow.js';
+import { planProfile, removeFromProfile, profileState, profilePaths, readProfile, applyProfile } from './psProfile.js';
 import { overAny, type Rect } from './hitTest.js';
 import { placeStage, restoreAnchor, IDLE_H, type Anchor } from './placement.js';
 import { terminalCommand, windowsTerminalCommand, newSessionCommand } from './terminal.js';
@@ -374,18 +375,29 @@ if (primary) app.whenReady().then(async () => {
   const connectionsState = async () => {
     const hosts = await Promise.all([...wslHosts.values()].map(hostRowState));
     return {
-      answerPermissions: settings.answerPermissions, sdkChats: settings.sdkChats, helper: !!helperPath, helperPath,
+      answerPermissions: settings.answerPermissions, sdkChats: settings.sdkChats, helper: !!helperPath, helperPath, wrapper: wrapperState(),
       windows: (() => { const sl = winHost.statusLine({}); return { ...winHost.state(settings.answerPermissions), port: winHost.port, up: winUp, statusLine: sl.kind, statusLineDiff: sl.diff, statusLineError: sl.error }; })(),
       wsl: hosts.find((x) => x.id === 'wsl')!,
       others: hosts.filter((x) => x.id !== 'wsl'),
     };
   };
-  const confirmHooks = async (message: string, items: Array<{ file: string; diff: string }>) => {
-    const detail = items.map((i) => `${i.file}\n${i.diff.length > 1400 ? `${i.diff.slice(0, 1400)}\n…` : i.diff}`).join('\n\n') + `\n\n${L('Копия файла сохранится рядом (settings.json.bak). Хуки только сообщают питомцу о событиях; свои хуки пользователя не затрагиваются.', 'A copy of the file is kept next to it (settings.json.bak). The hooks only tell the pet about events; your own hooks are not touched.', '文件的备份会保存在旁边（settings.json.bak）。钩子只向宠物通知事件，不会改动你自己的钩子。')}`;
+  const confirmHooks = async (message: string, items: Array<{ file: string; diff: string }>, note?: string) => {
+    const detail = items.map((i) => `${i.file}\n${i.diff.length > 1400 ? `${i.diff.slice(0, 1400)}\n…` : i.diff}`).join('\n\n') + `\n\n${note ?? L('Копия файла сохранится рядом (settings.json.bak). Хуки только сообщают питомцу о событиях; свои хуки пользователя не затрагиваются.', 'A copy of the file is kept next to it (settings.json.bak). The hooks only tell the pet about events; your own hooks are not touched.', '文件的备份会保存在旁边（settings.json.bak）。钩子只向宠物通知事件，不会改动你自己的钩子。')}`;
     const r = await dialog.showMessageBox(win, confirmOptions({ type: 'question', action: L('Применить', 'Apply', '应用'), cancel: L('Отмена', 'Cancel', '取消'), message, detail }));
     return isConfirmed(r);
   };
   const windowsSettings = join(homedir(), '.claude', 'settings.json');
+  // ---- the `claude` wrapper in the PowerShell profiles (Windows PowerShell always; PowerShell 7 when its profile folder exists) ----
+  const psProfiles = () => profilePaths(app.getPath('documents')).filter((p, i) => i === 0 || existsSync(dirname(p)));
+  /** profiles do not run under the Restricted / AllSigned execution policy: then the wrapper line has no effect (we never change the policy) */
+  let psPolicy: string | null = null;
+  execFile('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', 'Get-ExecutionPolicy'], { windowsHide: true, timeout: 15000 }, (err, out) => { if (!err) psPolicy = String(out).trim(); });
+  const wrapperState = () => {
+    if (!helperPath) return null;
+    const states = psProfiles().map((p) => { try { return profileState(readProfile(p), helperPath); } catch { return 'none' as const; } });
+    const state = states.includes('stale') ? 'stale' : states.every((x) => x === 'ours') ? 'ours' : states.some((x) => x === 'ours') ? 'partial' : 'none';
+    return { state, files: psProfiles(), policy: psPolicy };
+  };
   /**
    * Our Windows entries are there but out of date (the app moved, the helper changed, the token is new): offer to update them once per
    * start, with the diff. Absent entries are never offered here (connecting is the user's choice in Connections).
@@ -406,7 +418,14 @@ if (primary) app.whenReady().then(async () => {
   ipcMain.handle('pet:connections', () => connectionsState());
   ipcMain.handle('pet:connections-apply', async (_e, hostId: unknown, action: unknown) => {
     const remove = action === 'disconnect';
-    if (hostId === 'windows' && (action === 'statusline' || action === 'statusline-off')) {
+    if (hostId === 'windows' && (action === 'wrapper' || action === 'wrapper-off') && helperPath) {
+      const off = action === 'wrapper-off';
+      try {
+        const items = psProfiles().map((file) => { const cur = readProfile(file); const r = off ? removeFromProfile(cur) : planProfile(cur, helperPath); return { file, ...r }; }).filter((i) => i.diff);
+        if (items.length && await confirmHooks(off ? L('Убрать обёртку claude из профиля PowerShell?', 'Remove the claude wrapper from the PowerShell profile?', '从 PowerShell 配置文件中移除 claude 包装器？') : L('Добавить обёртку claude в профиль PowerShell?', 'Add the claude wrapper to the PowerShell profile?', '将 claude 包装器添加到 PowerShell 配置文件？'), items, L('Копия файла сохранится рядом (.bak). Меняются только строки между метками ccPet. Новые окна PowerShell будут запускать claude через обёртку.', 'A copy of the file is kept next to it (.bak). Only the lines between the ccPet markers change. New PowerShell windows will start claude through the wrapper.', '文件的备份会保存在旁边（.bak）。只修改 ccPet 标记之间的行。新的 PowerShell 窗口将通过包装器启动 claude。')))
+          for (const i of items) applyProfile(i.file, i.next);
+      } catch (e) { void info(L('Не удалось изменить профиль PowerShell', 'Could not change the PowerShell profile', '无法修改 PowerShell 配置文件'), (e as Error).message); }
+    } else if (hostId === 'windows' && (action === 'statusline' || action === 'statusline-off')) {
       const off = action === 'statusline-off';
       const p = winHost.statusLine({ remove: off });
       if (p.error) { void info(L('Не удалось прочитать settings.json', 'Could not read settings.json', '无法读取 settings.json'), p.error); return connectionsState(); }
