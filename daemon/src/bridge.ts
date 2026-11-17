@@ -46,6 +46,8 @@ export function createBridge(o: {
   out: (m: BridgeMessage) => void;
   readTranscript: (path: string) => Promise<ChatItem[]>;
   hooks: { settingsPath: string; hookPath: string; nodePath: string };
+  /** allow the Agent SDK paths (default false) */
+  sdkChats?: boolean;
   /** process access (real /proc and kill by default; injectable for tests) */
   proc?: { name(pid: number): string | null; kill(pid: number): void };
   /** sets the title of the terminal a process runs in (an OSC sequence written to its tty); false when it has no terminal */
@@ -73,6 +75,9 @@ export function createBridge(o: {
   stopRecheckMs?: number;
 }) {
   const pty = o.pty ?? { sendPrompt, sendEsc };
+  /** the Agent SDK paths (new chats, resume fallback, /btw, model list) start a second Claude Code process under the user's login: opt-in, off by default */
+  let sdkOn = o.sdkChats === true;
+  const needSdk = () => { if (!sdkOn) throw new Error(L('Запуск Claude Code через Agent SDK выключен. Включите его в «Настройки → Подключения» или работайте через терминал.', 'Starting Claude Code through the Agent SDK is off. Turn it on in Settings → Connections, or work in a terminal.', '通过 Agent SDK 启动 Claude Code 已关闭。请在“设置 → 连接”中开启，或在终端中使用。')); };
   const WORKING = new Set(['thinking', 'reading', 'writing', 'running', 'testing', 'waiting', 'subagent']);
   const proc = o.proc ?? {
     name: (pid: number) => { try { return readFileSync(`/proc/${pid}/comm`, 'utf8').trim(); } catch { return null; } },
@@ -136,6 +141,7 @@ export function createBridge(o: {
       try {
         switch (cmd?.type) {
           case 'start': {
+            needSdk();
             const sessionId = await o.runner.start({ cwd: toWslPath(String(cmd.cwd)), prompt: String(cmd.prompt) });
             o.out({ type: 'started', sessionId });
             break;
@@ -160,6 +166,7 @@ export function createBridge(o: {
               if (r === 'delivered') o.store.apply({ hook_event_name: 'UserPromptSubmit', session_id: id, cwd: s.cwd });
               break;
             }
+            if (!s?.owned) needSdk(); // a session the pet already runs may keep going; resuming a terminal one needs the SDK
             await ensureResumeCwd(id);
             await o.runner.send(id, String(cmd.text));
             break;
@@ -197,14 +204,16 @@ export function createBridge(o: {
             return;
           }
           case 'usage': if (o.usage) { usageVersion = o.usage.version(); o.out({ type: 'usage', usage: await o.usage.read() }); } return;
-          case 'models': o.out({ type: 'models', models: await o.runner.models() }); return;
+          case 'sdk-chats': sdkOn = cmd.on === true; return;
+          case 'models': needSdk(); o.out({ type: 'models', models: await o.runner.models() }); return;
           case 'setModel': {
             const sid = cmd.sessionId == null ? null : String(cmd.sessionId);
+            needSdk();
             await o.runner.setModel(sid, String(cmd.model));
             o.out({ type: 'modelSet', sessionId: sid, model: String(cmd.model) });
             return;
           }
-          case 'btw': await o.runner.btw(String(cmd.sessionId), String(cmd.text)); return;
+          case 'btw': if (!o.store.get(String(cmd.sessionId))?.owned) needSdk(); await o.runner.btw(String(cmd.sessionId), String(cmd.text)); return;
           case 'release': o.runner.release(String(cmd.sessionId)); break;
           case 'end': {
             const id = String(cmd.sessionId);

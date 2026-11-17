@@ -14,12 +14,13 @@ export interface HostState {
   statusLineDiff?: string;
   statusLineError?: string;
 }
-export interface ConnectionsState { answerPermissions: boolean; helper: boolean; /** full path of pet-helper.exe (for the PowerShell wrapper line) */ helperPath?: string; windows: HostState; wsl: HostState; /** other WSL distros that are followed */ others?: Array<HostState & { id: string }> }
+export interface ConnectionsState { answerPermissions: boolean; sdkChats?: boolean; helper: boolean; /** full path of pet-helper.exe (for the PowerShell wrapper line) */ helperPath?: string; windows: HostState; wsl: HostState; /** other WSL distros that are followed */ others?: Array<HostState & { id: string }> }
 export interface ConnectionsHost {
   copy?(text: string): void;
   get(): Promise<ConnectionsState>;
   apply(host: string, action: 'connect' | 'disconnect' | 'statusline' | 'statusline-off'): Promise<ConnectionsState>;
   answerPermissions(on: boolean): Promise<ConnectionsState>;
+  sdkChats(on: boolean): Promise<ConnectionsState>;
 }
 
 const el = <K extends keyof HTMLElementTagNameMap>(tag: K, cls = '', text = ''): HTMLElementTagNameMap[K] => {
@@ -97,6 +98,11 @@ export function createConnectionsTab(host: ConnectionsHost) {
     cb.addEventListener('change', () => void run(host.answerPermissions(cb.checked)));
     perm.append(cb, el('span', '', ` ${L('Отвечать на запросы разрешений в питомце', 'Answer permission questions in the pet', '在宠物中回答权限请求')}`));
     box.append(perm, el('div', 's-hint', L('Выключено по умолчанию. Если питомец не ответил за 30 с, Claude Code покажет обычный диалог.', 'Off by default. If the pet does not answer within 30 s, Claude Code shows its normal dialog.', '默认关闭。如果宠物在 30 秒内未回答，Claude Code 会显示常规对话框。')));
+    const sdk = el('label', 's-radio'); sdk.style.display = 'block';
+    const sb = el('input'); sb.type = 'checkbox'; sb.checked = !!state.sdkChats; sb.disabled = busy;
+    sb.addEventListener('change', () => void run(host.sdkChats(sb.checked)));
+    sdk.append(sb, el('span', '', ` ${L('Разрешить запуск Claude Code через Agent SDK', 'Allow starting Claude Code through the Agent SDK', '允许通过 Agent SDK 启动 Claude Code')}`));
+    box.append(sdk, el('div', 's-hint', L('Выключено по умолчанию. Без этого новые чаты открываются в терминале, а запущенные сессии доступны через хуки.', 'Off by default. Without it new chats open in a terminal, and running sessions are reached through the hooks.', '默认关闭。关闭时，新聊天在终端中打开，已运行的会话通过钩子联系。')));
   };
 
   return {

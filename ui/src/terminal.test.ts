@@ -24,3 +24,15 @@ describe('terminalCommand', () => {
     expect(c.args.slice(0, 4)).toEqual(['/c', 'start', '""', 'wsl.exe']);
   });
 });
+
+describe('newSessionCommand', () => {
+  it('starts claude in the folder with an optional first prompt (quoted), in a new Windows Terminal window', async () => {
+    const { newSessionCommand } = await import('./terminal.js');
+    const c = newSessionCommand({ distro: 'Ubuntu', cwd: '/home/u/p', claude: '/home/u/.local/bin/claude', prompt: "fix it's bug" });
+    expect(c.file).toBe('wt.exe');
+    expect(c.args.slice(0, 4)).toEqual(['-w', 'new', '--', 'wsl.exe']);
+    expect(c.args).toContain('/home/u/p');
+    expect(c.args[c.args.length - 1]).toBe(`'/home/u/.local/bin/claude' 'fix it'\\''s bug'; exit 0`);
+    expect(newSessionCommand({ distro: '', cwd: '/x', claude: '' }).args.join(' ')).toContain("claude; exit 0");
+  });
+});

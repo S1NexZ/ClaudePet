@@ -30,6 +30,7 @@ function setup(over: Partial<Parameters<typeof createBridge>[0]> = {}) {
     proc: { name: (pid) => procs.get(pid) ?? null, kill: (pid) => { killed.push(pid); } },
     readTranscript: async (p) => [{ role: 'assistant', text: `from ${p}` }],
     hooks: { settingsPath, hookPath: '/opt/pet/hook/pet-hook.mjs', nodePath: '/usr/bin/node' },
+    sdkChats: true,
     ...over,
   });
   return { out, calls, store, bridge, settingsPath, killed, procs };
@@ -213,6 +214,21 @@ describe('bridge', () => {
     expect(last(out, 'termMark')).toEqual({ type: 'termMark', sessionId: 't1', ok: true });
     await bridge.handle({ type: 'term-mark', sessionId: 'nope', text: 'y' });
     expect(last(out, 'termMark')).toEqual({ type: 'termMark', sessionId: 'nope', ok: false });
+  });
+
+  it('SDK paths are off unless allowed: no new chat, no resume fallback, no model list; a session the pet already runs still works', async () => {
+    const { bridge, out, calls, store } = setup({ sdkChats: false });
+    await bridge.handle({ type: 'start', cwd: '/x', prompt: 'hi' });
+    expect(last(out, 'error')?.message).toMatch(/Agent SDK/);
+    expect(calls.find((c) => c[0] === 'start')).toBeUndefined();
+    store.apply({ hook_event_name: 'Stop', session_id: 't9', cwd: '/x' } as any);
+    await bridge.handle({ type: 'send', sessionId: 't9', text: 'yo' });
+    expect(calls.find((c) => c[0] === 'send')).toBeUndefined();
+    await bridge.handle({ type: 'models' });
+    expect(last(out, 'models')).toBeUndefined();
+    await bridge.handle({ type: 'sdk-chats', on: true });
+    await bridge.handle({ type: 'send', sessionId: 't9', text: 'yo' });
+    expect(calls.some((c) => c[0] === 'send')).toBe(true);
   });
 
   it('dismiss hides a session without touching its process, and late events do not bring it back', async () => {

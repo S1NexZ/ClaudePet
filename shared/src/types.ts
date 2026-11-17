@@ -78,6 +78,7 @@ export type AppCommand =
   | { type: 'dismiss'; sessionId: string }
   | { type: 'term-mark'; sessionId: string; text: string }
   | { type: 'usage-refresh' }
+  | { type: 'sdk-chats'; on: boolean }
   | { type: 'statusline'; apply?: boolean; remove?: boolean }
   | { type: 'end'; sessionId: string }
   | { type: 'usage' };

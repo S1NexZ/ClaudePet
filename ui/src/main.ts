@@ -12,7 +12,7 @@ import { loadSettings, saveSettings } from './settings.js';
 import { focusByTitle } from './focusWindow.js';
 import { overAny, type Rect } from './hitTest.js';
 import { placeStage, restoreAnchor, IDLE_H, type Anchor } from './placement.js';
-import { terminalCommand, windowsTerminalCommand } from './terminal.js';
+import { terminalCommand, windowsTerminalCommand, newSessionCommand } from './terminal.js';
 import { createWindowsHost, WINDOWS_HOST_PORT } from './hub/windowsHost.js';
 import { createWslHost, parseDistroList, secondaryDistros, portForDistro, type WslHost } from './hub/wslHost.js';
 import { mergeSnapshots, hostOf, hostOfPermission, type HostPart } from './hub/merge.js';
@@ -136,6 +136,7 @@ if (primary) app.whenReady().then(async () => {
         host.send({ type: 'language', lang: getLang() });
         host.send({ type: 'permission-mode', mode: settings.permissions });
         host.send({ type: 'hook-permissions', on: settings.answerPermissions });
+        host.send({ type: 'sdk-chats', on: settings.sdkChats });
         if (!host.secondary) {
           host.send({ type: 'hooks', apply: false });
           if (demo) host.send({ type: 'start', cwd: demo.cwd, prompt: demo.prompt });
@@ -300,6 +301,17 @@ if (primary) app.whenReady().then(async () => {
   const warnedTerminal = new Set<string>();
   ipcMain.on('pet:cmd', async (_e, cmd) => {
     if (!cmd || typeof cmd !== 'object') return;
+    if (cmd.type === 'start' && !settings.sdkChats) { // no Agent SDK: a new chat is a new session in a real terminal (the pet sees it through the hooks)
+      const th = primary();
+      const go = (useWt: boolean) => {
+        const c = newSessionCommand({ distro: th.name(), cwd: String(cmd.cwd), claude: th.claude(), prompt: String(cmd.prompt ?? '') }, useWt);
+        const p = spawn(c.file, c.args, { detached: true, stdio: 'ignore' });
+        p.on('error', (e) => { log(`terminal (${c.file}) failed: ${e.message}`); if (useWt) go(false); });
+        p.unref();
+      };
+      go(true);
+      return;
+    }
     if (cmd.type === 'send') {
       const s = sessionById(String(cmd.sessionId));
       // the warning is for the SDK fallback only: a session reachable through its mailbox (or on the Windows host) is woken by a hook, no second process
@@ -339,7 +351,7 @@ if (primary) app.whenReady().then(async () => {
   const connectionsState = async () => {
     const hosts = await Promise.all([...wslHosts.values()].map(hostRowState));
     return {
-      answerPermissions: settings.answerPermissions, helper: !!helperPath, helperPath,
+      answerPermissions: settings.answerPermissions, sdkChats: settings.sdkChats, helper: !!helperPath, helperPath,
       windows: { ...winHost.state(settings.answerPermissions), port: winHost.port, up: winUp },
       wsl: hosts.find((x) => x.id === 'wsl')!,
       others: hosts.filter((x) => x.id !== 'wsl'),
@@ -377,6 +389,20 @@ if (primary) app.whenReady().then(async () => {
       if (p?.diff && await confirmHooks(remove ? L(`Отключить ${label} от питомца?`, `Disconnect ${label} from the pet?`, `断开 ${label} 与宠物的连接？`) : L(`Подключить сессии Claude Code (${label})?`, `Connect Claude Code sessions (${label})?`, `连接 Claude Code 会话（${label}）？`), [{ file: `~/.claude/settings.json (${label})`, diff: String(p.diff) }]))
         await wslRequest({ type: 'hooks', apply: true, remove, permissions: settings.answerPermissions }, h);
     }
+    return connectionsState();
+  });
+  ipcMain.handle('pet:sdk-chats', async (_e, on: unknown) => {
+    const wanted = on === true;
+    if (wanted) {
+      const r = await dialog.showMessageBox(win, confirmOptions({
+        type: 'warning', action: L('Включить', 'Turn on', '开启'), cancel: L('Отмена', 'Cancel', '取消'),
+        message: L('Разрешить питомцу запускать Claude Code через Agent SDK?', 'Let the pet start Claude Code through the Agent SDK?', '允许宠物通过 Agent SDK 启动 Claude Code？'),
+        detail: L('Питомец сможет начинать новые чаты и продолжать терминальные сессии, запуская второй процесс claude под вашим входом (как если бы вы набрали команду сами). Anthropic отдельно оговаривает использование Agent SDK с входом по подписке: прочитайте их условия. Без этого новые чаты открываются в терминале, а общаться с уже запущенными сессиями можно через хуки.', 'The pet will be able to start new chats and continue terminal sessions by running a second claude process under your login (as if you typed the command yourself). Anthropic has separate terms for using the Agent SDK with a subscription login: please read them. Without this, new chats open in a terminal, and running sessions can still be reached through the hooks.', '宠物将能够新建聊天并继续终端会话，方式是在您的登录下运行第二个 claude 进程（就像您自己输入命令）。Anthropic 对使用订阅登录的 Agent SDK 另有条款，请阅读。关闭时，新聊天会在终端中打开，已运行的会话仍可通过钩子联系。'),
+      }));
+      if (!isConfirmed(r)) return connectionsState();
+    }
+    settings = { ...settings, sdkChats: wanted }; applySettings();
+    toAllBridges({ type: 'sdk-chats', on: wanted });
     return connectionsState();
   });
   ipcMain.handle('pet:answer-permissions', async (_e, on: unknown) => {
