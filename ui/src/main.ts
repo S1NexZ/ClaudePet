@@ -10,7 +10,7 @@ import { listModels, pickModel, MODEL_ID, DEFAULT_MODEL } from './models/registr
 import { installModelFromZip, installModelFromDir, removeModel, scanPetFolder, ModelError } from './models/install.js';
 import { loadSettings, saveSettings } from './settings.js';
 import { focusByTitle, focusDesktopApp } from './focusWindow.js';
-import { sendToDesktop, newChatLink } from './desktopSend.js';
+import { sendToDesktop, newChatLink, unhideDesktop } from './desktopSend.js';
 import { formatDiagnostics, lastEventByHost, hostIdOf } from './diagnostics.js';
 import { syncHelper } from './stableHelper.js';
 import { checkLatest } from './updates.js';
@@ -805,6 +805,7 @@ if (primary) app.whenReady().then(async () => {
   await win.loadFile(join(__dirname, 'index.html'));
   win.showInactive();
   log(`window bounds=${JSON.stringify(win.getBounds())} scale=${screen.getDisplayMatching(win.getBounds()).scaleFactor}`);
+  if (!NATIVE) void unhideDesktop(); // a send cut short by a crash of the pet must not leave the Claude app's window invisible
   void winHost.start().then((ok) => { winUp = ok; sendUp(); if (ok) { void winHost.pushUsage(); void offerWindowsRepair(); }log(`windows host ${ok ? `listening on 127.0.0.1:${winHost.port}` : 'not started'}`); });
   const winTimer = setInterval(() => winHost.tick(Date.now()), 1500);
   registerHotkey();
