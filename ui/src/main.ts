@@ -756,6 +756,37 @@ if (primary) app.whenReady().then(async () => {
     endDrag();
     if (process.env.CLAUDE_PET_DEBUG) log(`anchor=${JSON.stringify(anchor)}`);
   });
+  // ---- keep the pet visible ----
+  // Fullscreen apps, games and video players can push a topmost window down, and Windows sometimes drops the flag after sleep or a
+  // display change: put the pet back on top regularly (no focus is taken, nothing moves).
+  const keepTop = setInterval(() => {
+    if (win.isDestroyed() || !win.isVisible() || dragging) return;
+    win.setAlwaysOnTop(true, 'floating');
+    win.moveTop();
+  }, 5000);
+  // a monitor unplugged, a resolution or scaling change: a pet left outside every screen comes back next to where it stood
+  const onSomeScreen = () => {
+    const b = win.getBounds(), x = b.x + b.width / 2, y = b.y + IDLE_H / 2;
+    return screen.getAllDisplays().some((d) => x >= d.workArea.x && x <= d.workArea.x + d.workArea.width && y >= d.workArea.y && y <= d.workArea.y + d.workArea.height);
+  };
+  const rescue = (why: string) => {
+    if (win.isDestroyed() || onSomeScreen()) return;
+    const b = win.getBounds();
+    const wa = screen.getDisplayNearestPoint({ x: Math.round(anchor.cx), y: Math.round(anchor.bottom - 1) }).workArea;
+    ownMoveUntil = Date.now() + 150;
+    win.setBounds(placeStage(anchor, b.width, b.height, wa));
+    lastX = win.getBounds().x; anchor = anchorOf();
+    log(`the pet was off screen (${why}): moved back to ${JSON.stringify(anchor)}`);
+  };
+  for (const ev of ['display-added', 'display-removed', 'display-metrics-changed'] as const) screen.on(ev as any, () => setTimeout(() => rescue(ev), 600));
+  // a crashed renderer or GPU process leaves a transparent window that shows nothing: log it and draw the pet again
+  win.webContents.on('render-process-gone', (_e, d) => { log(`renderer gone: ${d.reason} (${d.exitCode})`); if (d.reason !== 'clean-exit' && !quitting) win.webContents.reload(); });
+  win.webContents.on('unresponsive', () => log('renderer unresponsive'));
+  app.on('child-process-gone', (_e, d) => {
+    log(`${d.type} process gone: ${d.reason} (${d.exitCode})`);
+    if (d.type === 'GPU' && !quitting) setTimeout(() => { if (!win.isDestroyed()) win.webContents.reload(); }, 1000);
+  });
+  app.on('before-quit', () => clearInterval(keepTop));
   // constant width; the height follows the content (grows downwards from the pet). While the user drags, the OS owns the window: wait for the drop.
   ipcMain.on('pet:resize', (_e, _w: number, h: number) => {
     const height = Math.min(MAX_H, Math.max(120, Math.ceil(Number(h) || 0)));
