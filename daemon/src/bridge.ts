@@ -12,7 +12,8 @@ import { createSoftStop } from './softStop.js';
 import { planHooks, removeHooks, lineDiff } from './installHooks.js';
 import { planStatusLine, removeStatusLine, statusLineState } from './installStatusLine.js';
 import { planHostHooks, removeHostHooks, hooksStatus, readSettingsFile, writeSettingsFile } from './hookConfig.js';
-import type { AppCommand, BridgeMessage, ChatEvent, ChatItem, Snapshot, UsageInfo } from '../../shared/src/types.js';
+import type { AppCommand, AskQuestion, BridgeMessage, ChatEvent, ChatItem, Snapshot, UsageInfo } from '../../shared/src/types.js';
+import { isTestCommand } from './mapEvent.js';
 import { L, setLang } from '../../shared/src/i18n.js';
 
 export interface RunnerLike {
@@ -25,6 +26,28 @@ export interface RunnerLike {
   send(sessionId: string, text: string): Promise<void>;
   interrupt(sessionId: string): Promise<void>;
   respondPermission(id: string, allow: boolean): void;
+}
+
+/** What the pet answers to a PermissionRequest hook: allow / deny, or allow with a changed input (Claude's questions answered) */
+export type PermissionAnswer = 'allow' | 'deny' | { updatedInput: Record<string, unknown> };
+
+/** The questions of an AskUserQuestion call, or null when the input is not shaped as expected */
+export function askQuestions(input: unknown): AskQuestion[] | null {
+  const qs = (input as { questions?: unknown })?.questions;
+  if (!Array.isArray(qs) || !qs.length) return null;
+  const ok = qs.every((q) => typeof q?.question === 'string' && Array.isArray(q.options) && q.options.length > 0 && q.options.every((x: any) => typeof x?.label === 'string'));
+  return ok ? qs.map((q) => ({ question: q.question, header: typeof q.header === 'string' ? q.header : undefined, multiSelect: q.multiSelect === true, options: q.options.map((x: any) => ({ label: x.label, description: typeof x.description === 'string' ? x.description : undefined })) })) : null;
+}
+
+/** A finished Bash call worth a reaction: tests passed or failed, a commit went in */
+export function reactionFor(event: string, tool: string, input: Record<string, unknown> | undefined): 'happy' | 'sad' | null {
+  if (tool !== 'Bash') return null;
+  const cmd = String(input?.command ?? '');
+  const failed = event === 'PostToolUseFailure';
+  if (event !== 'PostToolUse' && !failed) return null;
+  if (isTestCommand(cmd)) return failed ? 'sad' : 'happy';
+  if (!failed && /\bgit\b[^|;&\n]*\scommit\b/.test(cmd)) return 'happy';
+  return null;
 }
 
 /** hook events that can only come after a pending permission question was settled */
@@ -72,6 +95,8 @@ export function createBridge(o: {
   /** answer PermissionRequest hooks through the pet (off by default); the Windows host reads the app setting here */
   permissionsFromPet?: () => boolean;
   permissionTimeoutMs?: number;
+  /** how long a question of Claude waits for an answer in the pet (the hook's own timeout is a bit longer) */
+  questionTimeoutMs?: number;
   /** this host's hook receiver: lets the bridge install the mailbox waiter and the PermissionRequest hook next to the events hook */
   hostHooks?: { origin: string; token: string };
   /** prefix of permission ids (two hosts must not hand out the same id) */
@@ -97,9 +122,10 @@ export function createBridge(o: {
   const ended = new Set<string>();
   let permOn = false;
   const permissionsOn = () => (o.permissionsFromPet ? o.permissionsFromPet() : permOn);
-  const asks = new Map<string, { sessionId: string; tool: string; resolve: (d: 'allow' | 'deny' | null) => void; timer: ReturnType<typeof setTimeout> }>();
+  const asks = new Map<string, { sessionId: string; tool: string; resolve: (d: PermissionAnswer | null) => void; timer: ReturnType<typeof setTimeout>; input?: Record<string, unknown> }>();
   /** tool name + input: a PostToolUse of this very call (tools can run in parallel, another tool finishing settles nothing) */
-  const toolKey = (e: HookPayload) => `${String(e.tool_name ?? '')}\u0000${JSON.stringify(e.tool_input ?? null)}`;
+  // (a question's input gains the answers once it is answered: only the questions identify it)
+  const toolKey = (e: HookPayload) => `${String(e.tool_name ?? '')}\u0000${JSON.stringify(e.tool_name === 'AskUserQuestion' ? (e.tool_input as any)?.questions ?? null : e.tool_input ?? null)}`;
   let askSeq = 0;
   let lastSnap = '';
   const snapshot = (onlyIfChanged = false) => {
@@ -201,7 +227,10 @@ export function createBridge(o: {
           case 'hook-permissions': permOn = cmd.on === true; return;
           case 'permission': {
             const ask = asks.get(String(cmd.id));
-            if (ask) { clearTimeout(ask.timer); asks.delete(String(cmd.id)); o.store.setPending(ask.sessionId, undefined); o.store.apply({ hook_event_name: 'UserPromptSubmit', session_id: ask.sessionId, cwd: o.store.get(ask.sessionId)?.cwd ?? '' }); ask.resolve(cmd.allow === true ? 'allow' : 'deny'); break; }
+            if (ask) { clearTimeout(ask.timer); asks.delete(String(cmd.id)); o.store.setPending(ask.sessionId, undefined); o.store.apply({ hook_event_name: 'UserPromptSubmit', session_id: ask.sessionId, cwd: o.store.get(ask.sessionId)?.cwd ?? '' }); // a question answered in the pet goes back as its input plus the answers; dismissed, the terminal's own question stays
+              if (ask.input) ask.resolve(cmd.allow === true && cmd.answers && typeof cmd.answers === 'object' ? { updatedInput: { ...ask.input, answers: cmd.answers } } : null);
+              else ask.resolve(cmd.allow === true ? 'allow' : 'deny');
+              break; }
             o.runner.respondPermission(String(cmd.id), cmd.allow === true);
             break;
           }
@@ -287,6 +316,8 @@ export function createBridge(o: {
         const post = e.hook_event_name === 'PostToolUse' || e.hook_event_name === 'PostToolUseFailure';
         for (const [id, a] of asks) if (a.sessionId === e.session_id && (!post || a.tool === toolKey(e))) { clearTimeout(a.timer); asks.delete(id); o.store.setPending(a.sessionId, undefined); a.resolve(null); }
       }
+      const reaction = reactionFor(e.hook_event_name, String(e.tool_name ?? ''), e.tool_input as Record<string, unknown> | undefined);
+      if (reaction && !o.store.get(e.session_id)?.owned) o.out({ type: 'react', sessionId: e.session_id, reaction });
       if (ended.has(e.session_id)) {
         if (e.hook_event_name !== 'UserPromptSubmit' && e.hook_event_name !== 'SessionStart') return;
         ended.delete(e.session_id); // resumed by the user
@@ -309,16 +340,23 @@ export function createBridge(o: {
       if ((e.hook_event_name === 'Stop' || (e.hook_event_name === 'UserPromptSubmit' && sess?.pty)) && !sess?.owned) rereadLater(e.session_id);
     },
     /** A PermissionRequest hook: shown in the pet as Allow / Deny when the user switched that on; null = no opinion (the normal dialog stays). */
-    onPermission(e: HookPayload): Promise<'allow' | 'deny' | null> {
-      if (!permissionsOn() || o.store.get(e.session_id)?.owned) return Promise.resolve(null);
+    onPermission(e: HookPayload, gone?: AbortSignal): Promise<PermissionAnswer | null> {
+      // Claude's questions (AskUserQuestion) are answered in the pet always; other tools only when the user switched that on
+      const questions = e.tool_name === 'AskUserQuestion' ? askQuestions(e.tool_input) : null;
+      if ((!questions && !permissionsOn()) || o.store.get(e.session_id)?.owned) return Promise.resolve(null);
+      // with permissions on, two hook groups fire for one question: the first one shows it, the other has no opinion
+      if (questions && [...asks.values()].some((a) => a.sessionId === e.session_id && a.tool === toolKey(e))) return Promise.resolve(null);
       o.store.apply({ hook_event_name: 'Notification', session_id: e.session_id, cwd: e.cwd, message: 'permission' });
       const id = `${o.permissionIdPrefix ?? 'hp-'}${++askSeq}`;
-      o.store.setPending(e.session_id, { id, tool: String(e.tool_name ?? ''), summary: summarize(String(e.tool_name ?? ''), (e.tool_input ?? {}) as Record<string, unknown>) });
+      const summary = questions ? questions[0].question : summarize(String(e.tool_name ?? ''), (e.tool_input ?? {}) as Record<string, unknown>);
+      o.store.setPending(e.session_id, { id, tool: String(e.tool_name ?? ''), summary, ...(questions ? { questions } : {}) });
       snapshot();
       return new Promise((resolve) => {
-        const timer = setTimeout(() => { asks.delete(id); o.store.setPending(e.session_id, undefined); snapshot(); resolve(null); }, o.permissionTimeoutMs ?? 30_000);
+        const timer = setTimeout(() => { asks.delete(id); o.store.setPending(e.session_id, undefined); snapshot(); resolve(null); }, questions ? o.questionTimeoutMs ?? 590_000 : o.permissionTimeoutMs ?? 30_000);
         timer.unref?.();
-        asks.set(id, { sessionId: e.session_id, tool: toolKey(e), resolve, timer });
+        asks.set(id, { sessionId: e.session_id, tool: toolKey(e), resolve, timer, ...(questions ? { input: (e.tool_input ?? {}) as Record<string, unknown> } : {}) });
+        // Claude Code dropped the request (the session was closed, its hook timed out): nobody is waiting for this answer any more
+        gone?.addEventListener('abort', () => { if (!asks.has(id)) return; clearTimeout(timer); asks.delete(id); o.store.setPending(e.session_id, undefined); snapshot(); resolve(null); });
       });
     },
     onChat(sessionId: string, event: ChatEvent): void {

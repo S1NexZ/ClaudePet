@@ -98,6 +98,30 @@ body { font-family: "Segoe UI", "Microsoft YaHei UI", system-ui, sans-serif; col
 #perm #btn-allow { background: var(--teal); color: var(--accent-ink); }
 #perm #btn-deny { background: var(--hover2); color: var(--text); }
 #perm button:focus-visible { outline: 2px solid var(--text); }
+/* Claude's question: the text wraps, the options are buttons */
+#perm.ask { border-color: color-mix(in srgb, var(--teal) 60%, transparent); }
+#perm.ask #perm-text { white-space: normal; font-family: inherit; font-size: 13px; color: var(--text); }
+#perm-q { display: flex; flex-wrap: wrap; gap: 6px; justify-content: flex-end; flex: 1 0 100%; }
+#perm-q .ask-opt { background: var(--hover2); color: var(--text); }
+#perm-q .ask-opt:hover, #perm-q .ask-opt.on { background: var(--teal); color: var(--accent-ink); }
+#perm-q .ask-done { background: var(--teal); color: var(--accent-ink); }
+#perm-q .ask-done:disabled { opacity: .45; cursor: default; }
+#perm-q .ask-skip { color: var(--muted); }
+/* "done" card after a turn that changed files */
+.msg.summary { align-self: stretch; padding: 7px 10px; border-radius: 10px; background: color-mix(in srgb, var(--teal) 8%, transparent); border: 1px solid color-mix(in srgb, var(--teal) 35%, transparent); font-size: 12.5px; }
+.msg.summary .sum-head { font-weight: 600; margin-bottom: 3px; }
+.msg.summary .sum-head::before { content: "✓ "; color: var(--teal); }
+.msg.summary .sum-file { display: flex; gap: 8px; font: 11.5px ui-monospace, Consolas, monospace; color: var(--muted); }
+.msg.summary .sum-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* messages waiting their turn */
+#queue { display: flex; flex-direction: column; gap: 4px; padding: 6px 10px; border-top: 1px solid var(--glass-line); }
+#queue[hidden] { display: none; }
+#queue .q-row { display: flex; align-items: center; gap: 8px; font-size: 12.5px; }
+#queue .q-when { flex: none; color: var(--teal); font-size: 11.5px; }
+#queue .q-when::before { content: "⏳ "; }
+#queue .q-text { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#queue .q-x { all: unset; cursor: pointer; padding: 0 6px; color: var(--muted); font-size: 15px; }
+#queue .q-x:hover { color: var(--text); }
 #notice { max-width: 400px; padding: 5px 12px; border-radius: 14px; background: color-mix(in srgb, var(--alert) 22%, var(--glass)); font-size: 12.5px; }
 
 #sessions { display: flex; flex-direction: column; gap: 2px; width: 400px; max-height: 300px; overflow-y: auto; padding: 6px; background: var(--glass); border: 1px solid var(--glass-line); border-radius: 18px; }

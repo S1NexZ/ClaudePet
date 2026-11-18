@@ -152,3 +152,28 @@ describe('msToNextFrame (the render loop sleeps until then)', () => {
   });
 });
 
+
+describe('Animator reactions', () => {
+  it('sad shows the failure row, then the state comes back', () => {
+    const a = plain();
+    a.setState('thinking');
+    a.frame(0);
+    a.react('sad', 100);
+    expect(a.frame(100).row).toBe(5);
+    expect(a.frame(2000).row).toBe(5);
+    expect(a.frame(2800).row).toBe(7);
+  });
+  it('happy jumps, then waves', () => {
+    const a = plain();
+    a.react('happy', 0);
+    expect(a.frame(0).row).toBe(4);
+    expect(a.frame(ROW_FRAMES[4] * 100 + 50).row).toBe(3);
+    expect(a.msToNextFrame(10)).toBeGreaterThan(0);
+  });
+  it('a state that needs the user cuts the reaction short', () => {
+    const a = plain();
+    a.react('happy', 0);
+    a.setState('waiting');
+    expect(a.frame(50).row).toBe(6);
+  });
+});

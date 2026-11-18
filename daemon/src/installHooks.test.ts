@@ -11,9 +11,9 @@ const cmds = (o: any, ev: string) =>
   (o.hooks?.[ev] ?? []).flatMap((g: any) => g.hooks.map((h: any) => h.command as string));
 
 describe('planHooks', () => {
-  it('adds an entry for each of the 8 events, using the absolute node path', () => {
+  it('adds an entry for each of the 9 events, using the absolute node path', () => {
     const { next } = planHooks({}, HOOK, NODE);
-    expect(HOOK_EVENTS).toHaveLength(8);
+    expect(HOOK_EVENTS).toHaveLength(9);
     for (const ev of HOOK_EVENTS) expect(cmds(next, ev)).toEqual([CMD]);
   });
   it('tool events get matcher "*"', () => {

@@ -2,7 +2,7 @@ import { describe, it, expect, vi } from 'vitest';
 import { mkdtempSync, writeFileSync, readFileSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { createBridge } from './bridge.js';
+import { createBridge, askQuestions, reactionFor } from './bridge.js';
 import { SessionStore } from './sessionStore.js';
 import { createMailbox } from './mailbox.js';
 import type { BridgeMessage } from '../../shared/src/types.js';
@@ -526,6 +526,68 @@ describe('bridge: mailbox and hook permissions', () => {
   });
 });
 
+describe('bridge: Claude\'s questions and reactions', () => {
+  const start = (store: SessionStore, id = 's9') => store.apply({ hook_event_name: 'SessionStart', session_id: id, cwd: '/p' });
+  const ask = { questions: [{ question: 'Which color?', header: 'Color', options: [{ label: 'Red', description: 'warm' }, { label: 'Blue' }], multiSelect: false }] };
+  it('a question is shown in the pet even with tool permissions off, and the answer goes back as the input plus answers', async () => {
+    const { bridge, store } = setup();
+    start(store);
+    const p = bridge.onPermission({ hook_event_name: 'PermissionRequest', session_id: 's9', cwd: '/p', tool_name: 'AskUserQuestion', tool_input: ask });
+    const pend = store.get('s9')!.pendingPermission!;
+    expect(pend).toMatchObject({ tool: 'AskUserQuestion', summary: 'Which color?' });
+    expect(pend.questions?.[0].options.map((o) => o.label)).toEqual(['Red', 'Blue']);
+    // the second hook group (permissions on) for the same call has no opinion
+    expect(await bridge.onPermission({ hook_event_name: 'PermissionRequest', session_id: 's9', cwd: '/p', tool_name: 'AskUserQuestion', tool_input: ask })).toBeNull();
+    await bridge.handle({ type: 'permission', id: pend.id, allow: true, answers: { 'Which color?': 'Blue' } });
+    expect(await p).toEqual({ updatedInput: { ...ask, answers: { 'Which color?': 'Blue' } } });
+    expect(store.get('s9')?.pendingPermission).toBeUndefined();
+  });
+  it('dismissed in the pet or answered in the terminal: no opinion, the terminal keeps the question', async () => {
+    const { bridge, store } = setup();
+    start(store);
+    const p = bridge.onPermission({ hook_event_name: 'PermissionRequest', session_id: 's9', cwd: '/p', tool_name: 'AskUserQuestion', tool_input: ask });
+    await bridge.handle({ type: 'permission', id: store.get('s9')!.pendingPermission!.id, allow: false });
+    expect(await p).toBeNull();
+    const q = bridge.onPermission({ hook_event_name: 'PermissionRequest', session_id: 's9', cwd: '/p', tool_name: 'AskUserQuestion', tool_input: ask });
+    // answered in the terminal: the tool's input now carries the answers, the questions still identify it
+    bridge.onHook({ hook_event_name: 'PostToolUse', session_id: 's9', cwd: '/p', tool_name: 'AskUserQuestion', tool_input: { ...ask, answers: { 'Which color?': 'Red' } } });
+    expect(await q).toBeNull();
+    expect(store.get('s9')?.pendingPermission).toBeUndefined();
+  });
+  it('a question Claude Code stopped waiting for (session closed) disappears from the pet', async () => {
+    const { bridge, store } = setup();
+    start(store);
+    const ac = new AbortController();
+    const p = bridge.onPermission({ hook_event_name: 'PermissionRequest', session_id: 's9', cwd: '/p', tool_name: 'AskUserQuestion', tool_input: ask }, ac.signal);
+    expect(store.get('s9')?.pendingPermission).toBeDefined();
+    ac.abort();
+    expect(await p).toBeNull();
+    expect(store.get('s9')?.pendingPermission).toBeUndefined();
+  });
+  it('askQuestions accepts only well-formed questions', () => {
+    expect(askQuestions(ask)?.[0]).toEqual({ question: 'Which color?', header: 'Color', multiSelect: false, options: [{ label: 'Red', description: 'warm' }, { label: 'Blue', description: undefined }] });
+    expect(askQuestions({})).toBeNull();
+    expect(askQuestions({ questions: [{ question: 'x', options: [] }] })).toBeNull();
+  });
+  it('tests passing or failing and a commit make the pet react; other commands do not', () => {
+    expect(reactionFor('PostToolUse', 'Bash', { command: 'npx vitest run' })).toBe('happy');
+    expect(reactionFor('PostToolUseFailure', 'Bash', { command: 'npm test' })).toBe('sad');
+    expect(reactionFor('PostToolUse', 'Bash', { command: 'git commit -qm "x"' })).toBe('happy');
+    expect(reactionFor('PostToolUse', 'Bash', { command: 'git -c a=b commit -m x' })).toBe('happy');
+    expect(reactionFor('PostToolUseFailure', 'Bash', { command: 'git commit -m x' })).toBeNull();
+    expect(reactionFor('PostToolUse', 'Bash', { command: 'ls' })).toBeNull();
+    expect(reactionFor('PreToolUse', 'Bash', { command: 'npm test' })).toBeNull();
+    expect(reactionFor('PostToolUse', 'Read', { file_path: 'x' })).toBeNull();
+  });
+  it('a reaction goes out to the app with the session', () => {
+    const { bridge, store, out } = setup();
+    start(store);
+    bridge.onHook({ hook_event_name: 'PostToolUseFailure', session_id: 's9', cwd: '/p', tool_name: 'Bash', tool_input: { command: 'pytest -q' } });
+    expect(last(out, 'react')).toEqual({ type: 'react', sessionId: 's9', reaction: 'sad' });
+    expect(store.get('s9')?.state).toBe('thinking'); // a failed command is not a session error
+  });
+});
+
 describe('bridge: hooks with a receiver (mailbox waiter and permission hook)', () => {
   const host = { origin: 'http://127.0.0.1:47822', token: 'ab12cd' };
   it('plan shows the waiter; apply writes events + waiter (+ permission only when asked); remove leaves the user\'s own hooks', async () => {
@@ -537,7 +599,7 @@ describe('bridge: hooks with a receiver (mailbox waiter and permission hook)', (
     await bridge.handle({ type: 'hooks', apply: true, permissions: false });
     let st = JSON.parse(readFileSync(settingsPath, 'utf8'));
     expect(st.hooks.Stop.some((g: any) => /pet-hook\.mjs" wait/.test(g.hooks[0].command))).toBe(true);
-    expect(st.hooks.PermissionRequest).toBeUndefined();
+    expect(st.hooks.PermissionRequest.map((g: any) => g.matcher)).toEqual(['AskUserQuestion']); // Claude's questions only
     await bridge.handle({ type: 'hooks', apply: false, permissions: false });
     expect(last(out, 'hooks')).toMatchObject({ diff: '', events: true, mailbox: true, permissions: false });
     await bridge.handle({ type: 'hooks', apply: true, permissions: true });

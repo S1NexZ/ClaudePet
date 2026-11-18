@@ -29,7 +29,9 @@ describe('hookConfig (windows)', () => {
     expect(again.hooks.Stop.filter((g: any) => g.hooks[0].type === 'http')).toHaveLength(1);
   });
   it('adds the PermissionRequest hook only when asked, with a timeout above the pet\'s own', () => {
-    expect(planHostHooks({}, win).next.hooks.PermissionRequest).toBeUndefined();
+    const off = planHostHooks({}, win).next;
+    expect(off.hooks.PermissionRequest).toEqual([{ matcher: 'AskUserQuestion', hooks: [{ type: 'http', url: 'http://127.0.0.1:47821/hook/ab12cd/PermissionRequest', timeout: 600 }] }]);
+    expect(hooksStatus(off, 'windows').permissions).toBe(false); // Claude's questions are not tool permissions
     const { next } = planHostHooks({}, { ...win, permissions: true });
     expect(next.hooks.PermissionRequest[0].hooks[0]).toEqual({ type: 'http', url: 'http://127.0.0.1:47821/hook/ab12cd/PermissionRequest', timeout: 35 });
     expect(hooksStatus(next, 'windows').permissions).toBe(true);

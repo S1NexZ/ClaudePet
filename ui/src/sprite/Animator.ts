@@ -1,10 +1,13 @@
-import type { PetState } from '../../../shared/src/types.js';
+import type { PetState, Reaction } from '../../../shared/src/types.js';
 import { ROW_FRAMES, ROW_LOOP_MS, rowForState } from './stateMap.js';
 
 /** "done": jump once, then wave for as long as the state lasts. */
 const DONE_JUMP_ROW = 4;
 const DONE_WAVE_ROW = 3;
 const RUN_ROW = { right: 1, left: 2 } as const;
+/** a reaction to something that just happened: happy jumps and waves, sad shows the failure row; then the state comes back */
+const SAD_ROW = 5;
+export const REACT_MS = 2600;
 export type DragDir = keyof typeof RUN_ROW;
 
 /** States that must show at once: the user has to act. */
@@ -24,6 +27,7 @@ export class Animator {
   private startedAt: number | null = null;
   private drag: DragDir | null = null;
   private dragStartedAt: number | null = null;
+  private reaction: { kind: Reaction; at: number } | null = null;
   private rowFrames: readonly number[];
   private readonly frameMs?: number;
   private readonly minHoldMs: number;
@@ -39,6 +43,18 @@ export class Animator {
 
   setState(s: PetState): void {
     this.want = s;
+  }
+
+  /** A short one-off animation (tests passed / failed, a commit); a state that needs the user cuts it short. */
+  react(kind: Reaction, now: number): void { this.reaction = { kind, at: now }; }
+
+  private reacting(now: number): { row: number; col: number } | null {
+    const r = this.reaction;
+    if (!r) return null;
+    const t = now - r.at;
+    if (t >= REACT_MS || URGENT.has(this.want)) { this.reaction = null; this.shown = this.want; this.startedAt = now; return null; }
+    if (r.kind === 'sad') return this.cycle(SAD_ROW < this.rowFrames.length ? SAD_ROW : 0, t);
+    return this.sequence(t);
   }
 
   /** While the window is dragged the pet runs in that direction; null = released. */
@@ -57,6 +73,8 @@ export class Animator {
       if (row >= this.rowFrames.length) return this.cycle(0, now - this.dragStartedAt);
       return this.cycle(row, now - this.dragStartedAt);
     }
+    const r = this.reacting(now);
+    if (r) return r;
     this.startedAt ??= now;
     if (this.want !== this.shown && (URGENT.has(this.want) || now - this.startedAt >= this.minHoldMs)) {
       this.shown = this.want;
@@ -78,6 +96,12 @@ export class Animator {
     if (this.drag) {
       const row = RUN_ROW[this.drag] < this.rowFrames.length ? RUN_ROW[this.drag] : 0;
       step = this.stepMs(row); elapsed = now - (this.dragStartedAt ?? now);
+    } else if (this.reaction) {
+      const t = now - this.reaction.at;
+      if (t >= REACT_MS || URGENT.has(this.want)) return 0;
+      const row = this.reaction.kind === 'sad' ? SAD_ROW : t < this.rowFrames[DONE_JUMP_ROW] * this.stepMs(DONE_JUMP_ROW) ? DONE_JUMP_ROW : DONE_WAVE_ROW;
+      step = this.stepMs(row < this.rowFrames.length ? row : 0);
+      return Math.max(1, Math.min(step - (t % step), REACT_MS - t));
     } else {
       const started = this.startedAt ?? now;
       const row = this.shown === 'done' ? DONE_JUMP_ROW : rowForState(this.shown);

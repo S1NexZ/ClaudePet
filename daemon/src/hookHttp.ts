@@ -15,7 +15,8 @@ export interface HookServerOpts {
   /** a waiter told the session's folder (`?cwd=`): the session exists even if its SessionStart never arrived as an HTTP hook */
   onWaiter?(sessionId: string, cwd: string, source?: string): void;
   /** answers a PermissionRequest hook; null = no opinion (Claude Code then shows its normal dialog). Absent = never answer. */
-  onPermission?(e: HookPayload): Promise<'allow' | 'deny' | null>;
+  /** gone: aborted when Claude Code drops the request (the session ended, the hook timed out): the pet stops asking */
+  onPermission?(e: HookPayload, gone?: AbortSignal): Promise<'allow' | 'deny' | { updatedInput: Record<string, unknown> } | null>;
   /** an answer for an ordinary hook event (soft stop: `{"continue": false}`); null = plain 200 */
   onReply?(e: HookPayload): Record<string, unknown> | null;
   /** how long one mailbox long-poll may last (the hook re-polls) */
@@ -72,10 +73,13 @@ export async function startHookServer(o: HookServerOpts): Promise<{ port: number
         if (!e || typeof e.session_id !== 'string') { res.writeHead(400).end(); return; }
         const ev: HookPayload = { ...e, hook_event_name: typeof e.hook_event_name === 'string' ? e.hook_event_name : decode(rest) ?? '', cwd: typeof e.cwd === 'string' ? e.cwd : '' };
         if (ev.hook_event_name === 'PermissionRequest') {
-          const answer = o.onPermission ? o.onPermission(ev).catch(() => null) : Promise.resolve(null);
+          const ac = new AbortController();
+          res.on('close', () => { if (!res.writableEnded) ac.abort(); });
+          const answer = o.onPermission ? o.onPermission(ev, ac.signal).catch(() => null) : Promise.resolve(null);
           void answer.then((d) => {
             if (!d) { res.writeHead(200).end(); return; }
-            res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({ hookSpecificOutput: { hookEventName: 'PermissionRequest', decision: { behavior: d } } }));
+            const decision = typeof d === 'string' ? { behavior: d } : { behavior: 'allow', updatedInput: d.updatedInput };
+            res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({ hookSpecificOutput: { hookEventName: 'PermissionRequest', decision } }));
           });
           return;
         }

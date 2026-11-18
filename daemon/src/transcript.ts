@@ -1,6 +1,6 @@
 import { open } from 'node:fs/promises';
 import { summarize } from './summary.js';
-import type { ChatItem } from '../../shared/src/types.js';
+import type { ChatItem, TurnSummary } from '../../shared/src/types.js';
 
 const textOf = (content: unknown): string =>
   typeof content === 'string'
@@ -35,9 +35,40 @@ export async function readEntrypoint(path: string): Promise<string | null> {
   return null;
 }
 
-/** Extracts the visible conversation (user text, assistant text, tool calls) from Claude Code transcript JSONL. */
+const lineCount = (v: unknown): number => (typeof v === 'string' && v.length ? v.replace(/\n$/, '').split('\n').length : 0);
+
+/** Lines added / removed by one file-editing tool call (Edit, MultiEdit, Write); null for other tools. */
+export function editStats(name: string, input: any): { path: string; added: number; removed: number } | null {
+  const path = typeof input?.file_path === 'string' ? input.file_path : typeof input?.notebook_path === 'string' ? input.notebook_path : null;
+  if (!path) return null;
+  if (name === 'Edit') return { path, added: lineCount(input.new_string), removed: lineCount(input.old_string) };
+  if (name === 'MultiEdit' && Array.isArray(input.edits)) return input.edits.reduce((a: any, x: any) => ({ path, added: a.added + lineCount(x?.new_string), removed: a.removed + lineCount(x?.old_string) }), { path, added: 0, removed: 0 });
+  if (name === 'Write') return { path, added: lineCount(input.content), removed: 0 };
+  if (name === 'NotebookEdit') return { path, added: lineCount(input.new_source), removed: 0 };
+  return null;
+}
+
+/**
+ * Extracts the visible conversation (user text, assistant text, tool calls) from Claude Code transcript JSONL. A turn that changed
+ * files and has finished is followed by a 'summary' item: files with +/- lines, how long it took, output tokens, tool calls.
+ */
 export function parseTranscript(jsonl: string, limit = 40): ChatItem[] {
   const out: ChatItem[] = [];
+  type Turn = { start: number; end: number; files: Map<string, { path: string; added: number; removed: number }>; tokens: Map<string, number>; tools: number; done: boolean };
+  let turn = null as Turn | null; // assigned inside the helpers below: the cast keeps TypeScript from narrowing it to null
+  const closeTurn = () => {
+    if (turn && turn.files.size) {
+      const summary: TurnSummary = { files: [...turn.files.values()], ms: Math.max(0, turn.end - turn.start), tokens: [...turn.tokens.values()].reduce((a, b) => a + b, 0), tools: turn.tools };
+      out.push({ role: 'summary', text: '', summary });
+    }
+    turn = null;
+  };
+  const prompt = (e: any, text: string) => {
+    closeTurn();
+    out.push({ role: 'user', text });
+    const t = Date.parse(e.timestamp);
+    turn = { start: t, end: t, files: new Map(), tokens: new Map(), tools: 0, done: false };
+  };
   for (const line of jsonl.split('\n')) {
     if (!line.trim()) continue;
     let e: any;
@@ -45,19 +76,39 @@ export function parseTranscript(jsonl: string, limit = 40): ChatItem[] {
     if (e?.isMeta || e?.isSidechain) continue;
     if (e?.type === 'user') {
       const t = textOf(e.message?.content).trim();
-      if (t && !t.startsWith('<')) out.push({ role: 'user', text: t });
-      else if (t.includes(PET_MARKER) || t.includes(LEGACY_MARKER)) { const m = petMessageOf(t); if (m) out.push({ role: 'user', text: m }); }
+      if (t && !t.startsWith('<')) prompt(e, t);
+      else if (t.includes(PET_MARKER) || t.includes(LEGACY_MARKER)) { const m = petMessageOf(t); if (m) prompt(e, m); }
     } else if (e?.type === 'assistant') {
+      let tooled = false;
       for (const b of Array.isArray(e.message?.content) ? e.message.content : []) {
         if (b?.type === 'text' && b.text?.trim()) out.push({ role: 'assistant', text: b.text.trim() });
         else if (b?.type === 'tool_use') {
+          tooled = true;
           const s = summarize(b.name, b.input);
           out.push({ role: 'tool', text: s ? `${b.name} · ${s}` : String(b.name) });
+          if (turn) {
+            turn.tools++;
+            const st = editStats(String(b.name), b.input);
+            if (st) { const f = turn.files.get(st.path); turn.files.set(st.path, f ? { path: st.path, added: f.added + st.added, removed: f.removed + st.removed } : st); }
+          }
         }
+      }
+      if (turn) {
+        const t = Date.parse(e.timestamp);
+        if (Number.isFinite(t)) turn.end = t;
+        // one API message is written as several records (one per content block) with the same usage: count it once
+        const tok = Number(e.message?.usage?.output_tokens);
+        if (Number.isFinite(tok)) turn.tokens.set(String(e.message?.id ?? turn.tokens.size), tok);
+        // the final answer may span several records (thinking, then text): the card goes after the last of them
+        turn.done = e.message?.stop_reason === 'end_turn' && !tooled;
       }
     }
   }
-  return out.slice(-limit);
+  if (turn?.done) closeTurn();
+  const items = out.slice(-limit);
+  // a cut-off head may start with the summary of a turn whose prompt fell outside the window: it would hang there alone
+  while (items[0]?.role === 'summary') items.shift();
+  return items;
 }
 
 /**

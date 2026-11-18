@@ -6,6 +6,8 @@ import { matchCommands, planSlash, COMMANDS, typedLine, MODEL_ALIASES, type Comm
 import { decideSend, placeholderFor, isBusyReply, canStop, parseSlash, type Mode } from './compose.js';
 import { applyChat, mergeHistory } from './chatStore.js';
 import { mdBlocks, mdInline } from './md.js';
+import { summaryHead, summaryRows } from './summaryCard.js';
+import { parseAt } from '../hub/messageQueue.js';
 import { Animator } from '../sprite/Animator.js';
 import { cleanCell } from '../sprite/cleanCell.js';
 import { headCenter, trimAround, shiftCell } from '../sprite/stabilize.js';
@@ -20,7 +22,7 @@ import { initTooltips } from './tooltip.js';
 import { createMotion, animatePanels } from './motion.js';
 import { removeLightFringe, removeColorSpill } from '../sprite/fringe.js';
 import { dominantHue, type Appearance } from '../appearance.js';
-import type { AppCommand, BridgeMessage, ChatItem, Session, Snapshot, UsageInfo, PermissionPolicy } from '../../../shared/src/types.js';
+import type { AppCommand, AskQuestion, BridgeMessage, ChatItem, PendingPermission, Reaction, Session, Snapshot, TurnSummary, UsageInfo, PermissionPolicy } from '../../../shared/src/types.js';
 import { L, setLang, type Lang, type LangPref } from '../../../shared/src/i18n.js';
 
 interface PetConfig {
@@ -70,7 +72,24 @@ const SCALE = 0.6;
 const $ = (id: string) => document.getElementById(id)!;
 const host = window.petHost;
 
+/** "Done" card after a turn that changed files: files with +/- lines, time, tokens */
+function summaryNode(sm: TurnSummary): HTMLElement {
+  const el = document.createElement('div');
+  el.className = 'msg summary';
+  const head = document.createElement('div'); head.className = 'sum-head'; head.textContent = summaryHead(sm);
+  el.append(head);
+  for (const r of summaryRows(sm)) {
+    const row = document.createElement('div'); row.className = 'sum-file'; row.title = r.path;
+    const n = document.createElement('span'); n.className = 'sum-name'; n.textContent = r.name;
+    const st = document.createElement('span'); st.className = 'sum-stat'; st.textContent = r.stat;
+    row.append(n, st);
+    el.append(row);
+  }
+  return el;
+}
+
 function messageNode(it: ChatItem): HTMLElement {
+  if (it.role === 'summary' && it.summary) return summaryNode(it.summary);
   const el = document.createElement('div');
   el.className = `msg ${it.role}${it.streaming ? ' streaming' : ''}`;
   if (it.role !== 'assistant') { el.textContent = it.text; if (it.role === 'tool') el.title = it.text; return el; }
@@ -207,6 +226,8 @@ async function main() {
   const show = (el: HTMLElement, on: boolean) => { if (el.hidden === on) el.hidden = !on; };
   /** wakes the frame loop at once (it sleeps between sprite frames); anything that can change what is on screen calls it */
   let wake: () => void = () => {};
+  /** set once the animator exists: tests passed or failed, a commit went in */
+  let onReact: (r: Reaction) => void = () => {};
   host.onBridge((up) => { connected = up; if (!up) raw = null; if (up) host.send({ type: 'usage' }); wake(); });
   if (connected) host.send({ type: 'usage' });
   host.onMsg((m) => {
@@ -218,6 +239,7 @@ async function main() {
     else if (m.type === 'models') showModels(m.models);
     else if (m.type === 'modelSet') { hideModels(); notify(`${L('Модель', 'Model', '模型')}: ${m.model}${m.sessionId ? '' : L(' (для новых чатов)', ' (for new chats)', ' （用于新聊天）')}`); }
     else if (m.type === 'usage') { usage = m.usage; renderUsage(); }
+    else if (m.type === 'react') onReact(m.reaction);
     else if (m.type === 'error') notify(m.message);
   });
 
@@ -250,6 +272,7 @@ async function main() {
   let onSpriteLoaded: () => void = () => {};
   const petWin = window as unknown as { __petAtlas: HTMLCanvasElement; __petAtlasReady?: boolean };
   const anim = new Animator();
+  onReact = (r) => { anim.react(r, performance.now()); wake(); };
   const loadSprite = async (data: typeof pet) => {
     const token = ++spriteToken;
     const img = new Image();
@@ -387,6 +410,7 @@ async function main() {
     if (!connected) { notify(L('Нет связи с мостом Claude Code', 'No connection to the Claude Code bridge', '无法连接 Claude Code 桥接')); return; }
     // commands the pet handles itself; every other /command goes to Claude Code as typed
     const sl = parseSlash(input.value);
+    if (askFor && !sl && input.value.trim()) { chooseAnswer(askFor, input.value.trim()); input.value = ''; return; }
     const target = mode === 'reply' ? chatSession() : null;
     const plan = planSlash(sl, !!target?.pty);
     hideCmds();
@@ -426,6 +450,12 @@ async function main() {
         if (!target) { notify(L('/btw задаёт вопрос по открытому чату: сначала выбери сессию', '/btw asks about the open chat: pick a session first', '/btw 针对已打开的聊天提问：请先选择会话')); return; }
         if (!args) { notify(L('Напиши вопрос после /btw', 'Type your question after /btw', '请在 /btw 后输入你的问题')); return; }
         host.send({ type: 'btw', sessionId: target.id, text: args });
+      } else if (name === 'at') {
+        if (!target) { notify(L('/at отправляет сообщение в открытый чат: сначала выбери сессию', '/at sends to the open chat: pick a session first', '/at 发送到已打开的聊天：请先选择会话')); return; }
+        const p = parseAt(args, new Date(), usage?.fiveHour?.resetsAt ?? null);
+        if (!p) { notify(L('Формат: /at 23:30 текст или /at reset текст (после сброса 5-часового лимита)', 'Format: /at 23:30 text, or /at reset text (when the 5-hour limit resets)', '格式：/at 23:30 文本，或 /at reset 文本（5 小时额度重置后）')); return; }
+        host.send({ type: 'queue', sessionId: target.id, text: p.text, at: p.at });
+        notify(L(`Отправлю в ${new Date(p.at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`, `Will send at ${new Date(p.at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`, `将于 ${new Date(p.at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} 发送`));
       } else if (name === 'stop') {
         if (target) host.send({ type: 'interrupt', sessionId: target.id }); else notify(L('Нечего останавливать: чат не открыт', 'Nothing to stop: no chat is open', '没有可停止的内容'));
       } else if (name === 'new') { input.value = ''; await chooseFolder(); return; }
@@ -447,6 +477,7 @@ async function main() {
       if (!(await chooseFolder())) return;
       d = decideSend(input.value, chatSnap(), folder, mode);
     }
+    if (d.kind === 'queue') { host.send({ type: 'queue', sessionId: d.sessionId, text: d.text }); input.value = ''; return; }
     if (d.kind === 'busy') { notify(L('Claude занят. Нажми «стоп» или «+», чтобы начать новый чат', 'Claude is busy. Press Stop or “+” to start a new chat', 'Claude 正忙。点“停止”或“+”开始新聊天')); return; }
     if (d.kind === 'empty' || d.kind === 'needFolder') return;
     if (d.kind === 'start') { pinnedId = null; chatId = null; host.send({ type: 'start', cwd: d.cwd, prompt: d.prompt }); }
@@ -464,6 +495,70 @@ async function main() {
     if (e.key === 'Enter') void submit();
     else if (e.key === 'Escape') setExpanded(false);
   });
+  // ---- Claude's questions (AskUserQuestion): its options as buttons; several questions are answered one after another ----
+  let askShown: string | null = null, askIdx = 0, askAnswers: Record<string, string> = {}, askPicked = new Set<string>();
+  /** the question on screen: Enter in the composer answers it with the typed text (Claude Code's "Other") */
+  let askFor: PendingPermission | null = null;
+  const btn = (label: string, cls: string, title?: string) => { const b = document.createElement('button'); b.type = 'button'; b.className = cls; b.textContent = label; if (title) b.title = title; return b; };
+  const chooseAnswer = (pp: PendingPermission, label: string) => {
+    const q = pp.questions![askIdx];
+    askAnswers[q.question] = label;
+    askIdx++; askPicked = new Set();
+    if (askIdx < pp.questions!.length) drawQuestion(pp);
+    else { host.send({ type: 'permission', id: pp.id, allow: true, answers: askAnswers }); askFor = null; }
+  };
+  const drawQuestion = (pp: PendingPermission) => {
+    const qs = pp.questions!, q: AskQuestion = qs[askIdx];
+    $('perm-text').textContent = `${qs.length > 1 ? `${askIdx + 1}/${qs.length} · ` : ''}${q.header ? `${q.header}: ` : ''}${q.question}`;
+    $('perm-text').title = q.question;
+    const done = btn(L('Готово', 'Done', '完成'), 'ask-done');
+    const opts = q.options.map((o) => {
+      const b = btn(o.label, 'ask-opt', o.description);
+      b.addEventListener('click', () => {
+        if (!q.multiSelect) { chooseAnswer(pp, o.label); return; }
+        if (askPicked.has(o.label)) askPicked.delete(o.label); else askPicked.add(o.label);
+        b.classList.toggle('on', askPicked.has(o.label));
+        done.disabled = askPicked.size === 0;
+      });
+      return b;
+    });
+    done.disabled = true;
+    done.addEventListener('click', () => { if (askPicked.size) chooseAnswer(pp, q.options.map((o) => o.label).filter((l) => askPicked.has(l)).join(', ')); });
+    const term = btn(L('В терминале', 'In the terminal', '在终端中'), 'ask-skip', L('Ответить в терминале или приложении', 'Answer in the terminal or the app', '在终端或应用中回答'));
+    term.addEventListener('click', () => { host.send({ type: 'permission', id: pp.id, allow: false }); askFor = null; });
+    $('perm-q').replaceChildren(...opts, ...(q.multiSelect ? [done] : []), term);
+  };
+  const renderAsk = (pp: PendingPermission) => {
+    const qs = pp.questions;
+    show($('btn-allow'), !qs); show($('btn-deny'), !qs); show($('perm-q'), !!qs);
+    $('perm').classList.toggle('ask', !!qs);
+    askFor = qs ? pp : null;
+    if (!qs) { askShown = null; return; }
+    if (askShown === pp.id) return;
+    askShown = pp.id; askIdx = 0; askAnswers = {}; askPicked = new Set();
+    drawQuestion(pp);
+  };
+  // messages waiting for the turn to end (or for their time), under the chat; × takes one back
+  let queueKey = '';
+  const renderQueue = (sid: string | null, s: Session | null) => {
+    const q = sid && s ? s.queue ?? [] : [];
+    const key = `${sid}|${JSON.stringify(q)}`;
+    if (key === queueKey) return;
+    queueKey = key;
+    const box = $('queue');
+    box.replaceChildren(...q.map((m) => {
+      const row = document.createElement('div'); row.className = 'q-row';
+      const when = document.createElement('span'); when.className = 'q-when';
+      when.textContent = m.at ? new Date(m.at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : L('после ответа', 'after the reply', '回复后');
+      const t = document.createElement('span'); t.className = 'q-text'; t.textContent = m.text; t.title = m.text;
+      const x = btn('×', 'q-x', L('Убрать из очереди', 'Remove from the queue', '移出队列'));
+      x.addEventListener('click', () => host.send({ type: 'unqueue', sessionId: sid!, id: m.id }));
+      row.append(when, t, x);
+      return row;
+    }));
+    show(box, q.length > 0);
+  };
+
   const answer = (allow: boolean) => {
     const id = current()?.pendingPermission?.id;
     if (id) host.send({ type: 'permission', id, allow });
@@ -487,6 +582,7 @@ async function main() {
     if ($('btn-term').getAttribute('aria-label') !== openLabel) { $('btn-term').title = openLabel; $('btn-term').setAttribute('aria-label', openLabel); }
     // ask for the transcript once per opening of this chat (even if /btw already put messages there)
     if (sid && !historyAsked.has(sid)) { historyAsked.add(sid); host.send({ type: 'history', sessionId: sid }); }
+    renderQueue(sid, s);
     const items = sid ? chats.get(sid) ?? [] : [];
     if (sid !== shownFor) { shownFor = sid; shown = []; list.replaceChildren(); }
     let i = 0;
@@ -658,7 +754,8 @@ async function main() {
     const pp = s?.pendingPermission;
     show($('perm'), !!pp);
     if (pp) {
-      $('perm-text').textContent = `${pp.tool}: ${pp.summary}`;
+      renderAsk(pp);
+      if (!pp.questions) $('perm-text').textContent = `${pp.tool}: ${pp.summary}`;
       if (pp.id !== lastNotified) { lastNotified = pp.id; host.notify(L('Claude ждёт разрешения', 'Claude needs permission', 'Claude 需要权限'), `${s!.project}: ${pp.tool} ${pp.summary}`); }
     }
     // a chat opened before any session was known follows the first one that appears
@@ -666,9 +763,9 @@ async function main() {
     const cs = chatSnap();
     const chatS = chatSession();
     const busy = isBusyReply(cs, mode);
-    const ph = placeholderFor(cs, folder, mode);
+    const ph = askFor ? L('Или напиши свой ответ на вопрос Claude…', 'Or type your own answer to Claude’s question…', '或输入你对 Claude 问题的回答…') : placeholderFor(cs, folder, mode);
     if (input.placeholder !== ph) input.placeholder = ph;
-    if (input.disabled !== busy) { input.disabled = busy; if (!busy && expanded) input.focus(); }
+    if (input.disabled) input.disabled = false; // a busy session queues the message instead
     show($('btn-stop'), busy && canStop(chatS));
     show($('btn-send'), !(busy && canStop(chatS)));
     lastSnap = snap;

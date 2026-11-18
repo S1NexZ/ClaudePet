@@ -119,3 +119,25 @@ describe('readEntrypoint', () => {
     expect(await readEntrypoint(join(dir, 'missing.jsonl'))).toBeNull();
   });
 });
+
+describe('turn summary', () => {
+  const rec = (o: object) => JSON.stringify(o);
+  const lines = [
+    rec({ type: 'user', timestamp: '2026-01-01T10:00:00Z', message: { content: 'fix it' } }),
+    rec({ type: 'assistant', timestamp: '2026-01-01T10:00:05Z', message: { id: 'm1', usage: { output_tokens: 100 }, content: [{ type: 'tool_use', name: 'Edit', input: { file_path: '/a.ts', old_string: 'x\ny', new_string: 'x\ny\nz' } }] } }),
+    rec({ type: 'user', timestamp: '2026-01-01T10:00:06Z', message: { content: [{ type: 'tool_result', content: 'ok' }] } }),
+    rec({ type: 'assistant', timestamp: '2026-01-01T10:00:09Z', message: { id: 'm2', usage: { output_tokens: 20 }, content: [{ type: 'tool_use', name: 'Write', input: { file_path: '/b.ts', content: 'a\nb\n' } }] } }),
+    rec({ type: 'assistant', timestamp: '2026-01-01T10:00:30Z', message: { id: 'm3', stop_reason: 'end_turn', usage: { output_tokens: 7 }, content: [{ type: 'thinking', thinking: '' }] } }),
+    rec({ type: 'assistant', timestamp: '2026-01-01T10:00:30Z', message: { id: 'm3', stop_reason: 'end_turn', usage: { output_tokens: 7 }, content: [{ type: 'text', text: 'Done.' }] } }),
+  ];
+  it('a finished turn that changed files ends with a summary after the final answer', () => {
+    const items = parseTranscript(lines.join('\n'));
+    expect(items.map((i) => i.role)).toEqual(['user', 'tool', 'tool', 'assistant', 'summary']);
+    expect(items.at(-1)!.summary).toEqual({ files: [{ path: '/a.ts', added: 3, removed: 2 }, { path: '/b.ts', added: 2, removed: 0 }], ms: 30_000, tokens: 127, tools: 2 });
+  });
+  it('no card while the turn is still running, or when nothing was changed', () => {
+    expect(parseTranscript(lines.slice(0, 4).join('\n')).some((i) => i.role === 'summary')).toBe(false);
+    const talk = [lines[0], rec({ type: 'assistant', timestamp: '2026-01-01T10:00:01Z', message: { id: 'q', stop_reason: 'end_turn', content: [{ type: 'text', text: 'hi' }] } })];
+    expect(parseTranscript(talk.join('\n')).some((i) => i.role === 'summary')).toBe(false);
+  });
+});

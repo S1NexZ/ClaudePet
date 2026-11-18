@@ -19,9 +19,10 @@ describe('decideSend', () => {
   it('new mode without a folder asks for one', () => {
     expect(decideSend('сделай', null, null, 'new')).toEqual({ kind: 'needFolder' });
   });
-  it('reply mode with a busy session is refused (user can pick a folder to start a new chat instead)', () => {
-    expect(decideSend('x', snap(sess({ state: 'thinking' })), 'C:\\p', 'reply')).toEqual({ kind: 'busy' });
-    expect(decideSend('x', snap(sess({ state: 'waiting' })), null, 'reply')).toEqual({ kind: 'busy' });
+  it('reply mode with a busy session queues the message for when the turn ends', () => {
+    const s = sess({ state: 'thinking' });
+    expect(decideSend(' x ', snap(s), 'C:\\p', 'reply')).toEqual({ kind: 'queue', sessionId: s.id, text: 'x' });
+    expect(decideSend('x', snap(sess({ state: 'waiting' })), null, 'reply')).toMatchObject({ kind: 'queue' });
   });
   it('reply mode with no session falls back to new-chat rules; a sleeping/errored chat still gets the reply', () => {
     expect(decideSend('x', snap(), null, 'reply')).toEqual({ kind: 'needFolder' });
@@ -31,7 +32,7 @@ describe('decideSend', () => {
 });
 
 describe('placeholderFor', () => {
-  it('busy reply target', () => expect(placeholderFor(snap(sess({ state: 'thinking' })), null, 'reply')).toBe('Claude занят…'));
+  it('busy reply target', () => expect(placeholderFor(snap(sess({ state: 'thinking' })), null, 'reply')).toBe('Claude работает: сообщение встанет в очередь…'));
   it('reply mode names the project', () => expect(placeholderFor(snap(sess({ state: 'idle' })), null, 'reply')).toBe('Ответить в proj…'));
   it('new mode with folder shows its name', () => expect(placeholderFor(null, 'C:\\work\\мой пет', 'new')).toBe('Новая задача в «мой пет»…'));
   it('default', () => expect(placeholderFor(null, null, 'new')).toBe('Начать новый чат'));

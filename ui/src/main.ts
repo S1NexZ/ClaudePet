@@ -26,6 +26,7 @@ import { createDesktopRegistry, findRegistryRoots, decorateDesktop, type Desktop
 import { pickAttention } from '../../daemon/src/sessionStore.js';
 import { toWslPath } from '../../daemon/src/paths.js';
 import { cleanAppearance } from './appearance.js';
+import { MessageQueue } from './hub/messageQueue.js';
 import { clampScale, PET_SCALE_MIN, PET_SCALE_MAX } from './petScale.js';
 import { PERMISSION_POLICIES, type PermissionPolicy, type BridgeMessage, type UsageInfo, type Session } from '../../shared/src/types.js';
 import { L, setLang, getLang, resolveLang, LANG_PREFS, type LangPref } from '../../shared/src/i18n.js';
@@ -127,9 +128,20 @@ if (primary) app.whenReady().then(async () => {
     win.webContents.send('pet:msg', m);
   };
   let pendingNewChat: { cwd: string; at: number; prompt: string; known: string[] } | null = null;
+  /** the pet's command handler (set further down, where everything it needs exists); queued messages go out through it */
+  let onCmd: (cmd: any) => Promise<void> = async () => {};
+  const queueFile = userFile('queue.json');
+  const queue = new MessageQueue((d) => writeFileSync(queueFile, JSON.stringify(d)), (() => { try { return JSON.parse(readFileSync(queueFile, 'utf8')); } catch { return undefined; } })());
+  const drainQueue = () => {
+    for (const { sessionId, message } of queue.due(lastSnapshot?.sessions ?? [], Date.now())) {
+      log(`queue: sending a waiting message to ${sessionId}`);
+      void onCmd({ type: 'send', sessionId, text: message.text });
+    }
+  };
+  setInterval(drainQueue, 2000); // timed messages and turns that ended without a fresh snapshot
   const pushSnapshot = () => {
     const m = mergeSnapshots(hostParts());
-    const sessions = decorateDesktop(m.sessions, desktopEntries());
+    const sessions = queue.decorate(decorateDesktop(m.sessions, desktopEntries()));
     if (pendingNewChat) {
       const w = pendingNewChat;
       const id = matchNewSession(sessions, w);
@@ -138,6 +150,7 @@ if (primary) app.whenReady().then(async () => {
     }
     lastSnapshot = { ...m, sessions, attention: sessions.some((x) => x.id === m.attention) ? m.attention : pickAttention(sessions)?.id ?? null };
     win.webContents.send('pet:msg', lastSnapshot);
+    setTimeout(drainQueue, 0);
   };
   // a chat renamed, archived or deleted in the app shows up in the pet at once (the folder is watched; the 5 s re-read above stays as the fallback)
   const regWatchers = new Map<string, FSWatcher>();
@@ -403,8 +416,11 @@ if (primary) app.whenReady().then(async () => {
   ipcMain.on('pet:appearance', (_e, a) => { settings = { ...settings, appearance: cleanAppearance(a) }; applySettings(); });
   const sessionById = (id: string) => (lastSnapshot?.sessions ?? []).find((x: any) => x.id === id);
   const warnedTerminal = new Set<string>();
-  ipcMain.on('pet:cmd', async (_e, cmd) => {
+  onCmd = async (cmd: any) => {
     if (!cmd || typeof cmd !== 'object') return;
+    // messages for later live in the app: it routes every send (terminal, the Claude app's chats) and sees every host's state
+    if (cmd.type === 'queue' && typeof cmd.sessionId === 'string' && typeof cmd.text === 'string' && cmd.text.trim()) { queue.add(cmd.sessionId, cmd.text.trim(), Number.isFinite(cmd.at) ? Number(cmd.at) : undefined); pushSnapshot(); return; }
+    if (cmd.type === 'unqueue' && typeof cmd.sessionId === 'string') { queue.remove(cmd.sessionId, typeof cmd.id === 'string' ? cmd.id : undefined); pushSnapshot(); return; }
     if (cmd.type === 'start' && !settings.sdkChats && settings.newChatIn === 'desktop') { // a new chat inside the Claude desktop app (needs a Windows folder; the app fills the prompt, the pet presses Send)
       const prompt = String(cmd.prompt ?? '').trim();
       const link = prompt ? newChatLink(String(cmd.cwd), prompt) : null;
@@ -491,7 +507,8 @@ if (primary) app.whenReady().then(async () => {
     // send() returns nothing, so `?.send(cmd) ?? toBridge(cmd)` ran both: every command to a WSL session reached the bridge twice (a typed message arrived doubled)
     const target = h ? wslHosts.get(h) : undefined;
     if (target) target.send(cmd); else toBridge(cmd);
-  });
+  };
+  ipcMain.on('pet:cmd', (_e, cmd) => void onCmd(cmd));
   // ---- connections: our hooks in each host's settings.json (always with the diff and the user's consent) ----
   const wslRequest = (cmd: object, host: WslHost = primary()): Promise<any> => host.request(cmd);
   const hostLabel = (h: WslHost) => (NATIVE ? L('этот компьютер', 'this computer', '本机') : h.name() ? `WSL: ${h.name()}` : 'WSL');

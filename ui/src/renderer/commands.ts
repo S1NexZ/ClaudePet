@@ -6,6 +6,7 @@ export interface Command { name: string; kind: 'pet' | 'claude'; args?: string; 
 export const COMMANDS: Command[] = [
   { name: 'model', kind: 'pet', args: '[model]', desc: () => L('Выбрать модель для чата', 'Pick the model for this chat', '为此聊天选择模型') },
   { name: 'btw', kind: 'pet', args: '<question>', desc: () => L('Побочный вопрос по чату, не попадает в историю', 'A side question about the chat, kept out of its history', '关于聊天的旁支提问，不计入历史') },
+  { name: 'at', kind: 'pet', args: '<ЧЧ:ММ|reset> <text>', desc: () => L('Отправить в это время (или после сброса лимита)', 'Send at this time (or when the limit resets)', '在此时间发送（或在额度重置后）') },
   { name: 'stop', kind: 'pet', desc: () => L('Остановить Claude', 'Stop Claude', '停止 Claude') },
   { name: 'new', kind: 'pet', desc: () => L('Новый чат в папке…', 'New chat in a folder…', '在文件夹中新建聊天…') },
   { name: 'end', kind: 'pet', desc: () => L('Завершить сессию', 'End the session', '结束会话') },

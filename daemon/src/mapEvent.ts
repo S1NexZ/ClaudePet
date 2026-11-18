@@ -10,6 +10,9 @@ const TEST_RUNNERS = [
   /\bgradle\w*\s+test\b/,
 ];
 
+/** A command that runs a test suite (shown as 'testing'; its result makes the pet react) */
+export const isTestCommand = (cmd: string): boolean => TEST_RUNNERS.some((re) => re.test(cmd));
+
 const READING = new Set(['Read', 'Grep', 'Glob', 'LS', 'WebFetch', 'WebSearch']);
 const WRITING = new Set(['Edit', 'Write', 'MultiEdit', 'NotebookEdit']);
 
@@ -20,7 +23,7 @@ function toolState(ev: HookEvent): PetState {
   if (tool === 'Task') return 'subagent';
   if (tool === 'Bash') {
     const cmd = String(ev.tool_input?.command ?? '');
-    return TEST_RUNNERS.some((re) => re.test(cmd)) ? 'testing' : 'running';
+    return isTestCommand(cmd) ? 'testing' : 'running';
   }
   return 'running';
 }
@@ -31,6 +34,8 @@ export function mapEvent(ev: HookEvent): PetState | null {
     case 'UserPromptSubmit': return 'thinking';
     case 'PreToolUse': return toolState(ev);
     case 'PostToolUse': return ev.tool_response?.is_error ? 'error' : 'thinking';
+    // a failed command is ordinary work: Claude reads the error and goes on
+    case 'PostToolUseFailure': return 'thinking';
     case 'Notification': return /permission/i.test(ev.message ?? '') ? 'waiting' : null;
     case 'Stop': return 'done';
     case 'SessionStart': return 'idle';

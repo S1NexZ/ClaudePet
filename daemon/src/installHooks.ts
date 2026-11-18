@@ -3,7 +3,7 @@ import { dirname } from 'node:path';
 import { nodeCmd } from './nodeCmd.js';
 
 export const HOOK_EVENTS = [
-  'UserPromptSubmit', 'PreToolUse', 'PostToolUse', 'Notification',
+  'UserPromptSubmit', 'PreToolUse', 'PostToolUse', 'PostToolUseFailure', 'Notification',
   'Stop', 'SubagentStop', 'SessionStart', 'SessionEnd',
 ] as const;
 const TOOL_EVENTS = new Set(['PreToolUse', 'PostToolUse']);

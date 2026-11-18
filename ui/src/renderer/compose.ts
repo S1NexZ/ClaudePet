@@ -6,6 +6,8 @@ export type Decision =
   | { kind: 'empty' }
   | { kind: 'needFolder' }
   | { kind: 'busy' }
+  /** the session is working: the message waits and goes in when the turn ends */
+  | { kind: 'queue'; sessionId: string; text: string }
   | { kind: 'start'; cwd: string; prompt: string }
   | { kind: 'send'; sessionId: string; text: string };
 
@@ -34,7 +36,7 @@ const folderName = (p: string) => p.replace(/[\\/]+$/, '').split(/[\\/]/).pop() 
 export function decideSend(text: string, snap: Snapshot | null, folder: string | null, mode: Mode): Decision {
   const t = text.trim();
   if (!t) return { kind: 'empty' };
-  if (isBusyReply(snap, mode)) return { kind: 'busy' };
+  if (isBusyReply(snap, mode)) return { kind: 'queue', sessionId: attentionOf(snap)!.id, text: t };
   const target = mode === 'reply' ? replyTarget(snap) : null;
   if (target) return { kind: 'send', sessionId: target.id, text: t };
   if (!folder) return { kind: 'needFolder' };
@@ -42,7 +44,7 @@ export function decideSend(text: string, snap: Snapshot | null, folder: string |
 }
 
 export function placeholderFor(snap: Snapshot | null, folder: string | null, mode: Mode): string {
-  if (isBusyReply(snap, mode)) return L('Claude занят…', 'Claude is busy…', 'Claude 正忙…');
+  if (isBusyReply(snap, mode)) return L('Claude работает: сообщение встанет в очередь…', 'Claude is working: the message will wait its turn…', 'Claude 正在工作：消息将排队…');
   const target = mode === 'reply' ? replyTarget(snap) : null;
   if (target) return L(`Ответить в ${target.project}…`, `Reply in ${target.project}…`, `在 ${target.project} 中回复…`);
   if (folder) return L(`Новая задача в «${folderName(folder)}»…`, `New task in “${folderName(folder)}”…`, `在“${folderName(folder)}”中新建任务…`);

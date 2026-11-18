@@ -50,8 +50,9 @@ export function statusView(snap: Snapshot | null, connected: boolean, now: numbe
   const s = snap.sessions.find((x) => x.id === snap.attention);
   if (!s) return { label: L('Жду Claude Code…', 'Waiting for Claude Code…', '正在等待 Claude Code…'), chip: L('Ожидание', 'Waiting', '等待中'), detail: '', state: 'idle', attention: false };
   return {
-    label: STATE_LABEL[s.state],
-    chip: chipLabel(s.state),
+    // Claude asks a question (not a tool permission): say so
+    label: s.pendingPermission?.questions ? L('Claude задаёт вопрос', 'Claude asks a question', 'Claude 在提问') : STATE_LABEL[s.state],
+    chip: s.pendingPermission?.questions ? L('Вопрос', 'Question', '提问') : chipLabel(s.state),
     detail: `${s.project} · ${formatElapsed(now - s.since)}`,
     state: s.state,
     attention: s.state === 'waiting' || s.state === 'error',

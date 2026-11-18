@@ -25,7 +25,7 @@ export interface HookPlanOpts {
   permissions: boolean;
 }
 
-const TOOL_EVENTS = new Set(['PreToolUse', 'PostToolUse']);
+const TOOL_EVENTS = new Set(['PreToolUse', 'PostToolUse', 'PostToolUseFailure']);
 const HTTP_HOOK_URL = /^http:\/\/127\.0\.0\.1:\d+\/hook\/[0-9a-f]+\/(\w+)$/;
 const isWaiter = (h: any) => h?.type === 'command' && (
   (/pet-helper(\.exe)?["']?$/i.test(String(h.command ?? '')) && Array.isArray(h.args) && h.args[0] === 'wait') ||
@@ -50,9 +50,9 @@ const withDiff = (current: Settings, next: Settings) => {
   return { next, diff: lineDiff(before, after) };
 };
 
-const add = (next: Settings, ev: string, handler: Settings) => {
+const add = (next: Settings, ev: string, handler: Settings, matcher?: string) => {
   next.hooks ??= {};
-  const group: Settings = TOOL_EVENTS.has(ev) || ev === 'PermissionRequest' ? { matcher: '*' } : {};
+  const group: Settings = matcher ? { matcher } : TOOL_EVENTS.has(ev) || ev === 'PermissionRequest' ? { matcher: '*' } : {};
   group.hooks = [handler];
   next.hooks[ev] = [...(next.hooks[ev] ?? []), group];
 };
@@ -72,6 +72,8 @@ export function planHostHooks(current: Settings, o: HookPlanOpts): { next: Setti
     for (const ev of ['SessionStart', 'Stop']) add(next, ev, { ...waiter });
   }
   if (o.permissions) add(next, 'PermissionRequest', { type: 'http', url: `${o.origin}/hook/${o.token}/PermissionRequest`, timeout: 35 });
+  // Claude's questions (AskUserQuestion) are answered in the pet: the user may take a while, the terminal shows the question meanwhile
+  add(next, 'PermissionRequest', { type: 'http', url: `${o.origin}/hook/${o.token}/PermissionRequest`, timeout: 600 }, 'AskUserQuestion');
   return withDiff(current, next);
 }
 
@@ -91,7 +93,8 @@ export function hooksStatus(current: Settings, kind: HostKind): HooksStatus {
   return {
     events: kind === 'windows' ? eventsHttp : eventsCmd,
     mailbox: ['SessionStart', 'Stop'].every((ev) => handlers(ev).some(isWaiter)),
-    permissions: handlers('PermissionRequest').some(isOurHttp),
+    // the questions-only group (matcher AskUserQuestion) is always there: tool permissions are the catch-all one
+    permissions: (Array.isArray(current.hooks?.PermissionRequest) ? current.hooks.PermissionRequest : []).some((g: any) => g?.matcher !== 'AskUserQuestion' && Array.isArray(g?.hooks) && g.hooks.some(isOurHttp)),
   };
 }
 

@@ -20,6 +20,7 @@ export function applyChat(items: ChatItem[], e: ChatEvent): ChatItem[] {
     case 'tool': return [...closeStream(items), { role: 'tool', text: e.summary ? `${e.name} · ${e.summary}` : e.name }];
     // a side answer goes just before a reply that is still streaming, so that reply keeps growing in place
     case 'note': return streaming ? [...items.slice(0, -1), { role: 'note', text: e.text }, last!] : [...items, { role: 'note', text: e.text }];
+    case 'summary': return [...closeStream(items), { role: 'summary', text: '', summary: e.summary }];
     case 'end': {
       const closed = closeStream(items);
       return e.error ? [...closed, { role: 'tool', text: `⚠ ${e.error}` }] : closed;

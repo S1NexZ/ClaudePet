@@ -12,7 +12,20 @@ export interface HookEvent {
   message?: string;
 }
 
-export interface PendingPermission { id: string; tool: string; summary: string }
+/** One question of Claude's AskUserQuestion tool, as Claude Code sends it */
+export interface AskQuestion { question: string; header?: string; options: { label: string; description?: string }[]; multiSelect?: boolean }
+
+/** A tool call waiting for the user: Allow / Deny, or (questions set) Claude's question with its options */
+export interface PendingPermission { id: string; tool: string; summary: string; questions?: AskQuestion[] }
+
+/** A message waiting to be typed into a session: after the current turn, or at a time (ms epoch) */
+export interface QueuedMessage { id: string; text: string; at?: number }
+
+/** What changed in one turn (from the transcript): shown as a card when Claude finishes */
+export interface TurnSummary { files: { path: string; added: number; removed: number }[]; ms: number; tokens: number; tools: number }
+
+/** A short one-off animation of the pet for something that just happened in a session */
+export type Reaction = 'happy' | 'sad';
 
 export interface Session {
   id: string;
@@ -41,6 +54,8 @@ export interface Session {
   desktopId?: string;
   /** a mailbox waiter is armed: a message sent from the pet is delivered even without a PTY */
   mailbox?: boolean;
+  /** messages the pet will type into this session later (after the turn, or at a time) */
+  queue?: QueuedMessage[];
 }
 
 export interface Snapshot {
@@ -50,7 +65,7 @@ export interface Snapshot {
 }
 
 // ---- revision 2: bridge protocol (JSON lines over stdio) ----
-export interface ChatItem { role: 'user' | 'assistant' | 'tool' | 'note'; text: string; streaming?: boolean }
+export interface ChatItem { role: 'user' | 'assistant' | 'tool' | 'note' | 'summary'; text: string; streaming?: boolean; summary?: TurnSummary }
 
 export type ChatEvent =
   | { kind: 'user'; text: string }
@@ -59,6 +74,8 @@ export type ChatEvent =
   | { kind: 'tool'; name: string; summary: string }
   /** a side answer (/btw) that is not part of the session */
   | { kind: 'note'; text: string }
+  /** what the finished turn changed */
+  | { kind: 'summary'; summary: TurnSummary }
   | { kind: 'end'; error?: string };
 
 /** How the pet's own chat answers Claude Code's tool permission requests: ask every time / allow file edits / allow everything. */
@@ -72,7 +89,11 @@ export type AppCommand =
   | { type: 'hook-permissions'; on: boolean }
   | { type: 'start'; cwd: string; prompt: string }
   | { type: 'send'; sessionId: string; text: string }
-  | { type: 'permission'; id: string; allow: boolean }
+  /** answers: Claude's questions answered (question text -> chosen label(s), several joined with ", ") */
+  | { type: 'permission'; id: string; allow: boolean; answers?: Record<string, string> }
+  /** queue a message for a session: typed in when the current turn ends, or at `at` (ms epoch) */
+  | { type: 'queue'; sessionId: string; text: string; at?: number }
+  | { type: 'unqueue'; sessionId: string; id?: string }
   | { type: 'interrupt'; sessionId: string }
   | { type: 'history'; sessionId: string }
   /** apply=false: report the plan; apply=true: write it (after the app got consent); remove: take our entries out; permissions: include the PermissionRequest hook (default: the current setting) */
@@ -100,6 +121,7 @@ export type BridgeMessage =
   | { type: 'models'; models: Array<{ value: string; displayName: string; description: string }> }
   | { type: 'modelSet'; sessionId: string | null; model: string }
   | { type: 'usage'; usage: UsageInfo }
+  | { type: 'react'; sessionId: string; reaction: Reaction }
   | { type: 'error'; message: string };
 
 /** One rate-limit window as Claude Code reports it (resetsAt in Unix epoch seconds). */

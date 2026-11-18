@@ -69,6 +69,12 @@ describe('hook http receiver', () => {
     const r = await post(`${base}/hook/tok/PermissionRequest`, { session_id: 's1', tool_name: 'Bash' });
     expect(await r.json()).toEqual({ hookSpecificOutput: { hookEventName: 'PermissionRequest', decision: { behavior: 'deny' } } });
   });
+  it('answers Claude\'s question as allow with the input plus the answers (checked live against Claude Code 2.1.327)', async () => {
+    const updatedInput = { questions: [{ question: 'Which color?', options: [{ label: 'Red' }, { label: 'Blue' }] }], answers: { 'Which color?': 'Blue' } };
+    const { base } = await boot({ onPermission: async () => ({ updatedInput }) });
+    const r = await post(`${base}/hook/tok/PermissionRequest`, { session_id: 's1', tool_name: 'AskUserQuestion' });
+    expect(await r.json()).toEqual({ hookSpecificOutput: { hookEventName: 'PermissionRequest', decision: { behavior: 'allow', updatedInput } } });
+  });
   it('has no opinion (empty 200, normal dialog) when the pet answers null or has no handler', async () => {
     const a = await boot({ onPermission: async () => null });
     const r1 = await post(`${a.base}/hook/tok/PermissionRequest`, { session_id: 's1' });
