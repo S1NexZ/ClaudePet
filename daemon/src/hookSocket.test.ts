@@ -8,6 +8,8 @@ import { fileURLToPath } from 'node:url';
 import { listenHooks } from './hookSocket.js';
 
 const HOOK = fileURLToPath(new URL('../../hook/pet-hook.mjs', import.meta.url));
+/** PET_HOOK_BIN: run the native ccpet-hook instead of the Node script (same behaviour expected) */
+const BIN = process.env.PET_HOOK_BIN;
 const sock = () => join(mkdtempSync(join(tmpdir(), 'hs-')), 'hook.sock');
 const closers: Array<() => unknown> = [];
 afterEach(async () => { for (const c of closers.splice(0)) await c(); });
@@ -15,7 +17,7 @@ afterEach(async () => { for (const c of closers.splice(0)) await c(); });
 function runHook(path: string, input: string) {
   return new Promise<{ code: number | null; stdout: string; ms: number }>((resolve) => {
     const t0 = Date.now();
-    const p = spawn(process.execPath, [HOOK], { env: { ...process.env, PET_PTY_SOCK: '', CLAUDE_PET_SOCK: path } });
+    const p = spawn(BIN ?? process.execPath, BIN ? [] : [HOOK], { env: { ...process.env, PET_PTY_SOCK: '', CLAUDE_PET_SOCK: path } });
     let stdout = '';
     p.stdout.on('data', (d) => (stdout += d));
     p.on('close', (code) => resolve({ code, stdout, ms: Date.now() - t0 }));

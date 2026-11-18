@@ -8,11 +8,13 @@ import { startHookServer } from '../daemon/src/hookHttp.js';
 import { createMailbox } from '../daemon/src/mailbox.js';
 
 const script = fileURLToPath(new URL('./pet-hook.mjs', import.meta.url));
+/** PET_HOOK_BIN: run the native ccpet-hook instead of the Node script (same behaviour expected) */
+const BIN = process.env.PET_HOOK_BIN;
 const closers: Array<() => Promise<void>> = [];
 afterEach(async () => { for (const c of closers) await c(); closers.length = 0; });
 
 function waiter(home: string, sid = 's1') {
-  const p = spawn(process.execPath, [script, 'wait'], { env: { ...process.env, HOME: home, USERPROFILE: home }, stdio: ['pipe', 'pipe', 'pipe'] });
+  const p = spawn(BIN ?? process.execPath, BIN ? ['wait'] : [script, 'wait'], { env: { ...process.env, HOME: home, USERPROFILE: home }, stdio: ['pipe', 'pipe', 'pipe'] });
   let err = '';
   p.stderr.on('data', (d) => { err += d; });
   p.stdin.end(JSON.stringify({ session_id: sid }));
@@ -52,7 +54,7 @@ describe('pet-hook.mjs wait (the mailbox waiter)', () => {
     expect((await first.done).code).toBe(2);
   });
   /** runs the waiter under a parent process whose command line ends with `extra` (like `claude -p "hi"`) */
-  const underParent = (home: string, extra: string[]) => spawn(process.execPath, ['-e', `const c=require('child_process').spawn(process.execPath,[${JSON.stringify(script)},'wait'],{env:{...process.env,HOME:${JSON.stringify(home)}},stdio:['pipe','inherit','inherit']});c.stdin.end(JSON.stringify({session_id:'s1'}));c.on('close',(k)=>process.exit(k??9))`, '--', ...extra], { stdio: 'ignore' });
+  const underParent = (home: string, extra: string[]) => spawn(process.execPath, ['-e', `const c=require('child_process').spawn(${JSON.stringify(BIN ?? process.execPath)},${JSON.stringify(BIN ? ['wait'] : [script, 'wait'])},{env:{...process.env,HOME:${JSON.stringify(home)}},stdio:['pipe','inherit','inherit']});c.stdin.end(JSON.stringify({session_id:'s1'}));c.on('close',(k)=>process.exit(k??9))`, '--', ...extra], { stdio: 'ignore' });
   const exitOf = (p: ReturnType<typeof spawn>) => new Promise<number | null>((r) => p.on('close', r));
   it('a one-shot `claude -p` parent: exits 0 at once instead of holding the run open', async () => {
     const { home } = await hub(2000);
@@ -84,7 +86,7 @@ describe('pet-hook.mjs wait (the mailbox waiter)', () => {
     const port = probe.port; await probe.close();
     mkdirSync(join(home, '.claude-pet'), { recursive: true });
     writeFileSync(join(home, '.claude-pet', 'hub.json'), JSON.stringify({ port, token: 'abcdef0123456789' }));
-    const p = spawn(process.execPath, [script, 'wait'], { env: { ...process.env, HOME: home, USERPROFILE: home, CLAUDE_PET_WAIT_RETRY_MS: '200' }, stdio: ['pipe', 'pipe', 'pipe'] });
+    const p = spawn(BIN ?? process.execPath, BIN ? ['wait'] : [script, 'wait'], { env: { ...process.env, HOME: home, USERPROFILE: home, CLAUDE_PET_WAIT_RETRY_MS: '200' }, stdio: ['pipe', 'pipe', 'pipe'] });
     let err = ''; p.stderr.on('data', (d) => { err += d; });
     p.stdin.end(JSON.stringify({ session_id: 's1' }));
     const done = new Promise<number | null>((r) => p.on('close', r));
@@ -104,7 +106,7 @@ describe('pet-hook.mjs wait (the mailbox waiter)', () => {
     const port = probe.port; await probe.close();
     mkdirSync(join(home, '.claude-pet'), { recursive: true });
     writeFileSync(join(home, '.claude-pet', 'hub.json'), JSON.stringify({ port, token: 'abcdef0123456789' }));
-    const p = spawn(process.execPath, [script, 'wait'], { env: { ...process.env, HOME: home, USERPROFILE: home, CLAUDE_PET_WAIT_RETRY_MS: '100', CLAUDE_PET_WAIT_DOWN_MS: '500' }, stdio: ['pipe', 'ignore', 'ignore'] });
+    const p = spawn(BIN ?? process.execPath, BIN ? ['wait'] : [script, 'wait'], { env: { ...process.env, HOME: home, USERPROFILE: home, CLAUDE_PET_WAIT_RETRY_MS: '100', CLAUDE_PET_WAIT_DOWN_MS: '500' }, stdio: ['pipe', 'ignore', 'ignore'] });
     p.stdin.end(JSON.stringify({ session_id: 's1' }));
     const t0 = Date.now();
     expect(await new Promise((r) => p.on('close', r))).toBe(0);

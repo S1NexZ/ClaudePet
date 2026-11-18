@@ -209,12 +209,22 @@ if (primary) app.whenReady().then(async () => {
   });
   const info = (message: string, detail = '') => dialog.showMessageBox(win, { type: 'info', title: 'ccPet', message, detail });
 
-  const onHooks = async (m: { diff: string; applied: boolean; installed: boolean; stale: boolean }) => {
+  const onHooks = async (m: { diff: string; applied: boolean; installed: boolean; stale: boolean; upgrade?: boolean }) => {
     if (m.applied) { void info(L('Хуки подключены', 'Hooks connected', '钩子已连接'), L('Новые сессии Claude Code будут видны питомцу. Уже открытые терминалы нужно перезапустить.', 'New Claude Code sessions will be visible to the pet. Terminals that are already open need a restart.', '新的 Claude Code 会话将对宠物可见。已打开的终端需要重启。')); return; }
     if (!m.diff) { if (hooksManual) void info(L('Хуки уже подключены', 'Hooks are already connected', '钩子已经连接')); return; }
     // unasked, only offer when they're absent or broken; an install pointing at a working copy is left alone
-    if (!hooksManual && m.installed && !m.stale) return;
+    if (!hooksManual && m.installed && !m.stale && !m.upgrade) return;
     const added = m.diff.split('\n').filter((l) => l.startsWith('+ ')).length;
+    if (m.upgrade && m.installed && !m.stale) {
+      // 0.6 hooks run through Node: offer the native hook (same events, a fraction of the memory), with the same diff and backup
+      const u = await dialog.showMessageBox(win, confirmOptions({
+        type: 'question', action: L('Обновить', 'Update', '更新'), cancel: L('Не сейчас', 'Not now', '暂不'),
+        message: L('Обновить хуки Claude Code?', 'Update the Claude Code hooks?', '更新 Claude Code 钩子？'),
+        detail: `${L(`Хуки питомца теперь работают без Node.js: каждая сессия Claude Code тратит на них около 1 МБ памяти вместо 65 МБ. Изменятся только команды хуков питомца в ~/.claude/settings.json, копия сохранится в settings.json.bak. Уже открытые сессии подхватят их после перезапуска.`, `The pet's hooks now run without Node.js: each Claude Code session spends about 1 MB of memory on them instead of 65 MB. Only the pet's hook commands in ~/.claude/settings.json change; a copy is kept in settings.json.bak. Sessions already open pick them up after a restart.`, `宠物的钩子现在无需 Node.js 运行：每个 Claude Code 会话只占用约 1 MB 内存，而不是 65 MB。只会修改 ~/.claude/settings.json 中宠物的钩子命令，备份保存在 settings.json.bak。已打开的会话重启后生效。`)}\n\n${m.diff.split('\n').slice(0, 14).join('\n')}\n…`,
+      }));
+      if (isConfirmed(u)) toBridge({ type: 'hooks', apply: true });
+      return;
+    }
     const r = await dialog.showMessageBox(win, confirmOptions({
       type: 'question', action: L('Подключить', 'Connect', '连接'), cancel: L('Не сейчас', 'Not now', '暂不'),
       message: L('Подключить хуки Claude Code?', 'Connect Claude Code hooks?', '连接 Claude Code 钩子？'),

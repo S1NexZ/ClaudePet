@@ -1,3 +1,4 @@
+import { isNativeHook } from './nodeCmd.js';
 import { join, dirname } from 'node:path';
 import { existsSync, writeFileSync } from 'node:fs';
 import type { SessionStore } from './sessionStore.js';
@@ -161,7 +162,7 @@ export function createBridge(o: {
     // our hook files referenced by the user's settings: none = not installed; any missing = stale
     const files = Object.values(current.hooks ?? {}).flat()
       .flatMap((g: any) => (Array.isArray(g?.hooks) ? g.hooks : []))
-      .map((h: any) => /"([^"]*pet-hook\.mjs)"/.exec(String(h?.command ?? ''))?.[1])
+      .map((h: any) => /"([^"]*(?:pet-hook\.mjs|ccpet-hook))"/.exec(String(h?.command ?? ''))?.[1])
       .filter((f): f is string => !!f);
     let next: Record<string, any>;
     if (remove) next = removeHostHooks(removeHooks(current).next).next;
@@ -172,7 +173,9 @@ export function createBridge(o: {
     const same = JSON.stringify(current) === JSON.stringify(next);
     const diff = same ? '' : lineDiff(JSON.stringify({ hooks: current.hooks ?? {} }, null, 2).split('\n'), JSON.stringify({ hooks: next.hooks ?? {} }, null, 2).split('\n'));
     const st = hooksStatus(current, 'wsl');
-    return { current, raw, next, diff, installed: files.length > 0, stale: files.some((f) => !existsSync(f)), ...st };
+    // installed through Node (0.6) while this bridge has the native hook: the same hooks, each a ~1 MB process instead of a Node one
+    const upgrade = !!diff && isNativeHook(o.hooks.hookPath) && files.some((f) => f.endsWith('pet-hook.mjs'));
+    return { current, raw, next, diff, installed: files.length > 0, stale: files.some((f) => !existsSync(f)), upgrade, ...st };
   };
 
   return {
@@ -240,7 +243,7 @@ export function createBridge(o: {
             if (!o.hooks.nodePath) { o.out({ type: 'statusline', diff: '', applied: false, kind: 'none', error: 'unsupported' }); return; }
             try {
               const { current, raw } = readSettingsFile(o.hooks.settingsPath);
-              const script = join(dirname(o.hooks.hookPath), 'pet-statusline.mjs');
+              const script = isNativeHook(o.hooks.hookPath) ? o.hooks.hookPath : join(dirname(o.hooks.hookPath), 'pet-statusline.mjs');
               const r = cmd.remove === true ? removeStatusLine(current) : planStatusLine(current, script, o.hooks.nodePath);
               if (cmd.apply === true && r.diff) writeSettingsFile(o.hooks.settingsPath, r.next, raw !== undefined);
               o.out({ type: 'statusline', diff: cmd.apply === true ? '' : r.diff, applied: cmd.apply === true && !!r.diff, kind: statusLineState(cmd.apply === true || !r.diff ? r.next : current) });
@@ -299,7 +302,7 @@ export function createBridge(o: {
               if (p.diff) writeSettingsFile(o.hooks.settingsPath, p.next, p.raw !== undefined);
               o.out({ type: 'hooks', diff: '', applied: !!p.diff, installed: cmd.remove !== true, stale: false, events: cmd.remove !== true, mailbox: cmd.remove !== true && !!o.hostHooks, permissions: cmd.remove !== true && wantPerm && !!o.hostHooks });
             } else {
-              o.out({ type: 'hooks', diff: p.diff, applied: false, installed: p.installed, stale: p.stale, events: p.events, mailbox: p.mailbox, permissions: p.permissions });
+              o.out({ type: 'hooks', diff: p.diff, applied: false, installed: p.installed, stale: p.stale, upgrade: p.upgrade, events: p.events, mailbox: p.mailbox, permissions: p.permissions });
             }
             return;
           }

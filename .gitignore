@@ -16,3 +16,4 @@ release-test/
 __pycache__/
 *.pyc
 ui/helper/
+native/target/

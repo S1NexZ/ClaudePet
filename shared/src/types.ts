@@ -119,7 +119,7 @@ export type BridgeMessage =
   | { type: 'chat'; sessionId: string; event: ChatEvent }
   | { type: 'history'; sessionId: string; items: ChatItem[] }
   | { type: 'started'; sessionId: string }
-  | { type: 'hooks'; diff: string; applied: boolean; installed: boolean; stale: boolean; events?: boolean; mailbox?: boolean; permissions?: boolean; error?: string }
+  | { type: 'hooks'; diff: string; applied: boolean; installed: boolean; stale: boolean; /** installed through Node while the faster native hook is available */ upgrade?: boolean; events?: boolean; mailbox?: boolean; permissions?: boolean; error?: string }
   | { type: 'models'; models: Array<{ value: string; displayName: string; description: string }> }
   | { type: 'modelSet'; sessionId: string | null; model: string }
   | { type: 'usage'; usage: UsageInfo }

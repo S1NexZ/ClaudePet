@@ -1,0 +1,9 @@
+[package]
+name = "ccpet-hook"
+version = "0.7.0"
+edition = "2021"
+description = "ccPet's Claude Code hook: forwards events to the pet, waits for the pet's messages, saves plan limits from the status line"
+license = "MIT"
+
+[dependencies]
+serde_json = "1"

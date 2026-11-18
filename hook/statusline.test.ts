@@ -7,7 +7,9 @@ import { join } from 'node:path';
 const SCRIPT = join(__dirname, 'pet-statusline.mjs');
 const enc = (o: unknown) => Buffer.from(JSON.stringify(o), 'utf8').toString('base64url');
 const event = JSON.stringify({ rate_limits: { five_hour: { used_percentage: 23, resets_at: 1900000000 }, seven_day: { used_percentage: 77, resets_at: 1900500000 } } });
-const run = (args: string[], file: string, input = event) => spawnSync(process.execPath, [SCRIPT, ...args], { input, encoding: 'utf8', env: { ...process.env, CLAUDE_PET_USAGE: file } });
+/** PET_HOOK_BIN: run the native ccpet-hook instead of the Node script (same behaviour expected) */
+const BIN = process.env.PET_HOOK_BIN;
+const run = (args: string[], file: string, input = event) => spawnSync(BIN ?? process.execPath, BIN ? ['statusline', ...args] : [SCRIPT, ...args], { input, encoding: 'utf8', env: { ...process.env, CLAUDE_PET_USAGE: file } });
 
 describe('pet-statusline.mjs', () => {
   it('stores the limits and prints its own short line when it is not chained', () => {

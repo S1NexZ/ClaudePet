@@ -6,7 +6,7 @@ import { execFileSync } from 'node:child_process';
 import { homedir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { stableHookDir, stableRuntime } from './nodeCmd.js';
+import { pickHook, stableHookDir, stableRuntime } from './nodeCmd.js';
 import { SessionStore } from './sessionStore.js';
 import { SessionRunner } from './runner.js';
 import { createBridge } from './bridge.js';
@@ -28,7 +28,7 @@ function findClaude(): string | undefined {
 }
 
 const here = dirname(typeof __filename === 'string' ? __filename : fileURLToPath(import.meta.url));
-const hookPath = process.env.CLAUDE_PET_HOOK ?? join(stableHookDir(join(here, '../hook'), join(homedir(), '.claude-pet', 'bin')), 'pet-hook.mjs');
+const hookPath = process.env.CLAUDE_PET_HOOK ?? pickHook(stableHookDir(join(here, '../hook'), join(homedir(), '.claude-pet', 'bin')));
 const claude = findClaude();
 const store = new SessionStore();
 let bridge: ReturnType<typeof createBridge>;

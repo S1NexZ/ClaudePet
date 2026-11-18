@@ -1,6 +1,6 @@
 import { readFileSync, writeFileSync, copyFileSync, existsSync, mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
-import { nodeCmd } from './nodeCmd.js';
+import { hookCmd } from './nodeCmd.js';
 import { HOOK_EVENTS, lineDiff } from './installHooks.js';
 
 /**
@@ -29,7 +29,7 @@ const TOOL_EVENTS = new Set(['PreToolUse', 'PostToolUse', 'PostToolUseFailure'])
 const HTTP_HOOK_URL = /^http:\/\/127\.0\.0\.1:\d+\/hook\/[0-9a-f]+\/(\w+)$/;
 const isWaiter = (h: any) => h?.type === 'command' && (
   (/pet-helper(\.exe)?["']?$/i.test(String(h.command ?? '')) && Array.isArray(h.args) && h.args[0] === 'wait') ||
-  (/pet-hook\.mjs/.test(String(h.command ?? '')) && /\swait\b/.test(String(h.command))));
+  (/pet-hook\.mjs|ccpet-hook/.test(String(h.command ?? '')) && /\swait\b/.test(String(h.command))));
 const isOurHttp = (h: any) => h?.type === 'http' && HTTP_HOOK_URL.test(String(h.url ?? ''));
 const isOurs = (h: any) => isWaiter(h) || isOurHttp(h);
 
@@ -68,7 +68,7 @@ export function planHostHooks(current: Settings, o: HookPlanOpts): { next: Setti
       for (const ev of ['SessionStart', 'Stop']) add(next, ev, { ...waiter });
     }
   } else if (o.nodePath && o.hookPath) {
-    const waiter = { type: 'command', command: `${nodeCmd(o.nodePath)} "${o.hookPath}" wait`, asyncRewake: true };
+    const waiter = { type: 'command', command: `${hookCmd(o.nodePath, o.hookPath)} wait`, asyncRewake: true };
     for (const ev of ['SessionStart', 'Stop']) add(next, ev, { ...waiter });
   }
   if (o.permissions) add(next, 'PermissionRequest', { type: 'http', url: `${o.origin}/hook/${o.token}/PermissionRequest`, timeout: 35 });
@@ -89,7 +89,7 @@ export interface HooksStatus { events: boolean; mailbox: boolean; permissions: b
 export function hooksStatus(current: Settings, kind: HostKind): HooksStatus {
   const handlers = (ev: string): any[] => (Array.isArray(current.hooks?.[ev]) ? current.hooks[ev] : []).flatMap((g: any) => (Array.isArray(g?.hooks) ? g.hooks : []));
   const eventsHttp = HOOK_EVENTS.every((ev) => handlers(ev).some((h) => isOurHttp(h)));
-  const eventsCmd = HOOK_EVENTS.every((ev) => handlers(ev).some((h) => h?.type === 'command' && /pet-hook\.mjs/.test(String(h.command ?? '')) && !/\swait\b/.test(String(h.command))));
+  const eventsCmd = HOOK_EVENTS.every((ev) => handlers(ev).some((h) => h?.type === 'command' && /pet-hook\.mjs|ccpet-hook/.test(String(h.command ?? '')) && !/\swait\b/.test(String(h.command))));
   return {
     events: kind === 'windows' ? eventsHttp : eventsCmd,
     mailbox: ['SessionStart', 'Stop'].every((ev) => handlers(ev).some(isWaiter)),

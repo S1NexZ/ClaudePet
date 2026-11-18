@@ -51,3 +51,34 @@ describe('procinfo', () => {
     expect(ttyPath(999999999)).toBeNull();
   });
 });
+
+describe('the native hook (ccpet-hook)', () => {
+  const BIN = '/home/u/.claude-pet/bin/ccpet-hook';
+  it('is run directly, not through node; old Node commands and the native ones are both ours', async () => {
+    const { hookCmd, isNativeHook, isOurHookCommand } = await import('./nodeCmd.js');
+    expect(isNativeHook(BIN)).toBe(true);
+    expect(isNativeHook('/x/pet-hook.mjs')).toBe(false);
+    expect(hookCmd('/usr/bin/node', BIN)).toBe(`"${BIN}"`);
+    expect(hookCmd('/usr/bin/node', '/x/pet-hook.mjs')).toBe('"/usr/bin/node" "/x/pet-hook.mjs"');
+    expect(isOurHookCommand(`"${BIN}" wait`) && isOurHookCommand('"/n" "/x/pet-hook.mjs"') && !isOurHookCommand('my-own-hook.sh')).toBe(true);
+  });
+  it('events, waiter and status line commands use the binary; an old Node install is replaced, not doubled', async () => {
+    const old = planHostHooks(planHooks({}, '/x/pet-hook.mjs', '/usr/bin/node').next, { kind: 'wsl', origin: 'http://127.0.0.1:1', token: 't', nodePath: '/usr/bin/node', hookPath: '/x/pet-hook.mjs', permissions: false }).next;
+    const next = planHostHooks(planHooks(old, BIN, '/usr/bin/node').next, { kind: 'wsl', origin: 'http://127.0.0.1:1', token: 't', nodePath: '/usr/bin/node', hookPath: BIN, permissions: false }).next;
+    const commands = Object.values(next.hooks).flat().flatMap((g: any) => g.hooks).map((h: any) => String(h.command ?? ''));
+    expect(commands.some((c) => c.includes('pet-hook.mjs'))).toBe(false);
+    const { HOOK_EVENTS } = await import('./installHooks.js');
+    expect(commands.filter((c) => c === `"${BIN}" 2>/dev/null || true`).length).toBe(HOOK_EVENTS.length);
+    expect(next.hooks.SessionStart.flatMap((g: any) => g.hooks).filter((h: any) => h.command === `"${BIN}" wait`).length).toBe(1);
+    expect(planStatusLine({}, BIN, '/usr/bin/node').next.statusLine.command).toBe(`"${BIN}" statusline 2>/dev/null || true`);
+  });
+  it('pickHook takes the binary only when it runs here, else the Node script', async () => {
+    const { pickHook } = await import('./nodeCmd.js');
+    const dir = mkdtempSync(join(tmpdir(), 'nh-'));
+    expect(pickHook(dir)).toBe(join(dir, 'pet-hook.mjs'));
+    writeFileSync(join(dir, 'ccpet-hook'), 'not a program', { mode: 0o755 });
+    expect(pickHook(dir)).toBe(join(dir, 'pet-hook.mjs'));
+    writeFileSync(join(dir, 'ccpet-hook'), '#!/bin/sh\necho "ccpet-hook 0.7.0"\n', { mode: 0o755 });
+    expect(pickHook(dir)).toBe(join(dir, 'ccpet-hook'));
+  });
+});
