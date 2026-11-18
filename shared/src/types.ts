@@ -54,6 +54,8 @@ export interface Session {
   desktopId?: string;
   /** a mailbox waiter is armed: a message sent from the pet is delivered even without a PTY */
   mailbox?: boolean;
+  /** the ccPet plugin runs inside this session: messages from the pet go in as the user's own words (no wrapper, no typing into the app) */
+  mod?: boolean;
   /** messages the pet will type into this session later (after the turn, or at a time) */
   queue?: QueuedMessage[];
 }

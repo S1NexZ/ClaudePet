@@ -115,4 +115,26 @@ describe('hook http receiver', () => {
     const { base } = await boot();
     expect((await fetch(`${base}/mailbox/tok/..%2Fx%20y`)).status).toBe(400);
   });
+  it('the ccPet plugin (via=mod) takes the session from the older hook waiter, which then gets 409 and stops', async () => {
+    const { base, mailbox } = await boot({ waitMs: 5000 });
+    const hook = fetch(`${base}/mailbox/tok/s7`);
+    await new Promise((r) => setTimeout(r, 100));
+    expect(mailbox.hasWaiter('s7')).toBe(true);
+    const mod = fetch(`${base}/mailbox/tok/s7?via=mod&wait=2`);
+    expect((await hook).status).toBe(204); // released at once, not after its 5 s
+    await new Promise((r) => setTimeout(r, 50));
+    expect(mailbox.waiterIsMod('s7')).toBe(true);
+    expect((await fetch(`${base}/mailbox/tok/s7`)).status).toBe(409); // the hook waiter re-polls into a 409 and exits
+    mailbox.send('s7', 'hello');
+    const r = await mod;
+    expect(r.status).toBe(200);
+    expect(await r.text()).toBe('hello');
+    expect(mailbox.isMod('s7')).toBe(true);
+  });
+  it('a plugin poll is short (its fetch lasts 30 s at most): it ends with 204 after its own wait', async () => {
+    const { base } = await boot({ waitMs: 60_000 });
+    const t = Date.now();
+    expect((await fetch(`${base}/mailbox/tok/s8?via=mod&wait=1`)).status).toBe(204);
+    expect(Date.now() - t).toBeLessThan(3000);
+  });
 });

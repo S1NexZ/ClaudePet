@@ -42,6 +42,16 @@ Works with Claude Code in **Windows terminals, WSL, the Claude desktop app, macO
 3. **Optional: connect the terminal** (tray → "Connect the terminal"). Then the pet can type into your terminal session directly and stop it with Esc.
 4. Run `claude` as usual. The pet picks up the session; `Ctrl+Alt+P` opens the chat.
 
+### Recommended: the ccPet plugin for Claude Code
+
+Type this once in Claude Code (2.1.287 or later):
+
+```
+/plugin install ccpet --marketplace S1NexZ/ccPet
+```
+
+The plugin runs inside Claude Code (terminal, the Code tab of the Claude app, VS Code). With it, what you write in the pet arrives in the session as your own message, with no terminal wrapper and no typing into the app's window, and the pet gets your plan limits straight from Claude Code. It only talks to the pet on `127.0.0.1`; `claude plugin validate` lists every call it makes. WSL sessions inside the Claude app do not load plugins, so hooks stay in use there.
+
 **First launch warnings.** The builds are not signed with paid certificates yet:
 - **Windows** SmartScreen: "More info" → "Run anyway".
 - **macOS**: right-click the app → "Open". If macOS says the app is damaged, run `xattr -cr /Applications/ccPet.app`.

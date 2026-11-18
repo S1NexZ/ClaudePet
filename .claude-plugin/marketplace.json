@@ -1,0 +1,12 @@
+{
+  "name": "ccpet",
+  "owner": { "name": "S1NexZ", "url": "https://github.com/S1NexZ" },
+  "metadata": { "description": "The ccPet desktop pet for Claude Code" },
+  "plugins": [
+    {
+      "name": "ccpet",
+      "source": "./plugin/ccpet",
+      "description": "Connects Claude Code to the ccPet desktop pet: messages from the pet arrive as your own, plan limits reach the pet without extra queries."
+    }
+  ]
+}

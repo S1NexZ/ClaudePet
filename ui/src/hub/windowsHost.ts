@@ -58,7 +58,7 @@ export function createWindowsHost(o: WindowsHostOpts) {
     try { const t = JSON.parse(readFileSync(tokenFile, 'utf8'))?.token; if (typeof t === 'string' && /^[0-9a-f]{16,}$/.test(t)) return t; } catch { /* first run */ }
     const t = randomBytes(16).toString('hex');
     mkdirSync(o.dataDir, { recursive: true });
-    writeFileSync(tokenFile, JSON.stringify({ token: t }));
+    writeFileSync(tokenFile, JSON.stringify({ token: t, port: o.port }));
     return t;
   })();
   const store = new SessionStore();

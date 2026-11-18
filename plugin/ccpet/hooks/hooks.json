@@ -1,0 +1,4 @@
+{
+  "description": "ccPet bridge: delivers messages from the desktop pet and shares plan limits with it",
+  "modules": ["./register.js"]
+}

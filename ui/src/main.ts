@@ -290,6 +290,19 @@ if (primary) app.whenReady().then(async () => {
     if (!ok && Notification.isSupported())
       new Notification({ title: 'ccPet', body: L(`Горячая клавиша ${settings.hotkey} недоступна (занята другим приложением)`, `The hotkey ${settings.hotkey} is unavailable (taken by another app)`, `快捷键 ${settings.hotkey} 不可用（已被其他应用占用）`) }).show();
   };
+  /** How to install the ccPet plugin (a Claude Code mod): one command typed in Claude Code; the pet never edits anything for it */
+  const PLUGIN_INSTALL = '/plugin install ccpet --marketplace S1NexZ/ccPet';
+  const showPluginInfo = async () => {
+    const r = await dialog.showMessageBox(win, confirmOptions({
+      type: 'question', action: L('Копировать команду', 'Copy command', '复制命令'), cancel: L('Закрыть', 'Close', '关闭'),
+      message: L('Плагин ccPet для Claude Code', 'The ccPet plugin for Claude Code', 'Claude Code 的 ccPet 插件'),
+      detail: L(
+        `Плагин работает внутри Claude Code (терминал, вкладка Code приложения Claude, VS Code). С ним сообщения из питомца приходят как ваши собственные, без обёртки терминала и без ввода в окно приложения, а лимиты плана попадают в питомца без отдельных запросов.\n\nВведите в Claude Code:\n${PLUGIN_INSTALL}\n\nЗатем перезапустите сессию (или /reload-plugins). Нужен Claude Code 2.1.287 или новее. Сессии WSL внутри приложения Claude плагины не загружают: для них остаются хуки.`,
+        `The plugin runs inside Claude Code (terminal, the Code tab of the Claude app, VS Code). With it, messages from the pet arrive as your own, without the terminal wrapper or typing into the app's window, and plan limits reach the pet without extra queries.\n\nType in Claude Code:\n${PLUGIN_INSTALL}\n\nThen restart the session (or run /reload-plugins). Requires Claude Code 2.1.287 or later. WSL sessions inside the Claude app do not load plugins: hooks stay in use for them.`,
+        `该插件在 Claude Code 内运行（终端、Claude 应用的 Code 标签页、VS Code）。安装后，来自宠物的消息会作为您自己的消息送达，无需终端包装器或向应用窗口输入；套餐额度也无需额外查询即可传给宠物。\n\n在 Claude Code 中输入：\n${PLUGIN_INSTALL}\n\n然后重启会话（或运行 /reload-plugins）。需要 Claude Code 2.1.287 或更高版本。Claude 应用中的 WSL 会话不加载插件，仍使用钩子。`),
+    }));
+    if (isConfirmed(r)) clipboard.writeText(PLUGIN_INSTALL);
+  };
   const toggleWindow = () => (win.isVisible() ? win.hide() : (win.showInactive(), win.setAlwaysOnTop(true, TOP_LEVEL)));
   /** Guided terminal setup: shows the one command to run in WSL (it asks before changing ~/.bashrc, backs it up, can be undone). */
   const showTerminalSetup = async () => {
@@ -326,6 +339,7 @@ if (primary) app.whenReady().then(async () => {
     { label: L('Настройки…', 'Settings…', '设置…'), click: () => { win.show(); win.setAlwaysOnTop(true, TOP_LEVEL); win.webContents.send('pet:open-settings'); } },
     { label: NATIVE ? L('Подключить терминал…', 'Connect the terminal…', '连接终端…') : L('Подключить терминал (WSL)…', 'Connect the terminal (WSL)…', '连接终端（WSL）…'), click: () => void showTerminalSetup() },
     { label: L('Подключить хуки Claude Code…', 'Connect Claude Code hooks…', '连接 Claude Code 钩子…'), enabled: up, click: () => { hooksManual = true; toBridge({ type: 'hooks', apply: false }); } },
+    { label: L('Плагин ccPet для Claude Code…', 'ccPet plugin for Claude Code…', 'Claude Code 的 ccPet 插件…'), click: () => void showPluginInfo() },
     { label: L('Уведомлять, когда нужно разрешение', 'Notify when permission is needed', '需要权限时通知'), type: 'checkbox', checked: settings.notify,
       click: (i) => { settings = { ...settings, notify: i.checked }; applySettings(); } },
     { label: L('Размер питомца', 'Pet size', '宠物大小'), submenu: [0.75, 1, 1.25, 1.5, 1.8].filter((v) => v >= PET_SCALE_MIN && v <= PET_SCALE_MAX).map((v) => ({
@@ -487,7 +501,8 @@ if (primary) app.whenReady().then(async () => {
       const s = sessionById(String(cmd.sessionId));
       // a queued or scheduled message goes out when nobody may be at the computer: it never drives the Claude app's window (that
       // would take the keyboard focus, e.g. from a fullscreen game, and act in the app on its own); it goes through the hook instead
-      if (s?.desktopId && settings.desktopSend === 'real' && !cmd.queued && typeof cmd.text === 'string' && cmd.text.trim() && !(Array.isArray(cmd.images) && cmd.images.length)) {
+      // with the ccPet plugin in the session the message goes in through it, as the user's own words: no typing into the app's window
+      if (s?.desktopId && !s.mod && settings.desktopSend === 'real' && !cmd.queued && typeof cmd.text === 'string' && cmd.text.trim() && !(Array.isArray(cmd.images) && cmd.images.length)) {
         const r = await sendToDesktop({ text: cmd.text, title: s.project, desktopId: s.desktopId });
         if (r === 'ok') return;
         log(`desktop send: ${r}; delivering through the hook instead`);

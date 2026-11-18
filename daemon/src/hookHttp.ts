@@ -57,10 +57,18 @@ export async function startHookServer(o: HookServerOpts): Promise<{ port: number
       const src = url.searchParams.get('src'); // the front end that started claude (CLAUDE_CODE_ENTRYPOINT: cli, claude-vscode, claude-desktop, ...)
       if (cwd && cwd.length <= 1024 && !/[\x00-\x1f]/.test(cwd)) o.onWaiter?.(sid, cwd, src && /^[a-z0-9-]{1,32}$/.test(src) ? src : undefined);
       if (pty && PIPE_NAME.test(pty)) o.onPty?.(sid, pty);
+      // the ccPet plugin (a mod inside Claude Code) submits messages as the user's own words: it wins over the older asyncRewake
+      // waiter, whose delivery shows as faint hook feedback. Its polls are short: one $.http.fetch lasts 30 s at most
+      const mod = url.searchParams.get('via') === 'mod';
+      if (mod) {
+        o.mailbox.markMod(sid);
+        if (o.mailbox.hasWaiter(sid) && !o.mailbox.waiterIsMod(sid)) o.mailbox.cancel(sid); // that waiter gets 204 and re-polls into a 409
+      } else if (o.mailbox.isMod(sid)) { res.writeHead(409).end(); return; }
       if (o.mailbox.hasWaiter(sid)) { res.writeHead(409).end(); return; }
       let done = false;
       res.on('close', () => { if (!done) o.mailbox.cancel(sid); });
-      void o.mailbox.wait(sid, o.waitMs ?? 50_000).then((m) => {
+      const modWait = Math.min(25, Math.max(1, Number(url.searchParams.get('wait')) || 20)) * 1000;
+      void o.mailbox.wait(sid, mod ? modWait : o.waitMs ?? 50_000, mod).then((m) => {
         done = true;
         if (m === 'busy') res.writeHead(409).end();
         else if (m === null) res.writeHead(204).end();

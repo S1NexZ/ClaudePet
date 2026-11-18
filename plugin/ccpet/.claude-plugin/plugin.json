@@ -1,0 +1,10 @@
+{
+  "name": "ccpet",
+  "version": "0.7.0",
+  "description": "Connects Claude Code to the ccPet desktop pet: messages you write in the pet arrive as your own, and the pet gets your plan limits without extra queries.",
+  "author": { "name": "S1NexZ", "url": "https://github.com/S1NexZ" },
+  "homepage": "https://github.com/S1NexZ/ccPet",
+  "repository": "https://github.com/S1NexZ/ccPet",
+  "license": "MIT",
+  "keywords": ["pet", "desktop", "companion", "status", "limits"]
+}

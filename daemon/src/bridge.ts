@@ -130,7 +130,7 @@ export function createBridge(o: {
   let lastSnap = '';
   const snapshot = (onlyIfChanged = false) => {
     const s = snapshotOf(o.store);
-    if (o.mailbox) s.sessions = s.sessions.map((x) => ({ ...x, mailbox: o.mailbox!.hasWaiter(x.id) }));
+    if (o.mailbox) s.sessions = s.sessions.map((x) => ({ ...x, mailbox: o.mailbox!.hasWaiter(x.id) || o.mailbox!.isMod(x.id), ...(o.mailbox!.isMod(x.id) ? { mod: true } : {}) }));
     if (soft) s.sessions = s.sessions.map((x) => (hooked.has(x.id) && !x.owned && !x.pty ? { ...x, softStop: true } : x));
     const key = JSON.stringify(s);
     if (onlyIfChanged && key === lastSnap) return;
@@ -197,7 +197,8 @@ export function createBridge(o: {
                 o.store.clearPty(id); // wrapper is gone: fall back to resuming through the SDK
               }
             }
-            if (o.mailbox && s && !s.owned && (o.mailboxOnly || o.mailbox.hasWaiter(id))) {
+            // (the plugin re-polls every few seconds: a message for it waits in the mailbox until then)
+            if (o.mailbox && s && !s.owned && (o.mailboxOnly || o.mailbox.hasWaiter(id) || o.mailbox.isMod(id))) {
               // no PTY: wake the session through its mailbox waiter (the text goes out as a hook-feedback reminder)
               const text = String(cmd.text);
               const r = o.mailbox.send(id, `${L('Пользователь написал это через ccPet. Считай это его сообщением и ответь на него.', 'The user wrote this through ccPet. Treat it as their message and answer it.', '用户通过 ccPet 写了这条消息。请把它当作用户的消息并回答。')}\n${PET_MARKER} ${text}`);
