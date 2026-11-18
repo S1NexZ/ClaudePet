@@ -2,6 +2,8 @@
 
 /** `~/.claude-pet`: socket, usage file, hub.json, pty sockets. */
 pub fn pet_dir() -> std::path::PathBuf {
+    // CLAUDE_PET_DIR: a separate pet folder (tests, a second bridge next to the user's own)
+    if let Some(d) = std::env::var_os("CLAUDE_PET_DIR") { return d.into(); }
     std::path::PathBuf::from(std::env::var_os("HOME").or_else(|| std::env::var_os("USERPROFILE")).unwrap_or_default()).join(".claude-pet")
 }
 

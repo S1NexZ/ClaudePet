@@ -37,7 +37,7 @@ pub fn claude_fetch(claude: PathBuf, cwd: PathBuf, timeout: Duration) -> Fetch {
         let deadline = Instant::now() + timeout;
         let _ = std::fs::create_dir_all(&cwd);
         // no inherited session markers or keys
-        let env: Vec<(String, String)> = std::env::vars().filter(|(k, _)| !k.starts_with("CLAUDE") && !k.starts_with("ANTHROPIC")).collect();
+        let env: Vec<(String, String)> = std::env::vars().filter(|(k, _)| !k.starts_with("CLAUDE") && !k.starts_with("ANTHROPIC") && k != "PET_PTY_SOCK").collect();
         let h = Handlers {
             on_message: Box::new(|_, _| {}), // only housekeeping messages arrive
             on_request: Box::new(|p, id, _| p.respond(&id, Err("not supported".into()))),

@@ -66,7 +66,7 @@ fn busy() -> String { l("Claude занят", "Claude is busy", "Claude 正忙") 
 fn unknown(id: &str) -> String { l(&format!("Неизвестная сессия: {id}"), &format!("Unknown session: {id}"), &format!("未知会话：{id}")) }
 
 fn child_env() -> Vec<(String, String)> {
-    let mut env: Vec<(String, String)> = std::env::vars().filter(|(k, _)| k != "NODE_OPTIONS" && k != "DEBUG").collect();
+    let mut env: Vec<(String, String)> = std::env::vars().filter(|(k, _)| k != "NODE_OPTIONS" && k != "DEBUG" && k != "PET_PTY_SOCK").collect();
     if !env.iter().any(|(k, _)| k == "CLAUDE_CODE_ENTRYPOINT") { env.push(("CLAUDE_CODE_ENTRYPOINT".into(), "sdk-ts".into())); }
     env
 }
