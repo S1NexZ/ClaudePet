@@ -74,6 +74,8 @@ fn hub_token(file: &Path) -> String {
 }
 
 fn main() {
+    // the app asks this before relying on the binary (a build for another system or processor fails it)
+    if std::env::args().nth(1).as_deref() == Some("--version") { println!("ccpet-bridge {}", env!("CARGO_PKG_VERSION")); return; }
     let claude = find_claude();
     let settings = home().join(".claude").join("settings.json");
     let hub_file = pet_dir().join("hub.json");

@@ -24,6 +24,18 @@ describe('wslBridgeArgs for another distro', () => {
   });
 });
 
+describe('wslBridgeArgs with the native bridge', () => {
+  it('tries the binary first (it must answer --version) and falls back to node', () => {
+    const script = wslBridgeArgs('C:\\r\\bridge\\bridge.cjs', { nativeWinPath: 'C:\\r\\hook\\ccpet-bridge' })[3];
+    expect(script).toContain(`B='/mnt/c/r/hook/ccpet-bridge'; if [ -x "$B" ] && "$B" --version >/dev/null 2>&1; then exec "$B"; fi;`);
+    expect(script.indexOf('exec "$B"')).toBeLessThan(script.indexOf('exec "$N"'));
+  });
+  it('exports the port before either bridge starts', () => {
+    const script = wslBridgeArgs('C:\\b\\bridge.cjs', { nativeWinPath: 'C:\\h\\ccpet-bridge', port: 47930 })[3];
+    expect(script.indexOf('CLAUDE_PET_HOOK_PORT=47930')).toBeLessThan(script.indexOf('exec "$B"'));
+  });
+});
+
 describe('splitLines', () => {
   it('yields complete lines and keeps the unfinished tail', () => {
     expect(splitLines('', '{"a":1}\n{"b"')).toEqual({ lines: ['{"a":1}'], rest: '{"b"' });

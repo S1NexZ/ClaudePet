@@ -1,4 +1,6 @@
-import { spawn, type ChildProcess } from 'node:child_process';
+import { spawn, execFileSync, type ChildProcess } from 'node:child_process';
+import { existsSync } from 'node:fs';
+import { dirname, join } from 'node:path';
 import { wslBridgeArgs, splitLines } from '../bridgeLaunch.js';
 
 export interface WslHostOptions {
@@ -94,8 +96,9 @@ export function createWslHost(o: WslHostOptions): WslHost {
 
   const spawnBridge = () => {
     rest = '';
-    if (o.native) { const n = nativeBridgeSpawn(o.bridgePath); child = spawn(n.file, n.args, { env: n.env, stdio: ['pipe', 'pipe', 'pipe'] }); }
-    else child = spawn('wsl.exe', wslBridgeArgs(o.bridgePath, { distro: o.distro || undefined, port: o.secondary ? o.port : undefined, noUsage: o.secondary }), { windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] });
+    const nb = nativeBridgeFile(o.bridgePath);
+    if (o.native) { const n = nb && runsHere(nb) ? { file: nb, args: [] as string[], env: process.env } : nativeBridgeSpawn(o.bridgePath); child = spawn(n.file, n.args, { env: n.env, stdio: ['pipe', 'pipe', 'pipe'] }); }
+    else child = spawn('wsl.exe', wslBridgeArgs(o.bridgePath, { distro: o.distro || undefined, port: o.secondary ? o.port : undefined, noUsage: o.secondary, nativeWinPath: nb }), { windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] });
     child.stdin!.on('error', (e) => o.log(`bridge ${o.id} stdin: ${e.message}`)); // EPIPE if it just died; the exit handler restarts it
     child.stdout!.setEncoding('utf8');
     child.stdout!.on('data', (chunk: string) => { const r = splitLines(rest, chunk); rest = r.rest; r.lines.forEach(onLine); });
@@ -135,6 +138,14 @@ export function secondaryDistros(list: ReturnType<typeof parseDistroList>): stri
 }
 
 /** How the bridge starts on Linux / macOS: the app's own executable acting as Node (Electron's ELECTRON_RUN_AS_NODE), talking JSON lines over stdio. */
+/** The native bridge (Rust) shipped next to the hook, unless CLAUDE_PET_NATIVE_BRIDGE=0 asks for the Node one. */
+export function nativeBridgeFile(bridgePath: string, env: NodeJS.ProcessEnv = process.env): string | undefined {
+  if (env.CLAUDE_PET_NATIVE_BRIDGE === '0') return undefined;
+  const f = join(dirname(bridgePath), '..', 'hook', 'ccpet-bridge');
+  return existsSync(f) ? f : undefined;
+}
+const runsHere = (f: string): boolean => { try { return /^ccpet-bridge /.test(execFileSync(f, ['--version'], { encoding: 'utf8', timeout: 3000, stdio: ['ignore', 'pipe', 'ignore'] })); } catch { return false; } };
+
 export function nativeBridgeSpawn(bridgePath: string, execPath: string = process.execPath, env: NodeJS.ProcessEnv = process.env): { file: string; args: string[]; env: NodeJS.ProcessEnv } {
   return { file: execPath, args: [bridgePath], env: { ...env, ELECTRON_RUN_AS_NODE: '1' } };
 }

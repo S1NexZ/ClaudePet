@@ -1,4 +1,4 @@
-// Builds the native hook (native/ccpet-hook, Rust) into build/hook/ccpet-hook, the folder the app ships as resources/hook.
+// Builds the native hook and bridge (native/ccpet-hook, native/ccpet-bridge, Rust) into build/hook/, the folder the app ships as resources/hook.
 //   Windows / WSL: a static Linux binary for the WSL bridge (x86_64-unknown-linux-musl), built with Windows' cargo (no C toolchain in WSL needed).
 //   Linux:         the same static binary.
 //   macOS:         a universal binary (arm64 + x64).
@@ -11,8 +11,9 @@ import { fileURLToPath } from 'node:url';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const native = join(root, 'native');
-const out = join(root, 'build', 'hook', 'ccpet-hook');
-mkdirSync(dirname(out), { recursive: true });
+const outDir = join(root, 'build', 'hook');
+const BINS = ['ccpet-hook', 'ccpet-bridge'];
+mkdirSync(outDir, { recursive: true });
 const wsl = process.platform === 'linux' && !!process.env.WSL_DISTRO_NAME;
 const run = (file, args, opts = {}) => execFileSync(file, args, { stdio: 'inherit', ...opts });
 
@@ -21,26 +22,27 @@ function cargoBuild(target) {
     // Windows' cargo (MSVC host) links the Linux build scripts' host part itself; WSL has no C compiler of its own
     const winCargo = '%USERPROFILE%\\.cargo\\bin\\cargo.exe';
     const nativeWin = execFileSync('wslpath', ['-w', native], { encoding: 'utf8' }).trim();
-    run('cmd.exe', ['/c', `cd /d ${nativeWin} && set CARGO_TARGET_DIR=%LOCALAPPDATA%\\ccpet-target&& ${winCargo} build --release -p ccpet-hook --target ${target}`]);
+    run('cmd.exe', ['/c', `cd /d ${nativeWin} && set CARGO_TARGET_DIR=%LOCALAPPDATA%\\ccpet-target&& ${winCargo} build --release -p ccpet-hook -p ccpet-bridge --target ${target}`]);
     const localAppData = execFileSync('cmd.exe', ['/c', 'echo %LOCALAPPDATA%'], { encoding: 'utf8' }).trim();
-    return join(execFileSync('wslpath', [localAppData], { encoding: 'utf8' }).trim(), 'ccpet-target', target, 'release', 'ccpet-hook');
+    return join(execFileSync('wslpath', [localAppData], { encoding: 'utf8' }).trim(), 'ccpet-target', target, 'release');
   }
   const cargo = process.platform === 'win32' ? 'cargo.exe' : existsSync(join(homedir(), '.cargo/bin/cargo')) ? join(homedir(), '.cargo/bin/cargo') : 'cargo';
-  run(cargo, ['build', '--release', '-p', 'ccpet-hook', '--target', target], { cwd: native });
-  return join(native, 'target', target, 'release', 'ccpet-hook');
+  run(cargo, ['build', '--release', '-p', 'ccpet-hook', '-p', 'ccpet-bridge', '--target', target], { cwd: native });
+  return join(native, 'target', target, 'release');
 }
 
 try {
-  rmSync(out, { force: true });
+  for (const b of BINS) rmSync(join(outDir, b), { force: true });
   if (process.platform === 'darwin') {
-    const parts = ['aarch64-apple-darwin', 'x86_64-apple-darwin'].map(cargoBuild);
-    run('lipo', ['-create', '-output', out, ...parts]);
+    const dirs = ['aarch64-apple-darwin', 'x86_64-apple-darwin'].map(cargoBuild);
+    for (const b of BINS) run('lipo', ['-create', '-output', join(outDir, b), ...dirs.map((d) => join(d, b))]);
   } else {
-    copyFileSync(cargoBuild('x86_64-unknown-linux-musl'), out);
+    const d = cargoBuild('x86_64-unknown-linux-musl');
+    for (const b of BINS) copyFileSync(join(d, b), join(outDir, b));
   }
-  chmodSync(out, 0o755);
-  console.log('native hook built ->', out);
+  for (const b of BINS) chmodSync(join(outDir, b), 0o755);
+  console.log('native hook and bridge built ->', outDir);
 } catch (e) {
-  rmSync(out, { force: true });
-  console.log(`native hook not built (${e.message.split('\n')[0]}): the bridge uses the Node hook`);
+  for (const b of BINS) rmSync(join(outDir, b), { force: true });
+  console.log(`native hook and bridge not built (${e.message.split('\n')[0]}): the Node hook and bridge are used`);
 }
