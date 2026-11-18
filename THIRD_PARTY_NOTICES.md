@@ -3,7 +3,9 @@
 The MIT license in `LICENSE` covers **only the original source code of ccPet**. It does **not** apply to the items below,
 which keep their own licenses and rights.
 
-## Pet model: Claude娘 / Claude-maiden (`models/claude-maiden`)
+## Pet model: Claude娘 / Claude-maiden (`models/claude-maiden`), shown in the app as "cPet"
+
+The app displays this pack under the name **cPet** (Anthropic's trademark guidelines do not allow "Claude" in a third-party product's feature names). The pack's files are unchanged.
 - Pack `claude-maiden`, Codex pet format v2 ("An orange-haired, amber-eyed Claude."); the author is not named in the pack's metadata.
 - A fan-made personification of Anthropic's Claude; rights to the artwork belong to its author. Included unmodified.
 

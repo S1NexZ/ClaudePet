@@ -89,4 +89,4 @@ ccPet is free and will stay free: no ads, no paid features. If it made your work
 
 ## License
 
-ccPet's code is [MIT](LICENSE). Third-party assets (the bundled Claude-maiden pet, Claude Agent SDK, Electron) have their own terms: see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+ccPet's code is [MIT](LICENSE). Third-party assets (the bundled cPet pet, a third-party pack originally named Claude-maiden, Claude Agent SDK, Electron) have their own terms: see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).

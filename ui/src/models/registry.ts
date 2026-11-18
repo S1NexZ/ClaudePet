@@ -5,6 +5,15 @@ import { join } from 'node:path';
 export const MODEL_ID = /^[a-z0-9][a-z0-9-]{0,39}$/;
 export const DEFAULT_MODEL = 'claude-maiden';
 
+/**
+ * How the app names its bundled packs. The default pack calls itself "Claude娘 (Claude-maiden)": Anthropic's trademark guidelines do not
+ * let a third-party product use "Claude" as part of its own feature names, so the app shows it as "cPet". The pack's files stay as received
+ * (see its ATTRIBUTION.md); the id is kept so existing settings still point at it.
+ */
+const BUNDLED_NAMES: Record<string, { name: string; description: string }> = {
+  'claude-maiden': { name: 'cPet', description: 'An orange-haired, amber-eyed girl with a book: the default ccPet.' },
+};
+
 export interface ModelInfo {
   id: string;
   name: string;
@@ -30,7 +39,8 @@ function scan(root: string, bundled: boolean): ModelInfo[] {
     try { if (!statSync(dir).isDirectory()) continue; } catch { continue; }
     const m = readMeta(dir);
     if (!m) continue;
-    out.push({ id, name: str(m.displayName, 80) || id, description: str(m.description, 300), source: str(m.source, 80), bundled, dir });
+    const own = bundled ? BUNDLED_NAMES[id] : undefined;
+    out.push({ id, name: own?.name ?? (str(m.displayName, 80) || id), description: own?.description ?? str(m.description, 300), source: str(m.source, 80), bundled, dir });
   }
   return out;
 }

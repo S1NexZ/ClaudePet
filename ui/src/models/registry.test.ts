@@ -44,4 +44,11 @@ describe('model registry', () => {
     for (const ok of ['clawd', 'a', 'shy-miku', '0abc']) expect(MODEL_ID.test(ok)).toBe(true);
     for (const bad of ['', '-x', 'A', 'a b', '../x', 'a/b', 'a\\b', 'a.b', 'x'.repeat(41), '.tmp']) expect(MODEL_ID.test(bad)).toBe(false);
   });
+  it('the bundled default pack is shown as cPet (no "Claude" in a feature name); a user pack keeps its own name', () => {
+    const b = root(); model(b, 'claude-maiden');
+    const u = root(); model(u, 'mine');
+    const l = listModels(b, u);
+    expect(l.find((m) => m.id === 'claude-maiden')?.name).toBe('cPet');
+    expect(l.find((m) => m.id === 'mine')?.name).not.toBe('cPet');
+  });
 });
