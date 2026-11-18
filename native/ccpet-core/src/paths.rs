@@ -1,5 +1,10 @@
 //! Windows (or \\wsl$ UNC) paths from the app -> WSL paths (paths.ts).
 
+/** `~/.claude-pet`: socket, usage file, hub.json, pty sockets. */
+pub fn pet_dir() -> std::path::PathBuf {
+    std::path::PathBuf::from(std::env::var_os("HOME").or_else(|| std::env::var_os("USERPROFILE")).unwrap_or_default()).join(".claude-pet")
+}
+
 pub fn to_wsl_path(p: &str) -> String {
     let lower = p.to_ascii_lowercase();
     for pre in ["\\\\wsl$\\", "\\\\wsl.localhost\\"] {

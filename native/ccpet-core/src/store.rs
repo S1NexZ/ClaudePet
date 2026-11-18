@@ -19,10 +19,13 @@ pub fn project_name(cwd: &str) -> String {
     match p.rsplit('/').next() { Some(b) if !b.is_empty() => b.to_string(), _ => cwd.to_string() }
 }
 
+fn newest<'a>(xs: Vec<&'a Session>) -> Option<&'a Session> {
+    xs.into_iter().fold(None, |a, b| match a { Some(a) if b.last_event_at < a.last_event_at => Some(a), _ => Some(b) })
+}
+
 /** The session the pet should show: waiting > error > newest active > newest overall. */
 pub fn pick_attention(all: &[Session]) -> Option<&Session> {
     // the newest wins; on a tie the later one in the list (as reduce with >= does)
-    let newest = |xs: Vec<&Session>| xs.into_iter().fold(None::<&Session>, |a, b| match a { Some(a) if b.last_event_at < a.last_event_at => Some(a), _ => Some(b) });
     for pick in [
         &(|x: &Session| x.state == PetState::Waiting) as &dyn Fn(&Session) -> bool,
         &|x: &Session| x.state == PetState::Error,
