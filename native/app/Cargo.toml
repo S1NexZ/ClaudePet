@@ -1,0 +1,22 @@
+# The desktop app (phase 3: Tauri instead of Electron). Its own workspace: the musl build of ../ (hook, bridge) never sees it.
+[workspace]
+
+[package]
+name = "ccpet-app"
+version = "0.7.0"
+edition = "2021"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+base64 = "0.22"
+
+[profile.release]
+opt-level = "s"
+lto = true
+codegen-units = 1
+strip = true

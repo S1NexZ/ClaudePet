@@ -1,0 +1,6 @@
+{
+  "identifier": "default",
+  "description": "The pet window: events from the app and dragging itself",
+  "windows": ["main"],
+  "permissions": ["core:event:default", "core:window:allow-start-dragging"]
+}
