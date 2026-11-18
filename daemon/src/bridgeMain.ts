@@ -69,7 +69,7 @@ listenHooks(defaultSocketPath(), (e) => bridge.onHook(e))
     send({ type: 'ready', claude: claude ?? null, distro: process.env.WSL_DISTRO_NAME ?? '' });
     bridge.snapshot();
     // no limits query at start: it goes through the Agent SDK with the user's Claude login, which Anthropic reserves for its own apps.
-    // The ring is fed by Claude Code's own status line; a live query runs only on a click, and only with the SDK switched on by the user
+    // The ring is fed by Claude Code's own status line; a live query runs only when the user clicks the ring
     const adopted = new Set<string>();
     let lastAdopt = 0;
     const adoptRecent = async (now: number) => {

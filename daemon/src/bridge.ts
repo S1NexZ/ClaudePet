@@ -247,8 +247,8 @@ export function createBridge(o: {
             return;
           }
           case 'usage-refresh': { // the user clicked the limits ring: one live query (throttled by the source); its start and end push the numbers
-            // the live query runs the Agent SDK under the user's Claude login: only when the user switched the SDK on (Settings → Connections)
-            if (o.usage) { if (sdkOn) o.usage.refresh?.(); usageVersion = o.usage.version(); o.out({ type: 'usage', usage: await o.usage.read() }); }
+            // only on the user's own click (never on a timer or at start): the live query runs through the Agent SDK under the user's login
+            if (o.usage) { o.usage.refresh?.(); usageVersion = o.usage.version(); o.out({ type: 'usage', usage: await o.usage.read() }); }
             return;
           }
           case 'usage': if (o.usage) { usageVersion = o.usage.version(); o.out({ type: 'usage', usage: await o.usage.read() }); } return;
