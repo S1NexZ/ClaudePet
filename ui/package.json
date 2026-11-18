@@ -79,7 +79,7 @@
       "artifactName": "ccPet-Setup-${version}.exe"
     },
     "publish": null,
-    "afterPack": "scripts/adhoc-sign.cjs",
+    "afterPack": "scripts/after-pack.cjs",
     "linux": {
       "target": [
         {

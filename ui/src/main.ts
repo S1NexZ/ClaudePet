@@ -46,6 +46,9 @@ const atlasArg = arg('dump-atlas'), shotArg = arg('screenshot'), shotDelay = Num
 const demo = process.env.CLAUDE_PET_DEMO_PROMPT ? { prompt: process.env.CLAUDE_PET_DEMO_PROMPT, cwd: process.env.CLAUDE_PET_DEMO_CWD ?? '' } : null;
 /** Linux and macOS: one local bridge, no WSL, no Windows host, no desktop-app automation */
 const NATIVE = process.platform !== 'win32';
+/** the highest always-on-top band: above fullscreen players and games on macOS and Linux (Windows has one topmost band) */
+const TOP_LEVEL = 'screen-saver' as const;
+if (process.platform === 'win32') app.commandLine.appendSwitch('disable-features', 'CalculateNativeWinOcclusion'); // a pet behind a fullscreen window must keep drawing when it comes back on top
 if (process.platform === 'linux') { // a transparent, always-on-top overlay needs X11 (XWayland under Wayland) and a transparent visual
   app.commandLine.appendSwitch('ozone-platform', 'x11');
   app.commandLine.appendSwitch('enable-transparent-visuals');
@@ -89,9 +92,9 @@ if (primary) app.whenReady().then(async () => {
   const win = new BrowserWindow({
     ...(() => { const wa = screen.getDisplayNearestPoint({ x: Math.round(initialAnchor.cx), y: Math.round(initialAnchor.bottom - 1) }).workArea; return placeStage(initialAnchor, STAGE_W, STAGE_H, wa); })(), frame: false, transparent: true, resizable: false,
     alwaysOnTop: true, skipTaskbar: true, hasShadow: false, show: false, maximizable: false, minimizable: false, fullscreenable: false,
-    webPreferences: { preload: join(__dirname, 'preload.cjs'), contextIsolation: true, sandbox: true },
+    webPreferences: { preload: join(__dirname, 'preload.cjs'), contextIsolation: true, sandbox: true, backgroundThrottling: false },
   });
-  win.setAlwaysOnTop(true, 'floating');
+  win.setAlwaysOnTop(true, TOP_LEVEL);
   if (NATIVE) win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true, skipTransformProcessType: true }); // the pet follows the user across desktops
   if (process.platform === 'darwin') app.dock?.hide(); // a menu-bar style app: no Dock icon
   win.setIgnoreMouseEvents(true, { forward: true }); // click-through except over the pet's own elements
@@ -251,7 +254,7 @@ if (primary) app.whenReady().then(async () => {
     if (app.isPackaged) { if (process.platform === 'linux') setLinuxAutostart(settings.autostart); else app.setLoginItemSettings({ openAtLogin: settings.autostart }); }
   };
   /** Bring the pet to the front with the chat open (hotkey, second launch, /pet skill). */
-  const summon = () => { win.show(); win.setAlwaysOnTop(true, 'floating'); win.focus(); win.webContents.send('pet:summon'); };
+  const summon = () => { win.show(); win.setAlwaysOnTop(true, TOP_LEVEL); win.focus(); win.webContents.send('pet:summon'); };
   const registerHotkey = () => {
     globalShortcut.unregisterAll();
     if (!settings.hotkey) return;
@@ -262,7 +265,7 @@ if (primary) app.whenReady().then(async () => {
     if (!ok && Notification.isSupported())
       new Notification({ title: 'ccPet', body: L(`Горячая клавиша ${settings.hotkey} недоступна (занята другим приложением)`, `The hotkey ${settings.hotkey} is unavailable (taken by another app)`, `快捷键 ${settings.hotkey} 不可用（已被其他应用占用）`) }).show();
   };
-  const toggleWindow = () => (win.isVisible() ? win.hide() : (win.showInactive(), win.setAlwaysOnTop(true, 'floating')));
+  const toggleWindow = () => (win.isVisible() ? win.hide() : (win.showInactive(), win.setAlwaysOnTop(true, TOP_LEVEL)));
   /** Guided terminal setup: shows the one command to run in WSL (it asks before changing ~/.bashrc, backs it up, can be undone). */
   const showTerminalSetup = async () => {
     const script = app.isPackaged ? join(process.resourcesPath, 'scripts', 'install-shell-integration.sh') : join(__dirname, '../..', 'scripts', 'install-shell-integration.sh');
@@ -295,7 +298,7 @@ if (primary) app.whenReady().then(async () => {
     { label: win.isVisible() ? L('Скрыть питомца', 'Hide the pet', '隐藏宠物') : L('Показать питомца', 'Show the pet', '显示宠物'), click: toggleWindow },
     { label: `${L('Вызов питомца', 'Summon the pet', '唤出宠物')}: ${settings.hotkey || L('выключен', 'off', '关')}`, enabled: false },
     { type: 'separator' },
-    { label: L('Настройки…', 'Settings…', '设置…'), click: () => { win.show(); win.setAlwaysOnTop(true, 'floating'); win.webContents.send('pet:open-settings'); } },
+    { label: L('Настройки…', 'Settings…', '设置…'), click: () => { win.show(); win.setAlwaysOnTop(true, TOP_LEVEL); win.webContents.send('pet:open-settings'); } },
     { label: NATIVE ? L('Подключить терминал…', 'Connect the terminal…', '连接终端…') : L('Подключить терминал (WSL)…', 'Connect the terminal (WSL)…', '连接终端（WSL）…'), click: () => void showTerminalSetup() },
     { label: L('Подключить хуки Claude Code…', 'Connect Claude Code hooks…', '连接 Claude Code 钩子…'), enabled: up, click: () => { hooksManual = true; toBridge({ type: 'hooks', apply: false }); } },
     { label: L('Уведомлять, когда нужно разрешение', 'Notify when permission is needed', '需要权限时通知'), type: 'checkbox', checked: settings.notify,
@@ -761,9 +764,12 @@ if (primary) app.whenReady().then(async () => {
   // display change: put the pet back on top regularly (no focus is taken, nothing moves).
   const keepTop = setInterval(() => {
     if (win.isDestroyed() || !win.isVisible() || dragging) return;
-    win.setAlwaysOnTop(true, 'floating');
+    // Electron caches the topmost state and skips the call when it thinks it is already set, but a fullscreen
+    // player or game can take the window's topmost flag away: drop it and set it again so Windows really re-applies it
+    if (process.platform === 'win32') win.setAlwaysOnTop(false);
+    win.setAlwaysOnTop(true, TOP_LEVEL);
     win.moveTop();
-  }, 5000);
+  }, 2000);
   // a monitor unplugged, a resolution or scaling change: a pet left outside every screen comes back next to where it stood
   const onSomeScreen = () => {
     const b = win.getBounds(), x = b.x + b.width / 2, y = b.y + IDLE_H / 2;
@@ -855,7 +861,7 @@ function setLinuxAutostart(on: boolean): void {
   try {
     if (!on) { if (existsSync(f)) unlinkSync(f); return; }
     mkdirSync(dirname(f), { recursive: true });
-    const exe = process.env.APPIMAGE || process.execPath;
+    const exe = process.env.APPIMAGE || process.execPath.replace(/\.bin$/, ''); // the launcher next to the binary picks the sandbox mode
     writeFileSync(f, `[Desktop Entry]\nType=Application\nName=ccPet\nExec="${exe}"\nX-GNOME-Autostart-enabled=true\n`);
   } catch { /* non-fatal */ }
 }

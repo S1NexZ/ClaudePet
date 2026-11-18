@@ -84,8 +84,17 @@ jobs:
           sudo apt-get update -qq && sudo apt-get install -y -qq xvfb libfuse2t64 || sudo apt-get install -y -qq xvfb libfuse2
           chmod +x dl/*.AppImage
           mkdir -p "$HOME/.local/bin" && printf '#!/bin/sh\necho claude\n' > "$HOME/.local/bin/claude" && chmod +x "$HOME/.local/bin/claude"
-          xvfb-run -a dl/*.AppImage --appimage-extract-and-run --no-sandbox --screenshot=/tmp/shot.png --shot-delay=9000 || true
-          test -s /tmp/shot.png
+          sysctl kernel.apparmor_restrict_unprivileged_userns || true
           LOG="$HOME/.config/Claude Pet/pet.log"
+          # as a user starts it: no --no-sandbox (the launcher inside picks the sandbox mode)
+          xvfb-run -a dl/*.AppImage --appimage-extract-and-run --screenshot=/tmp/shot.png --shot-delay=9000 || true
+          test -s /tmp/shot.png
           cat "$LOG"
+          grep -q "bridge wsl ready" "$LOG"
+          # the .deb: installed, started from PATH as the desktop entry does
+          rm -f "$LOG" /tmp/shot.png
+          sudo apt-get install -y -qq ./dl/*.deb
+          ls -l /opt/ccPet/chrome-sandbox /opt/ccPet/claude-pet* || true
+          xvfb-run -a claude-pet --screenshot=/tmp/shot.png --shot-delay=9000 || true
+          test -s /tmp/shot.png
           grep -q "bridge wsl ready" "$LOG"
