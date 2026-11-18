@@ -1,0 +1,11 @@
+[package]
+name = "ccpet-core"
+version = "0.7.0"
+edition = "2021"
+description = "ccPet's core: Claude Code sessions, hooks, mailbox, transcripts, limits and settings changes"
+license = "MIT"
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+regex-lite = "0.1"
