@@ -131,7 +131,10 @@ fn cmd(app: tauri::State<Arc<App>>, cmd: Value) {
 }
 
 #[tauri::command]
-fn rects(app: tauri::State<Arc<App>>, rects: Vec<Rect>) { app.ui.lock().unwrap().hit = rects; }
+fn rects(app: tauri::State<Arc<App>>, rects: Vec<Rect>) {
+    if std::env::var("CCPET_DEBUG").is_ok() { app.log(&format!("rects: {}", rects.iter().map(|r| format!("{:.0},{:.0},{:.0},{:.0}", r.x, r.y, r.w, r.h)).collect::<Vec<_>>().join(" | "))); }
+    app.ui.lock().unwrap().hit = rects;
+}
 
 #[tauri::command]
 fn hover_rects(app: tauri::State<Arc<App>>, rects: Vec<Rect>) { app.ui.lock().unwrap().hover = rects; }
@@ -178,6 +181,8 @@ fn anchor_file(app: &App) -> PathBuf { app.data_dir.join("window.json") }
 
 /** where the pet stood last time (window.json, shared with the Electron app), else the primary screen's bottom right */
 fn start_position(app: &App, handle: &tauri::AppHandle) -> (f64, f64) {
+    // dev: CCPET_AT=x,y puts the window elsewhere (next to the running pet)
+    if let Some((x, y)) = std::env::var("CCPET_AT").ok().and_then(|v| { let (a, b) = v.split_once(',')?; Some((a.trim().parse().ok()?, b.trim().parse().ok()?)) }) { return (x, y); }
     let saved = std::fs::read_to_string(anchor_file(app)).ok().and_then(|t| serde_json::from_str::<Value>(&t).ok());
     if let Some(a) = saved.filter(|a| a["cx"].is_number() && a["bottom"].is_number()) {
         return (a["cx"].as_f64().unwrap() - STAGE_W / 2.0, a["bottom"].as_f64().unwrap() - IDLE_H);
@@ -193,12 +198,21 @@ fn start_position(app: &App, handle: &tauri::AppHandle) -> (f64, f64) {
 /** cursor polling: click-through except over the pet's own elements, hover for the button dock, end of a drag (main.ts hitTimer) */
 fn watch_cursor(win: WebviewWindow, app: Arc<App>) {
     std::thread::spawn(move || {
-        let (mut over, mut hovering) = (false, false);
+        let (mut over, mut hovering, mut failed, mut n) = (false, false, false, 0u64);
         let _ = win.set_ignore_cursor_events(true);
         loop {
             std::thread::sleep(Duration::from_millis(40));
-            let (Ok(c), Ok(p), Ok(sf)) = (win.cursor_position(), win.outer_position(), win.scale_factor()) else { continue };
+            let (c, p, sf) = (win.cursor_position(), win.outer_position(), win.scale_factor());
+            let (c, p, sf) = match (&c, &p, &sf) {
+                (Ok(c), Ok(p), Ok(sf)) => (*c, *p, *sf),
+                _ => {
+                    if !failed { failed = true; app.log(&format!("cursor polling failed: {:?} {:?} {:?}", c.err(), p.err(), sf.err())); }
+                    continue;
+                }
+            };
             let (x, y) = ((c.x - p.x as f64) / sf, (c.y - p.y as f64) / sf);
+            n += 1;
+            if n % 50 == 1 && std::env::var("CCPET_DEBUG").is_ok() { app.log(&format!("poll {n}: cursor {:?} window {:?} sf {sf} -> {x:.0},{y:.0}", c, p)); }
             let mut ui = app.ui.lock().unwrap();
             let hov = over_any(x, y, &ui.hover, 4.0);
             let hit = over_any(x, y, &ui.hit, 2.0);
@@ -206,11 +220,12 @@ fn watch_cursor(win: WebviewWindow, app: Arc<App>) {
             let drag_done = ui.last_move.map_or(false, |t| t.elapsed() > Duration::from_millis(600));
             if drag_done { ui.last_move = None; }
             drop(ui);
-            if drag_done {
+            if drag_done && std::env::var("CCPET_SANDBOX").is_err() { // a sandbox never moves the real pet's saved spot
                 let a = json!({ "cx": p.x as f64 / sf + STAGE_W / 2.0, "bottom": p.y as f64 / sf + IDLE_H });
                 let _ = std::fs::write(anchor_file(&app), a.to_string());
             }
             if hov != hovering { hovering = hov; let _ = win.emit("pet:hover", hov); }
+            if std::env::var("CCPET_DEBUG").is_ok() && (hit != over || hov != hovering) { app.log(&format!("cursor {x:.0},{y:.0} hit={hit} hover={hov}")); }
             if hit != over { over = hit; let _ = win.set_ignore_cursor_events(!hit); }
         }
     });
