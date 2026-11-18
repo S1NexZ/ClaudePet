@@ -413,7 +413,8 @@ impl Bridge {
             g.ended.remove(&sid); // resumed by the user
         }
         let mut new_path = false;
-        if let Some(p) = &e.transcript_path { new_path = g.transcripts.get(&sid) != Some(p); g.transcripts.insert(sid.clone(), p.clone()); }
+        // a subagent's event must not swap the parent's transcript
+        if let Some(p) = e.transcript_path.as_ref().filter(|_| e.agent_id.is_none()) { new_path = g.transcripts.get(&sid) != Some(p); g.transcripts.insert(sid.clone(), p.clone()); }
         if let Some(pid) = e.pet_parents.iter().flatten().filter_map(|p| u32::try_from(*p).ok()).find(|p| proc_name(*p).as_deref() == Some("claude")) { g.pids.insert(sid.clone(), pid); }
         g.store.apply(&e, now_ms());
         if new_path && g.store.get(&sid).map_or(false, |x| x.source.is_none()) {

@@ -4,6 +4,8 @@ use crate::map_event::map_event;
 use crate::types::{HookEvent, PendingPermission, PetState, Session};
 use std::collections::{HashMap, HashSet};
 
+/** an agent id not seen this long is forgotten: SubagentStop may never come after a crash/Esc */
+const SUBAGENT_STALE_MS: i64 = 10 * 60_000;
 const BUSY_DECAY_MS: i64 = 120_000;
 const WAITING_DECAY_MS: i64 = 30 * 60_000;
 const DONE_TO_IDLE_MS: i64 = 30_000;
@@ -48,6 +50,10 @@ pub struct Store {
     ended: HashSet<String>,
     /** SessionEnd time of sessions that are not owned by the pet; kept out of `Session` so it never reaches the snapshot */
     closed_at: HashMap<String, i64>,
+    /** running subagents per session: agent_id -> last seen ms */
+    agents: HashMap<String, HashMap<String, i64>>,
+    /** the main agent sent Stop and has not started a new turn */
+    turn_done: HashSet<String>,
 }
 
 impl Store {
@@ -68,6 +74,8 @@ impl Store {
         if s.cwd.is_empty() && !ev.cwd.is_empty() { s.cwd = ev.cwd.clone(); s.project = project_name(&ev.cwd); }
         if let Some(pty) = ev.pet_pty.as_ref().filter(|p| !p.is_empty()) { s.pty = Some(pty.clone()); }
         if ev.hook_event_name == "SessionEnd" {
+            self.agents.remove(&ev.session_id);
+            self.turn_done.remove(&ev.session_id);
             s.pty = None; // the wrapper (and its socket) goes away with the claude process
             if s.owned { return; } // the pet can still resume it
             self.closed_at.insert(s.id.clone(), now);
@@ -76,7 +84,30 @@ impl Store {
             self.ended.remove(&ev.session_id);
             self.closed_at.remove(&ev.session_id); // resumed
         }
-        if let Some(next) = map_event(ev) {
+        let agent = ev.agent_id.as_deref().filter(|a| !a.is_empty());
+        let next = if let Some(a) = agent {
+            if ev.hook_event_name == "SubagentStop" {
+                let left = self.agents.get_mut(&ev.session_id).map_or(true, |m| { m.remove(a); m.is_empty() });
+                if left && s.state == PetState::Subagent {
+                    Some(if self.turn_done.contains(&ev.session_id) { PetState::Done } else { PetState::Thinking })
+                } else { None }
+            } else {
+                self.agents.entry(ev.session_id.clone()).or_default().insert(a.to_string(), now);
+                if s.state != PetState::Waiting { Some(PetState::Subagent) } else { None } // subagent tool events never change the parent's state
+            }
+        } else {
+            match ev.hook_event_name.as_str() {
+                "Stop" => { self.turn_done.insert(ev.session_id.clone()); }
+                "UserPromptSubmit" | "PreToolUse" => { self.turn_done.remove(&ev.session_id); }
+                _ => {}
+            }
+            let busy = self.agents.get(&ev.session_id).map_or(false, |m| !m.is_empty());
+            match map_event(ev) {
+                Some(PetState::Done | PetState::Idle | PetState::Thinking) if busy => Some(PetState::Subagent),
+                n => n,
+            }
+        };
+        if let Some(next) = next {
             if next != s.state { s.state = next; s.since = now; }
         }
     }
@@ -85,13 +116,24 @@ impl Store {
         let mut drop = Vec::new();
         for id in &self.order {
             let s = self.sessions.get_mut(id).unwrap();
+            if let Some(m) = self.agents.get_mut(id) {
+                m.retain(|_, seen| now - *seen < SUBAGENT_STALE_MS);
+                if m.is_empty() {
+                    self.agents.remove(id);
+                    if s.state == PetState::Subagent {
+                        s.state = if self.turn_done.contains(id) { PetState::Done } else { PetState::Idle };
+                        s.since = now;
+                    }
+                }
+            }
+            let has_agents = self.agents.contains_key(id);
             let quiet_for = now - s.last_event_at;
             if s.state == PetState::Done && now - s.since >= DONE_TO_IDLE_MS {
                 s.state = if self.ended.remove(id) { PetState::Sleeping } else { PetState::Idle };
                 s.since = now;
             } else if s.state == PetState::Waiting && quiet_for >= WAITING_DECAY_MS {
                 s.state = PetState::Sleeping; s.since = now;
-            } else if !s.state.quiet() && s.state != PetState::Waiting && quiet_for >= BUSY_DECAY_MS {
+            } else if !has_agents && !s.state.quiet() && s.state != PetState::Waiting && quiet_for >= BUSY_DECAY_MS {
                 s.state = PetState::Sleeping; s.since = now;
             } else if s.state == PetState::Idle && !s.owned && quiet_for >= IDLE_TO_SLEEP_MS {
                 s.state = PetState::Sleeping; s.since = now;
@@ -146,6 +188,8 @@ impl Store {
         self.order.retain(|x| x != id);
         self.ended.remove(id);
         self.closed_at.remove(id);
+        self.agents.remove(id);
+        self.turn_done.remove(id);
     }
     pub fn get(&self, id: &str) -> Option<&Session> { self.sessions.get(id) }
     pub fn list(&self) -> Vec<Session> { self.order.iter().map(|id| self.sessions[id].clone()).collect() }
@@ -212,6 +256,77 @@ mod tests {
         st.tick(BUSY_DECAY_MS + 1);
         assert_eq!(st.get("a").unwrap().state, PetState::Sleeping);
         assert_eq!(st.get("b").unwrap().state, PetState::Waiting);
+    }
+
+    fn aev(name: &str, id: &str, agent: &str) -> HookEvent {
+        let mut e = ev(name, id);
+        e.agent_id = Some(agent.into());
+        if name == "PreToolUse" { e.tool_name = Some("Read".into()); }
+        e
+    }
+
+    #[test]
+    fn subagent_tool_events_do_not_touch_the_parent() {
+        let mut st = Store::new();
+        st.apply(&ev("UserPromptSubmit", "a"), 0);
+        st.apply(&aev("PreToolUse", "a", "x"), 10);
+        assert_eq!(st.get("a").unwrap().state, PetState::Subagent);
+        st.apply(&aev("PostToolUse", "a", "x"), 20);
+        assert_eq!(st.get("a").unwrap().state, PetState::Subagent);
+        assert_eq!(st.list().len(), 1);
+    }
+
+    #[test]
+    fn parent_stop_with_running_agent_then_subagent_stop() {
+        let mut st = Store::new();
+        st.apply(&ev("UserPromptSubmit", "a"), 0);
+        st.apply(&aev("PreToolUse", "a", "x"), 10);
+        st.apply(&ev("Stop", "a"), 20);
+        assert_eq!(st.get("a").unwrap().state, PetState::Subagent);
+        st.apply(&aev("SubagentStop", "a", "x"), 30);
+        assert_eq!(st.get("a").unwrap().state, PetState::Done);
+    }
+
+    #[test]
+    fn subagent_stop_mid_turn_returns_to_thinking() {
+        let mut st = Store::new();
+        st.apply(&ev("UserPromptSubmit", "a"), 0);
+        st.apply(&aev("PreToolUse", "a", "x"), 10);
+        st.apply(&aev("SubagentStop", "a", "x"), 20);
+        assert_eq!(st.get("a").unwrap().state, PetState::Thinking);
+    }
+
+    #[test]
+    fn stale_agent_is_dropped_in_tick() {
+        let mut st = Store::new();
+        st.apply(&ev("UserPromptSubmit", "a"), 0);
+        st.apply(&aev("PreToolUse", "a", "x"), 0);
+        st.tick(SUBAGENT_STALE_MS - 1);
+        assert_eq!(st.get("a").unwrap().state, PetState::Subagent);
+        st.tick(SUBAGENT_STALE_MS);
+        assert_eq!(st.get("a").unwrap().state, PetState::Idle);
+        st.apply(&aev("PreToolUse", "a", "y"), SUBAGENT_STALE_MS + 1);
+        st.apply(&ev("Stop", "a"), SUBAGENT_STALE_MS + 2);
+        st.tick(2 * SUBAGENT_STALE_MS + 1);
+        assert_eq!(st.get("a").unwrap().state, PetState::Done);
+    }
+
+    #[test]
+    fn no_busy_decay_while_agent_tracked() {
+        let mut st = Store::new();
+        st.apply(&ev("UserPromptSubmit", "a"), 0);
+        st.apply(&aev("PreToolUse", "a", "x"), 0);
+        st.tick(5 * 60_000);
+        assert_eq!(st.get("a").unwrap().state, PetState::Subagent);
+    }
+
+    #[test]
+    fn session_end_clears_agents() {
+        let mut st = Store::new();
+        st.apply(&ev("UserPromptSubmit", "a"), 0);
+        st.apply(&aev("PreToolUse", "a", "x"), 1);
+        st.apply(&ev("SessionEnd", "a"), 2);
+        assert!(!st.agents.contains_key("a") && !st.turn_done.contains("a"));
     }
 
     #[test]

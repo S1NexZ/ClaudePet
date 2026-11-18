@@ -234,3 +234,59 @@ describe('Windows hosts', () => {
     expect(st.get('x')?.cwd).toBe('/home/u/proj'); // a known folder is not replaced
   });
 });
+
+describe('subagent tracking', () => {
+  const ag = (name: string, id = 'g1', extra: Partial<HookEvent> = {}) => ev('a', name, { agent_id: id, ...extra });
+
+  it('subagent tool events keep the parent in subagent, no extra session', () => {
+    const s = new SessionStore();
+    s.apply(ev('a', 'UserPromptSubmit'), 1000);
+    s.apply(ag('PreToolUse', 'g1', { tool_name: 'Read' }), 1100);
+    expect(s.list()).toHaveLength(1);
+    expect(s.get('a')?.state).toBe('subagent');
+  });
+
+  it('parent Stop while an agent runs stays subagent, SubagentStop then gives done', () => {
+    const s = new SessionStore();
+    s.apply(ag('PreToolUse', 'g1', { tool_name: 'Read' }), 1000);
+    s.apply(ev('a', 'Stop'), 1100);
+    expect(s.get('a')?.state).toBe('subagent');
+    s.apply(ag('SubagentStop'), 1200);
+    expect(s.get('a')?.state).toBe('done');
+  });
+
+  it('SubagentStop mid-turn gives thinking', () => {
+    const s = new SessionStore();
+    s.apply(ev('a', 'UserPromptSubmit'), 1000);
+    s.apply(ag('PreToolUse', 'g1', { tool_name: 'Read' }), 1100);
+    s.apply(ag('SubagentStop'), 1200);
+    expect(s.get('a')?.state).toBe('thinking');
+  });
+
+  it('a stale agent is dropped after 10 minutes', () => {
+    const s = new SessionStore();
+    s.apply(ev('a', 'Stop'), 1000);
+    s.apply(ag('PreToolUse', 'g1', { tool_name: 'Read' }), 1100);
+    s.tick(1100 + 10 * 60_000 + 1);
+    expect(s.get('a')?.state).toBe('done');
+    s.apply(ev('b', 'UserPromptSubmit'), 0);
+    s.apply(ev('b', 'PreToolUse', { agent_id: 'x', tool_name: 'Read' }), 0);
+    s.tick(10 * 60_000);
+    expect(s.get('b')?.state).toBe('idle');
+  });
+
+  it('no busy decay to sleeping while an agent is tracked', () => {
+    const s = new SessionStore();
+    s.apply(ag('PreToolUse', 'g1', { tool_name: 'Read' }), 1000);
+    s.tick(1000 + 5 * 60_000);
+    expect(s.get('a')?.state).toBe('subagent');
+  });
+
+  it('SessionEnd clears agents', () => {
+    const s = new SessionStore();
+    s.apply(ag('PreToolUse', 'g1', { tool_name: 'Read' }), 1000);
+    s.apply(ev('a', 'SessionEnd'), 1100);
+    s.apply(ev('a', 'Stop'), 1200);
+    expect(s.get('a')?.state).toBe('done');
+  });
+});

@@ -332,7 +332,7 @@ export function createBridge(o: {
         ended.delete(e.session_id); // resumed by the user
       }
       let newPath = false;
-      if (typeof e.transcript_path === 'string') {
+      if (typeof e.transcript_path === 'string' && !e.agent_id) { // a subagent's event must not swap the parent's transcript
         newPath = transcripts.get(e.session_id) !== e.transcript_path;
         transcripts.set(e.session_id, e.transcript_path);
       }

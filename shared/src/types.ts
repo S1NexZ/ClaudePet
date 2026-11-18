@@ -10,6 +10,8 @@ export interface HookEvent {
   tool_input?: Record<string, unknown>;
   tool_response?: { is_error?: boolean; [k: string]: unknown };
   message?: string;
+  /** set on events fired inside a subagent (session_id is the parent's) */
+  agent_id?: string;
 }
 
 /** One question of Claude's AskUserQuestion tool, as Claude Code sends it */

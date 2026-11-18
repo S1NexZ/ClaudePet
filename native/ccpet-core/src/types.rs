@@ -37,6 +37,8 @@ pub struct HookEvent {
     pub pet_parents: Option<Vec<i64>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pet_pty: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent_id: Option<String>,
 }
 
 impl HookEvent {
@@ -53,7 +55,7 @@ impl HookEvent {
         }
         if !o.get("cwd").map_or(false, Value::is_string) { o.insert("cwd".into(), Value::String(String::new())); }
         // fields of an unexpected type are dropped rather than failing the whole event
-        for k in ["tool_name", "message", "transcript_path", "pet_pty"] {
+        for k in ["tool_name", "message", "transcript_path", "pet_pty", "agent_id"] {
             if o.get(k).map_or(false, |x| !x.is_string()) { o.remove(k); }
         }
         if o.get("pet_parents").map_or(false, |x| !x.is_array()) { o.remove("pet_parents"); }

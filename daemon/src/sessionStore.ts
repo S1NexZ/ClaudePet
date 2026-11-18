@@ -12,6 +12,8 @@ const SLEEPING_DROP_MS = 60 * 60_000;
 const IDLE_TO_SLEEP_MS = 3 * 60 * 60_000;
 /** Hard cap on the list: beyond it the longest-quiet sleeping/idle sessions go (a live one reappears with its next event). */
 const MAX_SESSIONS = 15;
+/** SubagentStop may never come (crash, Esc): an agent silent this long is dropped. */
+const SUBAGENT_STALE_MS = 10 * 60_000;
 const QUIET: PetState[] = ['idle', 'sleeping', 'done'];
 
 function projectName(cwd: string): string {
@@ -41,6 +43,11 @@ export class SessionStore {
   /** id -> when SessionEnd arrived; kept out of Session (which goes to the UI) */
   private closedAt = new Map<string, number>();
 
+  /** session -> running subagent ids -> last seen */
+  private agents = new Map<string, Map<string, number>>();
+  /** the main agent sent Stop and has not started a new turn */
+  private turnDone = new Set<string>();
+
   apply(ev: HookEvent, now: number = Date.now()): void {
     let s = this.sessions.get(ev.session_id);
     if (!s) {
@@ -54,6 +61,7 @@ export class SessionStore {
     const pty = (ev as { pet_pty?: unknown }).pet_pty;
     if (typeof pty === 'string' && pty) s.pty = pty;
     if (ev.hook_event_name === 'SessionEnd') {
+      this.agents.delete(s.id); this.turnDone.delete(s.id);
       delete s.pty; // the wrapper (and its socket) goes away with the claude process
       if (s.owned) return;                                   // the pet can still resume it
       this.closedAt.set(s.id, now);
@@ -62,7 +70,26 @@ export class SessionStore {
       this.ended.delete(s.id);
       this.closedAt.delete(s.id); // resumed
     }
-    const next = mapEvent(ev);
+    const agent = ev.agent_id;
+    if (agent) {
+      const m = this.agents.get(s.id) ?? new Map<string, number>();
+      this.agents.set(s.id, m);
+      if (ev.hook_event_name === 'SubagentStop') {
+        m.delete(agent);
+        if (!m.size) {
+          this.agents.delete(s.id);
+          if (s.state === 'subagent') this.setState(s, this.turnDone.has(s.id) ? 'done' : 'thinking', now);
+        }
+        return;
+      }
+      m.set(agent, now);
+      if (s.state !== 'waiting' && s.state !== 'subagent') this.setState(s, 'subagent', now);
+      return;
+    }
+    if (ev.hook_event_name === 'Stop') this.turnDone.add(s.id);
+    else if (ev.hook_event_name === 'UserPromptSubmit' || ev.hook_event_name === 'PreToolUse') this.turnDone.delete(s.id);
+    let next = mapEvent(ev);
+    if ((next === 'done' || next === 'idle' || next === 'thinking') && this.agents.get(s.id)?.size) next = 'subagent';
     if (next && next !== s.state) this.setState(s, next, now);
   }
 
@@ -70,12 +97,21 @@ export class SessionStore {
     for (const s of this.sessions.values()) {
       const closed = this.closedAt.get(s.id);
       if (closed !== undefined && now - closed >= CLOSED_DROP_MS) { this.remove(s.id); continue; }
+      const m = this.agents.get(s.id);
+      if (m) {
+        for (const [a, seen] of m) if (now - seen >= SUBAGENT_STALE_MS) m.delete(a);
+        if (!m.size) {
+          this.agents.delete(s.id);
+          if (s.state === 'subagent') this.setState(s, this.turnDone.has(s.id) ? 'done' : 'idle', now);
+        }
+      }
+      const hasAgents = !!this.agents.get(s.id)?.size;
       const quietFor = now - s.lastEventAt;
       if (s.state === 'done' && now - s.since >= DONE_TO_IDLE_MS) {
         this.setState(s, this.ended.delete(s.id) ? 'sleeping' : 'idle', now);
       }
       else if (s.state === 'waiting' && quietFor >= WAITING_DECAY_MS) this.setState(s, 'sleeping', now);
-      else if (!QUIET.includes(s.state) && s.state !== 'waiting' && quietFor >= BUSY_DECAY_MS)
+      else if (!QUIET.includes(s.state) && s.state !== 'waiting' && !hasAgents && quietFor >= BUSY_DECAY_MS)
         this.setState(s, 'sleeping', now);
       else if (s.state === 'idle' && !s.owned && quietFor >= IDLE_TO_SLEEP_MS) this.setState(s, 'sleeping', now);
       else if (s.state === 'sleeping' && now - s.since > SLEEPING_DROP_MS) this.remove(s.id);
@@ -146,6 +182,8 @@ export class SessionStore {
     this.sessions.delete(id);
     this.ended.delete(id);
     this.closedAt.delete(id);
+    this.agents.delete(id);
+    this.turnDone.delete(id);
   }
 
   get(id: string): Session | undefined {
