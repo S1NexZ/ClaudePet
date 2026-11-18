@@ -1,118 +1,92 @@
+<p align="center"><img src="docs/images/banner.png" alt="ccPet — a desktop pet for Claude Code" width="100%"></p>
+
+<p align="center">
+  <b>English</b> · <a href="README.ru.md">Русский</a><br>
+  <a href="https://github.com/S1NexZ/ccPet/releases/latest"><b>Download</b></a> ·
+  <a href="#quick-start">Quick start</a> ·
+  <a href="#is-it-safe">Is it safe?</a> ·
+  <a href="#support-the-project">Support ❤</a>
+</p>
+
 # ccPet
 
-**ccPet** is a Windows desktop pet for [Claude Code](https://code.claude.com) running in WSL, Windows terminals and the Claude desktop app. It shows what your Claude Code sessions are doing, has a chat,
-and — its main trick — **shares one live Claude Code session with your terminal**: type from the pet or from the terminal, both talk to the same process and the same transcript.
-*(The app interface is available in **English, Russian and Chinese** — it follows the system language, or pick one in Settings → Appearance. The documentation below is in Russian; the English summary is in the requirements and quick start sections.)*
+**ccPet is a free, open-source desktop pet for [Claude Code](https://code.claude.com).** It sits on your screen, shows what Claude is doing, and lets you talk to your sessions without switching windows: answer Claude's questions, approve actions, queue your next task, and watch the pet cheer when your tests pass.
 
-ccPet — настольный питомец для Claude Code в WSL, терминалах Windows и десктопном приложении Claude. Он показывает, что делают ваши сессии, содержит чат и **работает с той же живой сессией, что и ваш терминал**:
-пишете из питомца или из терминала, а отвечает один и тот же процесс Claude Code с одним транскриптом.
+Works with Claude Code in **Windows terminals, WSL, the Claude desktop app, macOS and Linux**. The interface speaks English, Russian and Chinese.
 
-> Неофициальный независимый проект, не связан с Anthropic; «cc» в названии — сокращение от «Claude Code», а не знак связи. Запуск Claude Code через Agent SDK (новые чаты из питомца) выключен по умолчанию и включается в «Настройки → Подключения». Лицензия MIT распространяется только на исходный код (см. [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)).
+> An unofficial, independent project, not affiliated with Anthropic. "cc" stands for "Claude Code".
 
-## Что умеет
+## What it does
 
-Всё перечисленное проверено на Windows 11 + WSL2 (Ubuntu), Claude Code 2.1.325, подписка Pro.
+- **Shows what Claude is doing.** Thinking, reading, writing, running commands, testing, waiting for you, done or asleep: the pet animates each state, driven by Claude Code hooks.
+- **Answers Claude's questions.** When Claude asks you something with options, the pet shows them as buttons. Pick one, type your own answer, or leave it to the terminal.
+- **Approves actions** (optional). Allow or deny tool permissions right from the pet.
+- **Shares one live session with your terminal.** Type from the pet or the terminal: it is the same Claude Code process and the same transcript, no second copy.
+- **Queues messages.** Write while Claude is still working: the message goes in when the turn ends. `/at 23:30 run the tests` sends it at a set time, `/at reset continue` right after your 5-hour limit resets.
+- **Summarizes each turn.** After a turn that changed files you get a card: files, +/− lines, time and tokens.
+- **Reacts.** Tests pass or a commit lands: the pet jumps and waves. Tests fail: it looks sad.
+- **Shows your plan limits.** A ring next to the pet tracks the 5-hour and weekly Claude limits.
+- **Chat commands.** `/model`, `/btw`, `/stop`, `/at`, `/compact`, `/clear` and more, with a menu as you type `/`.
+- **Custom pets.** Install any pet in the Codex pet format (`pet.json` + sprite sheet) from a ZIP. Recolor the pet and the interface to taste.
 
-- **Общая сессия с терминалом.** Если `claude` запущен через обёртку ccPet, питомец печатает прямо в тот же процесс (через PTY и unix-сокет). Ответ виден и в терминале, и в чате питомца; транскрипт и ID сессии одни.
-- **Кнопки по наведению.** В покое под питомцем только тень; при наведении из неё вырастает плашка (чат, настройки, сессии). Размер питомца — 60–180% (настройки или трей → «Размер питомца»).
-- **Состояния питомца** по хукам Claude Code: думает, читает, пишет, запускает команды, тестирует, ждёт разрешения, ошибка, готово, спит.
-- **Чат и кнопка «Стоп»** (посылает Esc в тот же процесс). Esc или Ctrl+C, нажатые в терминале, питомец тоже замечает.
-- **Запасной путь через SDK** для сессий, запущенных без обёртки (в этом режиме запускается второй процесс Claude Code, перед первой отправкой есть предупреждение).
-- **Лимиты подписки Claude (5 часов и неделя)**: кольцо возле питомца (только дуга, цифры в подсказке) и панель по клику. Фоновых запросов нет: кольцо питается строкой состояния Claude Code (подключается в «Настройки → Подключения»), а клик по кольцу (и запуск питомца) делает один запрос (не чаще раза в минуту) через экспериментальный метод SDK, см. ограничения.
-- **Горячая клавиша** `Ctrl+Alt+P` показывает/скрывает питомца; значок в трее; уведомления о запросах разрешения.
-- **Настройки** (шестерёнка или трей → «Настройки…»): цвет питомца, акцентный цвет интерфейса, **язык интерфейса (русский / English)**, **разрешения** для чата питомца (по умолчанию он спрашивает каждый раз), **менеджер моделей** питомца.
-- **Десктоп Claude и Windows.** Сессии десктопа под названиями чатов, «Открыть» ведёт в этот чат приложения, «Стоп» срабатывает после текущего шага (также в IDE и обычных Windows-терминалах). Для Windows: обёртка `claude` в профиле PowerShell ставится кнопкой, лимиты идут и от Windows-сессий, новые чаты можно запускать в Windows.
-- **Диагностика.** «Настройки → Подключения»: время последнего события по каждому подключению и копируемый отчёт «почему не вижу сессию».
-- **Модели питомцев.** Встроенная модель — Claude娘 (Claude-maiden). Свои модели ставятся из ZIP (формат Codex: `pet.json` + лист спрайтов 1536×1872 или 1536×2288) с проверкой архива; есть вкладка NPM со сторонним установщиком `codex-pets`.
+## Quick start
 
-## Требования
+1. **Download** the installer for your system from [Releases](https://github.com/S1NexZ/ccPet/releases/latest):
+   | System | File |
+   |---|---|
+   | Windows 10/11 | `ccPet-Setup-<version>.exe` |
+   | macOS (Apple silicon / Intel) | `ccPet-<version>-mac-arm64.dmg` / `-mac-x64.dmg` |
+   | Linux (Ubuntu, Debian) | `ccPet-<version>-linux-amd64.deb` |
+   | Linux (other) | `ccPet-<version>-linux-x86_64.AppImage` |
+2. **Connect Claude Code hooks:** Settings (⚙) → Connections. The pet shows the exact change to `~/.claude/settings.json`, keeps a `.bak` copy and applies it only after you agree. Without hooks the pet cannot see your sessions.
+3. **Optional: connect the terminal** (tray → "Connect the terminal"). Then the pet can type into your terminal session directly and stop it with Esc.
+4. Run `claude` as usual. The pet picks up the session; `Ctrl+Alt+P` opens the chat.
 
-| Что | Версия / примечание |
-|---|---|
-| Windows | 10 или 11, x64. Права администратора не нужны (установка в профиль пользователя) |
-| WSL2 | с дистрибутивом Linux (проверено на Ubuntu) |
-| Claude Code в WSL | установлен и авторизован (проверено на 2.1.325). Лимиты показываются для подписок Pro/Max через вход claude.ai |
-| Node.js в WSL | нужен мосту питомца; ищется в `~/.local/node/bin/node`, затем в `PATH` (проверено на Node 22) |
-| Python 3 в WSL | нужен только для обёртки `pet-claude.py` (проверено на 3.14) |
+**First launch warnings.** The builds are not signed with paid certificates yet:
+- **Windows** SmartScreen: "More info" → "Run anyway".
+- **macOS**: right-click the app → "Open". If macOS says the app is damaged, run `xattr -cr /Applications/ccPet.app`.
+- **Linux AppImage**: `chmod +x` the file; it needs `libfuse2` (on Ubuntu and Debian the `.deb` is simpler).
 
-Установщик не подписан сертификатом, поэтому Windows SmartScreen может показать предупреждение: «Подробнее» → «Выполнить в любом случае».
+## Is it safe?
 
-### Linux и macOS (бета)
-С 0.6.0 питомец работает и без Windows: мост Claude Code запускается на самом компьютере (WSL не нужен).
-- **Linux**: `ccPet-<версия>-linux-x64.AppImage` или `.deb`. Окно прозрачное и всегда сверху, поэтому нужен X11 (под Wayland питомец запускается через XWayland). Терминал для «Открыть в терминале» ищется среди gnome-terminal, konsole, xfce4-terminal, kitty, alacritty, xterm; поднять уже открытое окно можно, если установлен `wmctrl` или `xdotool`.
-- **macOS**: `ccPet-<версия>-mac-<arch>.dmg` (Intel и Apple silicon). Сборка подписана ad-hoc, без сертификата Apple: при первом запуске откройте её через правую кнопку → «Открыть» (или «Системные настройки → Конфиденциальность и безопасность → Всё равно открыть»). Если macOS пишет «приложение повреждено», выполните в Терминале `xattr -cr /Applications/ccPet.app`. Терминалом служит Terminal.app. Питомец живёт в строке меню, значка в Dock нет.
-- Подключение хуков и обёртки `claude` — те же шаги, что выше (в Настройках → Подключения один пункт «Этот компьютер»; для zsh обёртка пишется в `~/.zshrc`). Нужны `claude` и `python3` (для обёртки).
-- Чего на этих системах нет: десктопного приложения Claude (отправка в его чат), PowerShell-обёртки и `pet-helper.exe`.
-- Проверялось автоматически на GitHub Actions (Ubuntu и macOS: тесты, сборка, запуск приложения и подключение моста на Linux). Живой проверки на реальном Mac и на разных рабочих столах Linux не было: пишите об ошибках в Issues.
+- **Your settings are never changed silently.** Every change to Claude Code's `settings.json`, `~/.bashrc` or your PowerShell profile is shown as a diff first, backed up, and can be removed from the same screen.
+- **Your data stays on your computer.** The pet talks to Claude Code through local hooks (`127.0.0.1` and a unix socket with `0600` permissions). No telemetry, no accounts, no servers of its own; the only request it makes by itself is the daily update check on GitHub, which you can turn off. Details: [docs/privacy.md](docs/privacy.md).
+- **It does not run a second Claude for you.** Starting Claude Code through the Agent SDK (new chats from the pet) is off by default.
+- **Open source.** The whole code is here, under the MIT license.
 
-### Команды в чате
-Строка ввода понимает `/`: меню с подсказками открывается сразу. Команды питомца: `/model`, `/btw`, `/stop`, `/new`, `/end`, `/sessions`, `/terminal`, `/usage`, `/settings`, `/help`. Команды Claude Code (`/compact`, `/clear`, `/cost`, `/context`, `/status`, `/memory`, `/init`, `/review`, `/resume`) печатаются в терминал сессии как есть, если у неё есть связь с обёрткой; иначе питомец скажет, что команда там не сработает. Незнакомые `/слова` (скиллы, свои команды) уходят как набраны.
+## Requirements
 
-## Быстрый старт
+- **Claude Code** installed and logged in (tested with 2.1.3xx). Limits are shown for Pro/Max subscriptions.
+- **Windows**: 10 or 11, x64. For WSL sessions: WSL2 with Node.js 22 and Python 3 inside the distro.
+- **macOS**: 11 or newer, Apple silicon or Intel.
+- **Linux**: X11 or XWayland (the pet is a transparent always-on-top window), Python 3 for the terminal wrapper.
 
-1. Скачайте `ccPet-Setup-<версия>.exe` со страницы [Releases](https://github.com/S1NexZ/ClaudePet/releases) и запустите. Установка в один шаг, после неё питомец запустится сам.
-2. **Подключите хуки Claude Code**: «Настройки → Подключения» (отдельно для Windows и WSL; в трее есть то же самое). Питомец покажет точное изменение `settings.json`, сохранит копию `.bak` и применит его только после вашего согласия. Без хуков питомец не видит сессии. Так подключаются PowerShell/CMD/Windows Terminal, VS Code и десктопное приложение Claude; сообщения из чата доходят до таких сессий через «почтовый ящик» (фоновый хук будит сессию).
-3. **Подключите терминал** (трей → «Подключить терминал (WSL)…»): приложение покажет одну команду для WSL-терминала. Скрипт покажет изменение `~/.bashrc`, спросит подтверждение, сделает резервную копию и его можно отменить (`--uninstall`).
-   Без этого шага питомец тоже работает, но писать в терминальную сессию сможет только через запасной путь SDK.
-4. Откройте **новое** окно WSL-терминала и запустите `claude` как обычно. Питомец должен показать эту сессию; `Ctrl+Alt+P` откроет чат.
+macOS and Linux are in **beta**: they pass automated tests and start-up checks on GitHub Actions, but have had little real-world testing. Please report what you find in [Issues](https://github.com/S1NexZ/ccPet/issues).
 
-Если не хотите менять `~/.bashrc`, запускайте `python3 /mnt/c/Users/<вы>/AppData/Local/Programs/claude-pet/resources/scripts/pet-claude.py claude` вручную.
+## Known limitations
 
-### Чем особенна интеграция через PTY
-Обёртка `pet-claude.py` запускает `claude` один раз на псевдотерминале и делит его между окном терминала и сокетом `~/.claude-pet/pty/<pid>.sock` (права 0600).
-Питомец подключается к сокету и пишет в тот же PTY, что и клавиатура, поэтому Claude Code не отличает ввод питомца от вашего. Никакого второго процесса и копии разговора нет.
-Закрытие питомца не завершает Claude Code; при закрытии терминала процесс и сокет убираются.
+- Exclusive-fullscreen games draw over every normal window, the pet included. Use borderless windowed mode.
+- Esc pressed in the first seconds of a turn (while hooks run) may be ignored by Claude Code.
+- Plan limits come from an experimental Claude Code method that may change in future versions.
+- Pet models: the Codex sheet layout (8 columns × 9 or 11 rows of 192×208 cells).
 
-## Как пользоваться
-- **Питомец и строка статуса** показывают состояние внимания сессии. Клик по значку «сессии» — список; «карандаш» — чат; перетаскивание за питомца двигает окно.
-- **Чат**: поле ввода внизу отправляет сообщение в выбранную сессию. Для сессии под обёрткой это тот же процесс, для остальных — запасной путь SDK. Пока Claude занят или ждёт разрешения, питомец ничего не вставляет.
-- **Кнопка «Стоп»** прерывает текущий ответ (Esc в тот же процесс).
-- **Лимиты**: кольцо возле питомца — процент 5-часового окна; клик открывает панель с обоими окнами, временем сброса и временем последнего успешного обновления. Если запрос не удался, показываются сохранённые данные с пометкой «устарели».
+More: [docs/troubleshooting.md](docs/troubleshooting.md). App log: `%APPDATA%\Claude Pet\pet.log` (Windows).
 
-### Внешний вид
-Шестерёнка → вкладка «Внешний вид»: **цвет питомца** (перекрашивает самого питомца) и **акцентный цвет** интерфейса (кнопки, индикаторы). Готовые образцы или свой цвет, изменения видны сразу и сохраняются; «Сбросить все цвета» возвращает исходный вид.
+## Development
 
-### Модели питомцев
-Шестерёнка → «Модели»:
-- **Выбор и предпросмотр**: выбор показывает модель на питомце сразу; «Применить» сохраняет, «Отмена» (или закрытие панели) возвращает прежнюю. Перезапуск не нужен.
-- **Download**: выберите ZIP или перетащите его в панель. Архив проверяется до установки (нет путей наружу, ссылок, скриптов и исполняемых файлов, нужный размер листа, ограничения размера); ничего из архива не запускается.
-- **NPM**: показывает команду стороннего установщика `npx codex-pets add <pet-id>` (пакет `codex-pets`, MIT, не связан с ccPet) и умеет импортировать то, что он положил в `~/.codex/pets` в Windows. ccPet сам npm не запускает; **собственного npm-пакета у ccPet пока нет**.
-- **Удаление** своих моделей — с подтверждением; встроенные удалить нельзя.
-
-## Обновление и удаление
-- **Обновление**: скачайте новый установщик и запустите — он заменит программу; настройки и ваши модели лежат в `%APPDATA%\Claude Pet` и сохраняются.
-- **Удаление**: «Параметры → Приложения» либо `Uninstall ccPet.exe` в папке программы. Перед удалением выполните `bash …/install-shell-integration.sh --uninstall` (иначе блок в `~/.bashrc` останется; он безвреден: если файла обёртки нет, `claude` запускается как обычно).
-  Хуки в `~/.claude/settings.json` останутся и ничего не ломают (команда заканчивается `|| true`); удалите их вручную, если нужно.
-- Данные питомца: см. [docs/privacy.md](docs/privacy.md).
-
-## Известные ограничения
-- Только Windows; интерфейс на русском, английском и китайском; установщик не подписан.
-- Сессии на Windows (терминалы, десктоп, IDE): есть статус, чат и ответы на разрешения (по желанию). Esc/«Стоп» и ввод «как в терминале» работают только для сессий, запущенных через обёртку `pet-helper.exe pty claude` (строка для профиля PowerShell — в «Настройки → Подключения»); лимиты и запуск нового чата остаются за WSL. Дистрибутивы WSL, кроме запущенных, не подхватываются (остановленные не запускаются). Десктопное приложение проверено на практике, IDE-расширения — только по логике (читают тот же `settings.json`).
-- Сообщение из питомца в сессию без обёртки показывается в терминале как «Stop hook feedback», в чате питомца и транскрипте — как ваше.
-- Ответы на разрешения из питомца выключены по умолчанию (Настройки → Подключения); без ответа за 30 с Claude Code показывает обычный диалог.
-- **Лимиты** получаются через экспериментальный метод Agent SDK (`usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET`): он может измениться или исчезнуть при обновлении Claude Code, тогда лимиты станут недоступны. Запрос выполняется только по вашему клику на кольцо (не чаще раза в минуту): короткий процесс `claude` (~2 с, до ~230 МБ памяти), он обновляет `~/.claude.json` штатным способом Claude Code. Регулярного опроса нет. Если у вас уже есть своя строка состояния, питомец оборачивает её (ваша продолжает работать, «Отключить» возвращает её как была). Нулевой расход лимита не гарантируется (запрос не отправляет промпт, но процент целый и данные могут запаздывать).
-- Запасной путь SDK запускает второй процесс Claude Code: в уже открытом терминале ответ не появится. Для сессий под обёрткой этого нет.
-- Esc, нажатый в первые секунды хода (пока выполняются хуки), Claude Code может проигнорировать.
-- Модели: поддерживается сетка листа 8 столбцов × 9 или 11 строк ячеек 192×208 (1536×1872 или 1536×2288). Папка `~/.codex/pets` внутри WSL приложению не видна (используйте ZIP).
-- Проверено только на описанных выше версиях.
-
-## Диагностика
-См. [docs/troubleshooting.md](docs/troubleshooting.md). Журнал приложения: `%APPDATA%\Claude Pet\pet.log`.
-
-## Разработка
 ```
-export PATH=$HOME/.local/node/bin:$PATH      # Node 22 в WSL
-npm install && (cd ui && npm install)        # зависимости (ui/ ставьте из Windows-терминала для сборки установщика)
-npm run build                                # мост (build/bridge) и интерфейс (ui/dist)
-npm test                                     # Vitest
-npm run test:py                              # проверки обёртки и скрипта интеграции с терминалом
-npx tsc --noEmit -p .                        # типы
-npm run dist                                 # установщик: ui/release/ccPet-Setup-<версия>.exe
+npm install && (cd ui && npm install)
+npm run build      # bridge (build/bridge) and UI (ui/dist)
+npm test           # Vitest
+npm run dist       # Windows installer: ui/release/ccPet-Setup-<version>.exe
 ```
-Подробности устройства — в [CLAUDE.md](CLAUDE.md) и [docs/design.md](docs/design.md). История изменений — [CHANGELOG.md](CHANGELOG.md).
 
-## Поддержать проект
-ccPet бесплатный и останется бесплатным: без рекламы и платных функций. Если питомец вам пригодился, поддержать разработку можно на [Boosty](https://boosty.to/cpet) или [Ko-fi](https://ko-fi.com/aberz) (для оплаты из-за рубежа). Ссылка есть и в меню трея: «Поддержать проект ❤».
+How it works inside: [docs/design.md](docs/design.md). Changes: [CHANGELOG.md](CHANGELOG.md) (in Russian).
 
-## Лицензия
-Код ccPet — [MIT](LICENSE). Сторонние ресурсы (модель Claude-maiden, Claude Agent SDK, Electron) — на своих условиях, см. [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+## Support the project
+
+ccPet is free and will stay free: no ads, no paid features. If it made your work with Claude a bit nicer, you can support it on [Ko-fi](https://ko-fi.com/aberz) or [Boosty](https://boosty.to/cpet). A star on GitHub helps too ⭐
+
+## License
+
+ccPet's code is [MIT](LICENSE). Third-party assets (the bundled Claude-maiden pet, Claude Agent SDK, Electron) have their own terms: see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
