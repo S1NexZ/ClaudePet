@@ -20,7 +20,7 @@ function toolState(ev: HookEvent): PetState {
   const tool = ev.tool_name ?? '';
   if (READING.has(tool)) return 'reading';
   if (WRITING.has(tool)) return 'writing';
-  if (tool === 'Task') return 'subagent';
+  if (tool === 'Task' || tool === 'Agent') return 'subagent'; // Claude Code renamed Task to Agent
   if (tool === 'Bash') {
     const cmd = String(ev.tool_input?.command ?? '');
     return isTestCommand(cmd) ? 'testing' : 'running';

@@ -38,7 +38,7 @@ fn tool_state(ev: &HookEvent) -> PetState {
     match ev.tool() {
         "Read" | "Grep" | "Glob" | "LS" | "WebFetch" | "WebSearch" => PetState::Reading,
         "Edit" | "Write" | "MultiEdit" | "NotebookEdit" => PetState::Writing,
-        "Task" => PetState::Subagent,
+        "Task" | "Agent" => PetState::Subagent, // Claude Code renamed Task to Agent
         "Bash" => {
             let cmd = ev.tool_input.as_ref().and_then(|i| i.get("command")).map(js_string).unwrap_or_default();
             if is_test_command(&cmd) { PetState::Testing } else { PetState::Running }
@@ -89,6 +89,8 @@ mod tests {
         assert_eq!(map_event(&e), Some(PetState::Testing));
         e.tool_name = Some("Read".into());
         assert_eq!(map_event(&e), Some(PetState::Reading));
+        e.tool_name = Some("Agent".into());
+        assert_eq!(map_event(&e), Some(PetState::Subagent));
         let mut p = HookEvent::new("PostToolUse", "s", "/x");
         p.tool_response = Some(json!({"is_error": true}));
         assert_eq!(map_event(&p), Some(PetState::Error));

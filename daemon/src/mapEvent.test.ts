@@ -15,6 +15,8 @@ describe('mapEvent', () => {
     expect(mapEvent(ev({ hook_event_name: 'PreToolUse', tool_name: t }))).toBe('writing'));
   it('Task tool -> subagent', () =>
     expect(mapEvent(ev({ hook_event_name: 'PreToolUse', tool_name: 'Task' }))).toBe('subagent'));
+  it('Agent tool (the newer name of Task) -> subagent', () =>
+    expect(mapEvent(ev({ hook_event_name: 'PreToolUse', tool_name: 'Agent' }))).toBe('subagent'));
   it.each(['pytest -x', 'npm test', 'go test ./...', 'npx vitest run'])('Bash "%s" -> testing', (c) =>
     expect(mapEvent(bash(c))).toBe('testing'));
   it.each(['ls -la', 'git status', 'npm install'])('Bash "%s" -> running', (c) =>
