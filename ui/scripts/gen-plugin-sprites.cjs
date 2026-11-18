@@ -1,75 +1,71 @@
-// Builds plugin/ccpet/hooks/sprites.js: the bundled cPet pet, shrunk to a few terminal cells for the plugin's spinner.
-// Run with Electron (it decodes the WebP sheet): `npx electron scripts/gen-plugin-sprites.cjs` from ui/.
+// Builds plugin/ccpet/hooks/sprites.js: a tiny pixel pet drawn by hand for the plugin's spinner (a shrunk sheet turns to noise at this size).
+// Run with plain Node: `node ui/scripts/gen-plugin-sprites.cjs`.
 // Each frame is packed as a Raster's `cells`: u32 triplets [codePoint, fg, bg], two pixels per cell (upper half block).
-const { app, BrowserWindow } = require('electron');
 const fs = require('fs');
 const path = require('path');
 
-const ROOT = path.join(__dirname, '..', '..');
-const SHEET = path.join(ROOT, 'models', 'claude-maiden', 'spritesheet.webp');
-const OUT = path.join(ROOT, 'plugin', 'ccpet', 'hooks', 'sprites.js');
-const PW = 12, PH = 18; // pixels wide and tall: PW cells by PH / 2 rows
-const CELL = { w: 192, h: 208 };
-// Rows of the sheet (Codex layout v2) the spinner uses, and their frame counts.
-const ROWS = { idle: [0, 7], think: [7, 6], read: [8, 6], wait: [6, 6], done: [3, 4], error: [5, 8] };
+const OUT = path.join(__dirname, '..', '..', 'plugin', 'ccpet', 'hooks', 'sprites.js');
+const PAL = {
+  '.': null,
+  H: 0xe2784a, h: 0xb4532f, // hair, its shade
+  S: 0xfbe0cc, s: 0xedbfa5, // skin, its shade
+  E: 0x5b2a17, W: 0xffffff, // eyes, their glint
+  B: 0xf4a090, M: 0xb85c44, // blush, mouth
+  D: 0xf4ece2, d: 0xd6c4b0, // dress, its shade
+  K: 0x4f78b8, k: 0x34558a, // a book, its spine
+  Y: 0xffd36b,              // a spark (done)
+};
 
-app.whenReady().then(async () => {
-  const win = new BrowserWindow({ show: false, webPreferences: { offscreen: true } });
-  await win.loadURL('about:blank');
-  const data = 'data:image/webp;base64,' + fs.readFileSync(SHEET).toString('base64');
-  const js = `(async () => {
-    const img = new Image(); img.src = ${JSON.stringify(data)}; await img.decode();
-    const c = document.createElement('canvas'); c.width = img.width; c.height = img.height;
-    const g = c.getContext('2d'); g.drawImage(img, 0, 0);
-    return { w: img.width, h: img.height, px: Array.from(g.getImageData(0, 0, img.width, img.height).data) };
-  })()`;
-  const { w, px } = await win.webContents.executeJavaScript(js);
-  const at = (x, y) => { const i = (y * w + x) * 4; return [px[i], px[i + 1], px[i + 2], px[i + 3]]; };
+// 14 x 14 pixels: 14 cells by 7 rows.
+const base = (eyes, extra = {}) => [
+  '....hHHHHh....',
+  '..hHHHHHHHHh..',
+  '.hHHHHHHHHHHh.',
+  '.HHhHSSSSHhHH.',
+  'hHhSSSSSSSShHh',
+  eyes[0],
+  eyes[1],
+  extra.cheeks || 'hHBSSSMMSSSBHh',
+  '.hHsSSSSSSsHh.',
+  '.hHHdDDDDdHHh.',
+  extra.arms || '..hSDDDDDDSh..',
+  extra.body || '...dDDDDDDd...',
+  '...dDDDDDDd...',
+  '....ss..ss....',
+];
+const OPEN = ['hHSSEWSSEWSShH', 'hHSSEESSEESShH'];
+const BLINK = ['hHSSSSSSSSSShH', 'hHSSEESSEESShH'];
+const UP = ['hHSSWESSWESShH', 'hHSSEESSEESShH'];
+const DOWN = ['hHSSSSSSSSSShH', 'hHSSEESSEESShH'];
+const BOOK = { arms: '..hSKKKKKKSh..', body: '...dKkKKkKd...' };
+const HAPPY = ['hHSSSSSSSSSShH', 'hHSEESSSSEEShH'];
 
-  // One box around the pet in every frame used, so it does not jump between frames.
-  let x0 = CELL.w, y0 = CELL.h, x1 = 0, y1 = 0;
-  for (const [row, n] of Object.values(ROWS)) for (let f = 0; f < n; f++) for (let y = 0; y < CELL.h; y++) for (let x = 0; x < CELL.w; x++) {
-    if (at(f * CELL.w + x, row * CELL.h + y)[3] > 40) { x0 = Math.min(x0, x); x1 = Math.max(x1, x); y0 = Math.min(y0, y); y1 = Math.max(y1, y); }
+/** The sprite one pixel lower (a bob): the top row clears, the last drops off. */
+const bob = (rows) => ['..............', ...rows.slice(0, -1)];
+
+const FRAMES = {
+  idle: [base(OPEN), base(OPEN), base(OPEN), base(OPEN), base(BLINK), base(OPEN)],
+  think: [base(UP), base(UP), bob(base(UP)), bob(base(UP)), base(UP), base(BLINK)],
+  read: [base(DOWN, BOOK), base(DOWN, BOOK), bob(base(DOWN, BOOK)), bob(base(DOWN, BOOK))],
+  done: [base(HAPPY), bob(base(HAPPY))],
+};
+
+const W = 14, H = 14, DEFAULT = 0x01000000;
+const pack = (rows) => {
+  if (rows.length !== H || rows.some((r) => r.length !== W)) throw new Error('a frame is not 14 x 14: ' + JSON.stringify(rows));
+  const px = (x, y) => { const c = rows[y][x]; if (!(c in PAL)) throw new Error('no colour for ' + c); return PAL[c]; };
+  const words = new Uint32Array(W * (H / 2) * 3);
+  for (let cy = 0; cy < H / 2; cy++) for (let x = 0; x < W; x++) {
+    const top = px(x, cy * 2), bot = px(x, cy * 2 + 1), i = (cy * W + x) * 3;
+    if (top === null && bot === null) words.set([0x20, DEFAULT, DEFAULT], i);
+    else if (bot === null) words.set([0x2580, top, DEFAULT], i);
+    else if (top === null) words.set([0x2584, bot, DEFAULT], i);
+    else words.set([0x2580, top, bot], i);
   }
-  // One source step per pixel, the same both ways, fitted to the wider of the box's two sides.
-  const step = Math.max((x1 - x0 + 1) / PW, (y1 - y0 + 1) / PH);
-  const cx = (x0 + x1) / 2, cy = (y0 + y1) / 2;
-  const DEFAULT = 0x01000000;
+  return Buffer.from(words.buffer).toString('base64');
+};
 
-  /** The pixel at gx, gy of a frame: the average of its source area, or null where mostly transparent. */
-  const pixel = (row, f, gx, gy) => {
-    const sx0 = cx - (PW * step) / 2 + gx * step, sy0 = cy - (PH * step) / 2 + gy * step;
-    let r = 0, g = 0, b = 0, a = 0, n = 0;
-    for (let y = Math.floor(sy0); y < Math.floor(sy0 + step); y++) for (let x = Math.floor(sx0); x < Math.floor(sx0 + step); x++) {
-      n++;
-      if (x < 0 || y < 0 || x >= CELL.w || y >= CELL.h) continue;
-      const p = at(f * CELL.w + x, row * CELL.h + y);
-      const al = p[3] / 255;
-      r += p[0] * al; g += p[1] * al; b += p[2] * al; a += al;
-    }
-    if (!n || a / n < 0.45) return null;
-    return (Math.round(r / a) << 16) | (Math.round(g / a) << 8) | Math.round(b / a);
-  };
-
-  const frames = {};
-  for (const [name, [row, n]] of Object.entries(ROWS)) {
-    frames[name] = [];
-    for (let f = 0; f < n; f++) {
-      const words = new Uint32Array(PW * (PH / 2) * 3);
-      for (let cy2 = 0; cy2 < PH / 2; cy2++) for (let gx = 0; gx < PW; gx++) {
-        const top = pixel(row, f, gx, cy2 * 2), bot = pixel(row, f, gx, cy2 * 2 + 1);
-        const i = (cy2 * PW + gx) * 3;
-        if (top === null && bot === null) words.set([0x20, DEFAULT, DEFAULT], i);
-        else if (bot === null) words.set([0x2580, top, DEFAULT], i);
-        else if (top === null) words.set([0x2584, bot, DEFAULT], i);
-        else words.set([0x2580, top, bot], i);
-      }
-      frames[name].push(Buffer.from(words.buffer).toString('base64'));
-    }
-  }
-  const out = `// Generated by ui/scripts/gen-plugin-sprites.cjs from the bundled cPet pet (see THIRD_PARTY_NOTICES.md). Do not edit.\n` +
-    `export const COLS = ${PW}\nexport const ROWS = ${PH / 2}\nexport const FRAMES = ${JSON.stringify(frames, null, 0)}\n`;
-  fs.writeFileSync(OUT, out);
-  console.log('wrote', OUT, out.length, 'bytes', { box: [x0, y0, x1, y1] });
-  app.quit();
-}).catch((e) => { console.error(e); app.exit(1); });
+const out = `// Generated by ui/scripts/gen-plugin-sprites.cjs (a tiny pixel pet drawn for the spinner). Do not edit.\n` +
+  `export const COLS = ${W}\nexport const ROWS = ${H / 2}\nexport const FRAMES = ${JSON.stringify(Object.fromEntries(Object.entries(FRAMES).map(([k, v]) => [k, v.map(pack)])))}\n`;
+fs.writeFileSync(OUT, out);
+console.log('wrote', OUT, out.length, 'bytes');

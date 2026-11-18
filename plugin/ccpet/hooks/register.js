@@ -11,7 +11,7 @@ import { COLS, ROWS, FRAMES } from './sprites.js'
 
 const MARKER = /\[(?:ccPet|Claude Pet) message\]\s*/
 const POLL_WAIT_S = 20     // one $.http.fetch lasts 30 s at most: the receiver answers well before that
-const RETRY_MS = 60_000    // the pet is not running (or its file is unreadable): look again in a minute
+const RETRY_MS = 15_000    // the pet is not running (or its file is unreadable): look again shortly (reading one small file)
 const FRAME_MS = 220       // the pet's pace next to the spinner
 const ORANGE = '#d97757'
 
@@ -107,7 +107,7 @@ async function poll($) {
       if (r.status === 404) await setLinked($, false)
     }
   } catch {
-    hub = null // the pet is not running: the next look is a minute away
+    hub = null // the pet is not running: look again shortly
     hubCheckedAt = await $.clock.now()
     await setLinked($, false)
   } finally {

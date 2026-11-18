@@ -1,6 +1,6 @@
 {
   "name": "ccpet",
-  "version": "0.6.8",
+  "version": "0.6.9",
   "description": "Connects Claude Code to the ccPet desktop pet: the pet animates in place of the spinner, a row above the prompt shows your plan limits, and messages you write in the pet arrive as your own.",
   "author": {
     "name": "S1NexZ",
