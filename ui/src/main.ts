@@ -47,6 +47,8 @@ const atlasArg = arg('dump-atlas'), shotArg = arg('screenshot'), shotDelay = Num
 const demo = process.env.CLAUDE_PET_DEMO_PROMPT ? { prompt: process.env.CLAUDE_PET_DEMO_PROMPT, cwd: process.env.CLAUDE_PET_DEMO_CWD ?? '' } : null;
 /** Linux and macOS: one local bridge, no WSL, no Windows host, no desktop-app automation */
 const NATIVE = process.platform !== 'win32';
+/** donations page (ccPet stays free) */
+const SUPPORT_URL = 'https://boosty.to/ccpet';
 /** the highest always-on-top band: above fullscreen players and games on macOS and Linux (Windows has one topmost band) */
 const TOP_LEVEL = 'screen-saver' as const;
 if (process.platform === 'win32') app.commandLine.appendSwitch('disable-features', 'CalculateNativeWinOcclusion'); // a pet behind a fullscreen window must keep drawing when it comes back on top
@@ -324,6 +326,8 @@ if (primary) app.whenReady().then(async () => {
     { label: L('Проверять обновления (раз в день)', 'Check for updates (daily)', '检查更新（每天）'), type: 'checkbox', checked: settings.checkUpdates,
       click: (i) => { settings = { ...settings, checkUpdates: i.checked }; applySettings(); if (i.checked) void checkUpdates(); } },
     { type: 'separator' },
+    // ccPet is free; a quiet link for those who want to help (never a popup or a reminder)
+    { label: L('Поддержать проект ❤', 'Support the project ❤', '支持项目 ❤'), click: () => void shell.openExternal(SUPPORT_URL) },
     { label: L('Выйти', 'Quit', '退出'), click: () => app.quit() },
   ]);
   const tray = new Tray(nativeImage.createFromPath(join(__dirname, 'icon.png')).resize({ width: process.platform === 'darwin' ? 18 : 32, height: process.platform === 'darwin' ? 18 : 32 }));

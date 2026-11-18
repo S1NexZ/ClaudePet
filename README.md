@@ -111,5 +111,8 @@ npm run dist                                 # установщик: ui/release/
 ```
 Подробности устройства — в [CLAUDE.md](CLAUDE.md) и [docs/design.md](docs/design.md). История изменений — [CHANGELOG.md](CHANGELOG.md).
 
+## Поддержать проект
+ccPet бесплатный и останется бесплатным: без рекламы и платных функций. Если питомец вам пригодился, поддержать разработку можно на [Boosty](https://boosty.to/ccpet). Ссылка есть и в меню трея: «Поддержать проект ❤».
+
 ## Лицензия
 Код ccPet — [MIT](LICENSE). Сторонние ресурсы (модель Claude-maiden, Claude Agent SDK, Electron) — на своих условиях, см. [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
