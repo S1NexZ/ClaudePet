@@ -1,46 +1,46 @@
 const sq = (s: string) => `'${s.replace(/'/g, `'\\''`)}'`;
 
 /**
- * How to open a session in a real terminal: a new Windows Terminal window (or, without it, a plain
- * console via `cmd start`) running `claude --resume <id>` inside WSL, in the session's folder.
+ * How the pet opens terminals on Windows. Two parsers stand between us and the shell, and both read our arguments their own way:
+ *  - Windows Terminal (wt.exe) splits its command line at EVERY ';', even inside quotes (checked live: `-- cmd /c "echo A; B"` runs
+ *    `echo A` and treats `B` as a new wt command), so a ';' in a folder or a prompt broke the command or ran something else;
+ *  - cmd.exe (the fallback without wt) runs & | < > ^ in any argument Node leaves unquoted (one without spaces: `C:\x&calc`).
+ * So no folder, prompt or path ever goes on those command lines: a Windows folder is the spawned process's working directory
+ * (`-d .` / `/D .`), and the whole bash script for WSL travels base64-encoded (letters, digits, + / = only).
  */
+export interface TerminalLaunch { file: string; args: string[]; /** working directory for the spawned wt.exe / cmd.exe */ cwd?: string }
+
+const SAFE_TOKEN = /^[A-Za-z0-9._-]{1,128}$/;
+const safe = (what: string, v: string) => { if (!SAFE_TOKEN.test(v)) throw new Error(`unsafe ${what}: ${JSON.stringify(v)}`); return v; };
+/** `bash -lc` that runs `script` without exposing any of its characters to wt.exe or cmd.exe (no quotes, no ';') */
+export const encodedBash = (script: string): string[] => ['bash', '-lc', `source <(echo ${Buffer.from(script, 'utf8').toString('base64')} | base64 -d)`];
+const wsl = (distro: string, script: string) => ['wsl.exe', ...(distro ? ['-d', safe('distro', distro)] : []), '--exec', ...encodedBash(script)];
+const launch = (windowsTerminal: boolean, run: string[], cwd?: string): TerminalLaunch => (windowsTerminal
+  ? { file: 'wt.exe', args: ['-w', 'new', ...(cwd ? ['-d', '.'] : []), '--', ...run], ...(cwd ? { cwd } : {}) }
+  : { file: 'cmd.exe', args: ['/c', 'start', '""', ...(cwd ? ['/D', '.'] : []), ...run], ...(cwd ? { cwd } : {}) });
+
 /** Opens a Windows-side session (PowerShell / CMD session, desktop app, ...) again in Windows Terminal: `claude --resume <id>` in its folder. */
-export function windowsTerminalCommand(o: { cwd: string; sessionId: string }, windowsTerminal = true): { file: string; args: string[] } {
-  const run = ['claude', '--resume', o.sessionId];
-  return windowsTerminal
-    ? { file: 'wt.exe', args: ['-w', 'new', '-d', o.cwd, '--', ...run] }
-    : { file: 'cmd.exe', args: ['/c', 'start', '""', '/D', o.cwd, ...run] };
+export function windowsTerminalCommand(o: { cwd: string; sessionId: string }, windowsTerminal = true): TerminalLaunch {
+  return launch(windowsTerminal, ['claude', '--resume', safe('session id', o.sessionId)], o.cwd);
 }
 
-export function terminalCommand(
-  o: { distro: string; cwd: string; claude: string; sessionId: string },
-  windowsTerminal = true,
-): { file: string; args: string[] } {
-  const wsl = ['wsl.exe', ...(o.distro ? ['-d', o.distro] : []), '--cd', o.cwd, '--exec', 'bash', '-lc',
-    `${o.claude ? sq(o.claude) : 'claude'} --resume ${sq(o.sessionId)}; exit 0`];
-  return windowsTerminal ? { file: 'wt.exe', args: ['-w', 'new', '--', ...wsl] } : { file: 'cmd.exe', args: ['/c', 'start', '""', ...wsl] };
+/** Opens a WSL session in a real terminal: `claude --resume <id>` inside WSL, in the session's folder. */
+export function terminalCommand(o: { distro: string; cwd: string; claude: string; sessionId: string }, windowsTerminal = true): TerminalLaunch {
+  return launch(windowsTerminal, wsl(o.distro, `cd -- ${sq(o.cwd)} && ${o.claude ? sq(o.claude) : 'claude'} --resume ${sq(o.sessionId)}\nexit 0\n`));
 }
 
 /** A NEW Claude Code session in a real terminal (WSL), in `cwd`, optionally started with a first prompt: what "new chat" does when the Agent SDK paths are off. */
-export function newSessionCommand(
-  o: { distro: string; cwd: string; claude: string; prompt?: string },
-  windowsTerminal = true,
-): { file: string; args: string[] } {
+export function newSessionCommand(o: { distro: string; cwd: string; claude: string; prompt?: string }, windowsTerminal = true): TerminalLaunch {
   const prompt = (o.prompt ?? '').trim();
-  const wsl = ['wsl.exe', ...(o.distro ? ['-d', o.distro] : []), '--cd', o.cwd, '--exec', 'bash', '-lc',
-    `${o.claude ? sq(o.claude) : 'claude'}${prompt ? ` ${sq(prompt)}` : ''}; exit 0`];
-  return windowsTerminal ? { file: 'wt.exe', args: ['-w', 'new', '--', ...wsl] } : { file: 'cmd.exe', args: ['/c', 'start', '""', ...wsl] };
+  return launch(windowsTerminal, wsl(o.distro, `cd -- ${sq(o.cwd)} && ${o.claude ? sq(o.claude) : 'claude'}${prompt ? ` ${sq(prompt)}` : ''}\nexit 0\n`));
 }
 
 /**
  * A NEW Claude Code session in a Windows terminal, in `cwd`: through the `pet-helper pty` wrapper when there is one (the pet can then type
- * the first prompt into it). The prompt itself never goes on the command line: cmd.exe would interpret & | ^ % in it.
+ * the first prompt into it). The prompt itself never goes on the command line.
  */
-export function windowsNewSessionCommand(o: { cwd: string; helper?: string }, windowsTerminal = true): { file: string; args: string[] } {
-  const run = o.helper ? [o.helper, 'pty', 'claude'] : ['claude'];
-  return windowsTerminal
-    ? { file: 'wt.exe', args: ['-w', 'new', '-d', o.cwd, '--', ...run] }
-    : { file: 'cmd.exe', args: ['/c', 'start', '""', '/D', o.cwd, ...run] };
+export function windowsNewSessionCommand(o: { cwd: string; helper?: string }, windowsTerminal = true): TerminalLaunch {
+  return launch(windowsTerminal, o.helper ? [o.helper, 'pty', 'claude'] : ['claude'], o.cwd);
 }
 
 const normDir = (p: string) => p.replace(/\//g, '\\').replace(/\\+$/, '').toLowerCase();

@@ -14,14 +14,6 @@ export function procName(pid: number): string | null {
   return c ? c.split('/').pop()! : null;
 }
 
-/** Parent pid, 0 if unknown. */
-export function parentPid(pid: number): number {
-  if (hasProc) {
-    try { const st = readFileSync(`/proc/${pid}/stat`, 'utf8'); return Number(st.slice(st.lastIndexOf(')') + 2).split(' ')[1]) || 0; } catch { return 0; }
-  }
-  return Number(ps(pid, 'ppid')) || 0;
-}
-
 /** Terminal device the process is attached to (`/dev/pts/3`, `/dev/ttys004`), null if none. */
 export function ttyPath(pid: number): string | null {
   if (hasProc) { try { const t = readlinkSync(`/proc/${pid}/fd/0`); return t.startsWith('/dev/pts/') ? t : null; } catch { return null; } }

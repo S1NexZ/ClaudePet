@@ -1,3 +1,4 @@
+import { timingSafeEqual } from 'node:crypto';
 import { createServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import type { HookPayload } from './hookSocket.js';
@@ -36,11 +37,17 @@ const decode = (s: string): string | null => { try { return decodeURIComponent(s
 /** Named pipes of `pet-helper pty` wrappers: \\.\pipe\claude-pet-<pid> */
 export const PIPE_NAME = /^\\\\\.\\pipe\\claude-pet-\d{1,10}$/;
 
+/** constant-time token check (the receiver listens on loopback, but nothing is lost by not leaking timing) */
+const sameToken = (a: string | undefined, b: string): boolean => {
+  const x = Buffer.from(a ?? ''), y = Buffer.from(b);
+  return x.length === y.length && timingSafeEqual(x, y);
+};
+
 export async function startHookServer(o: HookServerOpts): Promise<{ port: number; close(): Promise<void> }> {
   const server = createServer((req, res) => {
     const url = new URL(req.url ?? '/', 'http://127.0.0.1');
     const [, kind, token, rest] = url.pathname.split('/');
-    if (token !== o.token || (kind !== 'hook' && kind !== 'mailbox') || !rest) { res.writeHead(404).end(); return; }
+    if (!sameToken(token, o.token) || (kind !== 'hook' && kind !== 'mailbox') || !rest) { res.writeHead(404).end(); return; }
 
     if (kind === 'mailbox' && req.method === 'GET') {
       const sid = decode(rest);

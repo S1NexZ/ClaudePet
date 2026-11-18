@@ -6,7 +6,7 @@ import { nodeCmd, stableHookDir, stableRuntime } from './nodeCmd.js';
 import { planHooks } from './installHooks.js';
 import { planStatusLine } from './installStatusLine.js';
 import { planHostHooks } from './hookConfig.js';
-import { procName, parentPid, ttyPath } from './procinfo.js';
+import { procName, ttyPath } from './procinfo.js';
 
 const electron = process.versions as any;
 afterEach(() => { delete electron.electron; delete process.env.APPIMAGE; });
@@ -47,9 +47,7 @@ describe('stableHookDir', () => {
 describe('procinfo', () => {
   it('knows this process and its parent', () => {
     expect(procName(process.pid)).toMatch(/node|vitest|npm/i);
-    expect(parentPid(process.pid)).toBe(process.ppid);
     expect(procName(999999999)).toBeNull();
-    expect(parentPid(999999999)).toBe(0);
     expect(ttyPath(999999999)).toBeNull();
   });
 });

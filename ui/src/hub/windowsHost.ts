@@ -110,7 +110,7 @@ export function createWindowsHost(o: WindowsHostOpts) {
         server = await startHookServer({ port: o.port, token, mailbox, onWaiter: (sid, cwd, src) => {
           if (!store.get(sid)) bridge.onHook({ hook_event_name: 'SessionStart', session_id: sid, cwd });
           if (src && !store.get(sid)?.source) { store.setSource(sid, src); bridge.snapshot(); }
-        }, onPty: attachPty, onEvent: (e) => bridge.onHook(e), onReply: (e) => bridge.hookReply(e), onPermission: (e) => bridge.onPermission(e) });
+        }, onPty: attachPty, onEvent: (e) => bridge.onHook(e), onReply: (e) => bridge.hookReply(e), onPermission: (e, gone) => bridge.onPermission(e, gone) });
         bridge.snapshot();
         return true;
       } catch (e) {

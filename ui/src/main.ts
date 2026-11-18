@@ -100,6 +100,9 @@ if (primary) app.whenReady().then(async () => {
   win.setAlwaysOnTop(true, TOP_LEVEL);
   if (NATIVE) win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true, skipTransformProcessType: true }); // the pet follows the user across desktops
   if (process.platform === 'darwin') app.dock?.hide(); // a menu-bar style app: no Dock icon
+  // the pet's page never navigates or opens windows (no links are rendered; this only closes the door)
+  win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
+  win.webContents.on('will-navigate', (e) => e.preventDefault());
   win.setIgnoreMouseEvents(true, { forward: true }); // click-through except over the pet's own elements
 
   // ---- hosts: a bridge process in every followed WSL distro (the default one is the primary), plus the Windows host (this process); the renderer sees one merged session list ----
@@ -136,8 +139,15 @@ if (primary) app.whenReady().then(async () => {
   const queue = new MessageQueue((d) => writeFileSync(queueFile, JSON.stringify(d)), (() => { try { return JSON.parse(readFileSync(queueFile, 'utf8')); } catch { return undefined; } })());
   const drainQueue = () => {
     for (const { sessionId, message } of queue.due(lastSnapshot?.sessions ?? [], Date.now())) {
+      const s = (lastSnapshot?.sessions ?? []).find((x: Session) => x.id === sessionId);
+      // only a session the pet reaches without asking (its terminal link, its mailbox, the Windows host): never a dialog or a second process at night
+      if (s && !s.owned && !s.pty && !s.mailbox && s.host !== 'windows') {
+        log(`queue: ${sessionId} cannot take a message without the user; dropped`);
+        win.webContents.send('pet:msg', { type: 'chat', sessionId, event: { kind: 'note', text: L(`Сообщение из очереди не отправлено: у сессии нет связи с питомцем. Текст: ${message.text}`, `A queued message was not sent: the session has no link to the pet. Text: ${message.text}`, `排队消息未发送：会话未连接到宠物。内容：${message.text}`) } });
+        continue;
+      }
       log(`queue: sending a waiting message to ${sessionId}`);
-      void onCmd({ type: 'send', sessionId, text: message.text });
+      void onCmd({ type: 'send', sessionId, text: message.text, queued: true });
     }
   };
   setInterval(drainQueue, 2000); // timed messages and turns that ended without a fresh snapshot
@@ -450,7 +460,7 @@ if (primary) app.whenReady().then(async () => {
         const prompt = String(cmd.prompt ?? '').trim();
         const goWin = (useWt: boolean) => {
           const c = windowsNewSessionCommand({ cwd: String(cmd.cwd), helper: helperPath }, useWt);
-          const p = spawn(c.file, c.args, { detached: true, stdio: 'ignore' });
+          const p = spawn(c.file, c.args, { detached: true, stdio: 'ignore', ...(c.cwd ? { cwd: c.cwd } : {}) });
           p.on('error', (e) => { log(`terminal (${c.file}) failed: ${e.message}`); if (useWt) goWin(false); });
           p.unref();
         };
@@ -466,7 +476,7 @@ if (primary) app.whenReady().then(async () => {
       const th = primary();
       const go = (useWt: boolean) => {
         const c = newSessionCommand({ distro: th.name(), cwd: String(cmd.cwd), claude: th.claude(), prompt: String(cmd.prompt ?? '') }, useWt);
-        const p = spawn(c.file, c.args, { detached: true, stdio: 'ignore' });
+        const p = spawn(c.file, c.args, { detached: true, stdio: 'ignore', ...(c.cwd ? { cwd: c.cwd } : {}) });
         p.on('error', (e) => { log(`terminal (${c.file}) failed: ${e.message}`); if (useWt) go(false); });
         p.unref();
       };
@@ -475,7 +485,9 @@ if (primary) app.whenReady().then(async () => {
     }
     if (cmd.type === 'send') {
       const s = sessionById(String(cmd.sessionId));
-      if (s?.desktopId && settings.desktopSend === 'real' && typeof cmd.text === 'string' && cmd.text.trim() && !(Array.isArray(cmd.images) && cmd.images.length)) {
+      // a queued or scheduled message goes out when nobody may be at the computer: it never drives the Claude app's window (that
+      // would take the keyboard focus, e.g. from a fullscreen game, and act in the app on its own); it goes through the hook instead
+      if (s?.desktopId && settings.desktopSend === 'real' && !cmd.queued && typeof cmd.text === 'string' && cmd.text.trim() && !(Array.isArray(cmd.images) && cmd.images.length)) {
         const r = await sendToDesktop({ text: cmd.text, title: s.project, desktopId: s.desktopId });
         if (r === 'ok') return;
         log(`desktop send: ${r}; delivering through the hook instead`);
@@ -641,7 +653,7 @@ if (primary) app.whenReady().then(async () => {
       const r = await dialog.showMessageBox(win, confirmOptions({
         type: 'warning', action: L('Включить', 'Turn on', '开启'), cancel: L('Отмена', 'Cancel', '取消'),
         message: L('Разрешить питомцу запускать Claude Code через Agent SDK?', 'Let the pet start Claude Code through the Agent SDK?', '允许宠物通过 Agent SDK 启动 Claude Code？'),
-        detail: L('Питомец сможет начинать новые чаты и продолжать терминальные сессии, запуская второй процесс claude под вашим входом (как если бы вы набрали команду сами). Anthropic отдельно оговаривает использование Agent SDK с входом по подписке: прочитайте их условия. Без этого новые чаты открываются в терминале, а общаться с уже запущенными сессиями можно через хуки.', 'The pet will be able to start new chats and continue terminal sessions by running a second claude process under your login (as if you typed the command yourself). Anthropic has separate terms for using the Agent SDK with a subscription login: please read them. Without this, new chats open in a terminal, and running sessions can still be reached through the hooks.', '宠物将能够新建聊天并继续终端会话，方式是在您的登录下运行第二个 claude 进程（就像您自己输入命令）。Anthropic 对使用订阅登录的 Agent SDK 另有条款，请阅读。关闭时，新聊天会在终端中打开，已运行的会话仍可通过钩子联系。'),
+        detail: L('Питомец сможет начинать новые чаты и продолжать терминальные сессии, запуская второй процесс claude под вашим входом (как если бы вы набрали команду сами). Важно: по правилам Anthropic (code.claude.com/docs/en/legal-and-compliance) сторонние программы на Agent SDK должны работать с API-ключом, а не через вход по подписке Free/Pro/Max. Включайте, только если Claude Code у вас вошёл по API-ключу или вы принимаете этот риск. С SDK питомец также может обновлять лимиты по клику на кольцо. Без этого новые чаты открываются в терминале, а общаться с уже запущенными сессиями можно через хуки.', 'The pet will be able to start new chats and continue terminal sessions by running a second claude process under your login (as if you typed the command yourself). Important: Anthropic rules (code.claude.com/docs/en/legal-and-compliance) say third-party tools built on the Agent SDK should use an API key, not a Free/Pro/Max subscription login. Turn this on only if your Claude Code signs in with an API key or you accept that risk. With the SDK on, clicking the limits ring also refreshes the numbers. Without this, new chats open in a terminal, and running sessions can still be reached through the hooks.', '宠物将能够新建聊天并继续终端会话，方式是在您的登录下运行第二个 claude 进程（就像您自己输入命令）。重要：根据 Anthropic 的规则（code.claude.com/docs/en/legal-and-compliance），基于 Agent SDK 的第三方工具应使用 API 密钥，而不是 Free/Pro/Max 订阅登录。仅当您的 Claude Code 使用 API 密钥登录或您接受该风险时才开启。开启后，点击额度圆环也会刷新数字。关闭时，新聊天会在终端中打开，已运行的会话仍可通过钩子联系。'),
       }));
       if (!isConfirmed(r)) return connectionsState();
     }
@@ -681,7 +693,7 @@ if (primary) app.whenReady().then(async () => {
       });
       const launchWin = (useWt: boolean) => {
         const c = windowsTerminalCommand({ cwd: s.cwd, sessionId: s.id }, useWt);
-        const p = spawn(c.file, c.args, { detached: true, stdio: 'ignore' });
+        const p = spawn(c.file, c.args, { detached: true, stdio: 'ignore', ...(c.cwd ? { cwd: c.cwd } : {}) });
         p.on('error', (e) => { log(`terminal (${c.file}) failed: ${e.message}`); if (useWt) launchWin(false); });
         p.unref();
       };
@@ -699,7 +711,7 @@ if (primary) app.whenReady().then(async () => {
     if (NATIVE) { setTimeout(() => openNativeTerminal({ cwd: s.cwd, claude: th.claude(), sessionId: s.id }), s.owned ? 500 : 0); return; }
     const launch = (useWt: boolean) => {
       const c = terminalCommand({ distro: th.name(), cwd: s.cwd, claude: th.claude(), sessionId: s.id }, useWt);
-      const p = spawn(c.file, c.args, { detached: true, stdio: 'ignore' });
+      const p = spawn(c.file, c.args, { detached: true, stdio: 'ignore', ...(c.cwd ? { cwd: c.cwd } : {}) });
       p.on('error', (e) => { log(`terminal (${c.file}) failed: ${e.message}`); if (useWt) launch(false); });
       p.unref();
     };

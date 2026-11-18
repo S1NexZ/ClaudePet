@@ -4,16 +4,6 @@ export interface Anchor { cx: number; bottom: number }
 export interface Area { x: number; y: number; width: number; height: number }
 
 /**
- * Window bounds for content of size w×h whose bottom centre (where the pet stands) sits at the anchor,
- * moved inside the work area when it would stick out (Windows' own window drag clamps to it anyway).
- */
-export function placeWindow(a: Anchor, w: number, h: number, wa: Area): { x: number; y: number; width: number; height: number } {
-  const x = Math.min(Math.max(a.cx - w / 2, wa.x), wa.x + wa.width - w);
-  const y = Math.min(Math.max(a.bottom - h, wa.y), wa.y + wa.height - h);
-  return { x: Math.round(x), y: Math.round(y), width: w, height: h };
-}
-
-/**
  * The window is a constant-size transparent stage (no resizing, so the OS can never show a stale frame of the pet in the wrong place).
  * The pet stands at its top and the panels open below it; the anchor is the bottom centre of the pet's own (idle) part, IDLE_H below the window's top.
  * The part below the work area may stick out: only the pet itself is kept on screen.

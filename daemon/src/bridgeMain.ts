@@ -56,7 +56,7 @@ bridge = createBridge({
   hostHooks: { origin: `http://127.0.0.1:${hubPort}`, token: hubToken },
 });
 
-const httpHooks = startHookServer({ port: hubPort, token: hubToken, mailbox, onEvent: (e) => bridge.onHook(e), onPermission: (e) => bridge.onPermission(e) })
+const httpHooks = startHookServer({ port: hubPort, token: hubToken, mailbox, onEvent: (e) => bridge.onHook(e), onPermission: (e, gone) => bridge.onPermission(e, gone) })
   .then((srv) => {
     mkdirSync(dirname(hubFile), { recursive: true, mode: 0o700 });
     writeFileSync(hubFile, JSON.stringify({ port: srv.port, token: hubToken }), { mode: 0o600 });
@@ -68,7 +68,8 @@ listenHooks(defaultSocketPath(), (e) => bridge.onHook(e))
     const http = await httpHooks;
     send({ type: 'ready', claude: claude ?? null, distro: process.env.WSL_DISTRO_NAME ?? '' });
     bridge.snapshot();
-    poller?.refresh(); // one query when the pet starts (the numbers on disk may be hours old); after that only the user's click or the status line
+    // no limits query at start: it goes through the Agent SDK with the user's Claude login, which Anthropic reserves for its own apps.
+    // The ring is fed by Claude Code's own status line; a live query runs only on a click, and only with the SDK switched on by the user
     const adopted = new Set<string>();
     let lastAdopt = 0;
     const adoptRecent = async (now: number) => {
