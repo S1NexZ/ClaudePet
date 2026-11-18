@@ -64,7 +64,7 @@ cp = child_pid(r)
 check('child starts as one process, PET_PTY_SOCK exported', f'READY {cp} 100x30 {sp}'.encode() in r.term)
 check('socket mode is 0600', stat.S_IMODE(os.stat(sp).st_mode) == 0o600, oct(stat.S_IMODE(os.stat(sp).st_mode)))
 
-c = r.connect()
+c = r.connect(); r.pump(0.5)   # let the wrapper register the client before it sends
 out = (c.send(b'hello-from-socket\n'), r.pump(5, c, until=b'ECHO hello-from-socket'))[1]
 check('socket input reaches the child; output seen by terminal and client', b'ECHO hello-from-socket' in r.term and b'ECHO hello-from-socket' in out)
 os.write(r.fd, b'hello-from-terminal\n'); out = r.pump(1, c, until=b'ECHO hello-from-terminal')
