@@ -34,6 +34,7 @@ interface PetConfig {
   permissions?: PermissionPolicy;
   lang?: Lang;
   petScale?: number;
+  answerKeys?: boolean;
   language?: LangPref;
   pet: { imageUrl: string; cell: { w: number; h: number }; rows: { frames: number }[]; tweaks?: { trimHalfWidth?: Record<string, number>; lightFringe?: 'remove' | 'dark'; fringeCream?: boolean; stabilize?: boolean; spill?: boolean } };
 }
@@ -45,6 +46,8 @@ declare global {
       onMsg(cb: (m: BridgeMessage) => void): void;
       onBridge(cb: (up: boolean) => void): void;
       onSummon(cb: () => void): void;
+      onAnswerKey(cb: (n: number) => void): void;
+      onAnswerKeys(cb: (on: boolean) => void): void;
       pickFolder(): Promise<string | null>;
       openTerminal(sessionId: string): void;
       focus(): void;
@@ -527,6 +530,7 @@ async function main() {
     const term = btn(L('В терминале', 'In the terminal', '在终端中'), 'ask-skip', L('Ответить в терминале или приложении', 'Answer in the terminal or the app', '在终端或应用中回答'));
     term.addEventListener('click', () => { host.send({ type: 'permission', id: pp.id, allow: false }); askFor = null; });
     $('perm-q').replaceChildren(...opts, ...(q.multiSelect ? [done] : []), term);
+    numberAnswers();
   };
   const renderAsk = (pp: PendingPermission) => {
     const qs = pp.questions;
@@ -566,6 +570,12 @@ async function main() {
   $('btn-allow').addEventListener('click', () => answer(true));
   $('btn-deny').addEventListener('click', () => answer(false));
   host.onSummon(() => setExpanded(true));
+  // Ctrl+Alt+<n> (registered by the app only while an answer is awaited) presses the n-th button of the question or permission
+  const answerButtons = () => Array.from($('perm').querySelectorAll<HTMLButtonElement>('button')).filter((b) => !b.hidden && b.offsetParent !== null);
+  const numberAnswers = () => answerButtons().forEach((b, i) => { if (i < 9) b.dataset.key = String(i + 1); else delete b.dataset.key; });
+  document.body.classList.toggle('answer-keys', cfg.answerKeys !== false);
+  host.onAnswerKeys((on) => document.body.classList.toggle('answer-keys', on));
+  host.onAnswerKey((n) => { const b = answerButtons()[n - 1]; if (b && !b.disabled) b.click(); });
   if (cfg.expanded) setExpanded(true);
 
   // incremental chat rendering: only nodes from the first changed item are rebuilt
@@ -756,6 +766,7 @@ async function main() {
     if (pp) {
       renderAsk(pp);
       if (!pp.questions) $('perm-text').textContent = `${pp.tool}: ${pp.summary}`;
+      numberAnswers();
       if (pp.id !== lastNotified) { lastNotified = pp.id; host.notify(L('Claude ждёт разрешения', 'Claude needs permission', 'Claude 需要权限'), `${s!.project}: ${pp.tool} ${pp.summary}`); }
     }
     // a chat opened before any session was known follows the first one that appears

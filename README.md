@@ -19,7 +19,7 @@ Works with Claude Code in **Windows terminals, WSL, the Claude desktop app, macO
 ## What it does
 
 - **Shows what Claude is doing.** Thinking, reading, writing, running commands, testing, waiting for you, done or asleep: the pet animates each state, driven by Claude Code hooks.
-- **Answers Claude's questions.** When Claude asks you something with options, the pet shows them as buttons. Pick one, type your own answer, or leave it to the terminal.
+- **Answers Claude's questions.** When Claude asks you something with options, the pet shows them as buttons. Pick one, type your own answer, or leave it to the terminal. `Ctrl+Alt+1…9` presses a button from any window.
 - **Approves actions** (optional). Allow or deny tool permissions right from the pet.
 - **Shares one live session with your terminal.** Type from the pet or the terminal: it is the same Claude Code process and the same transcript, no second copy.
 - **Queues messages.** Write while Claude is still working: the message goes in when the turn ends. `/at 23:30 run the tests` sends it at a set time, `/at reset continue` right after your 5-hour limit resets.
@@ -51,6 +51,8 @@ Type this once in Claude Code (2.1.287 or later):
 ```
 
 The plugin runs inside Claude Code (terminal, the Code tab of the Claude app, VS Code). With it, what you write in the pet arrives in the session as your own message, with no terminal wrapper and no typing into the app's window, and the pet gets your plan limits straight from Claude Code. It only talks to the pet on `127.0.0.1`; `claude plugin validate` lists every call it makes. WSL sessions inside the Claude app do not load plugins, so hooks stay in use there.
+
+In the terminal the plugin also draws a tiny animated pet next to Claude's spinner and a row above the prompt with your 5-hour and weekly limits, reset time and a run-out forecast. `/ccpet pet` and `/ccpet limits` turn them off or on.
 
 **First launch warnings.** The builds are not signed with paid certificates yet:
 - **Windows** SmartScreen: "More info" → "Run anyway".

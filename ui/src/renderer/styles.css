@@ -98,6 +98,7 @@ body { font-family: "Segoe UI", "Microsoft YaHei UI", system-ui, sans-serif; col
 #perm #btn-allow { background: var(--teal); color: var(--accent-ink); }
 #perm #btn-deny { background: var(--hover2); color: var(--text); }
 #perm button:focus-visible { outline: 2px solid var(--text); }
+body.answer-keys #perm button[data-key]::before { content: attr(data-key); margin-right: 5px; font-size: 11px; opacity: .55; font-variant-numeric: tabular-nums; }
 /* Claude's question: the text wraps, the options are buttons */
 #perm.ask { border-color: color-mix(in srgb, var(--teal) 60%, transparent); }
 #perm.ask #perm-text { white-space: normal; font-family: inherit; font-size: 13px; color: var(--text); }

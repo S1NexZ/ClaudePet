@@ -162,7 +162,21 @@ if (primary) app.whenReady().then(async () => {
     }
     lastSnapshot = { ...m, sessions, attention: sessions.some((x) => x.id === m.attention) ? m.attention : pickAttention(sessions)?.id ?? null };
     win.webContents.send('pet:msg', lastSnapshot);
+    syncAnswerKeys();
     setTimeout(drainQueue, 0);
+  };
+  // Ctrl+Alt+1-9 press the answer buttons of a question or permission on the pet, from any app; held only while one waits
+  const ANSWER_KEYS = [1, 2, 3, 4, 5, 6, 7, 8, 9].map((n) => `Control+Alt+${n}`);
+  let answerKeysOn = false;
+  const syncAnswerKeys = () => {
+    const s = (lastSnapshot?.sessions ?? []).find((x: Session) => x.id === lastSnapshot?.attention);
+    const want = !!(settings.answerKeys && s?.pendingPermission);
+    if (want === answerKeysOn) return;
+    answerKeysOn = want;
+    for (const [i, k] of ANSWER_KEYS.entries()) {
+      if (!want) { try { globalShortcut.unregister(k); } catch { /* not ours */ } continue; }
+      try { globalShortcut.register(k, () => win.webContents.send('pet:answer-key', i + 1)); } catch { /* taken by another app */ }
+    }
   };
   // a chat renamed, archived or deleted in the app shows up in the pet at once (the folder is watched; the 5 s re-read above stays as the fallback)
   const regWatchers = new Map<string, FSWatcher>();
@@ -282,6 +296,8 @@ if (primary) app.whenReady().then(async () => {
   const summon = () => { win.show(); win.setAlwaysOnTop(true, TOP_LEVEL); win.focus(); win.webContents.send('pet:summon'); };
   const registerHotkey = () => {
     globalShortcut.unregisterAll();
+    answerKeysOn = false;
+    syncAnswerKeys();
     if (!settings.hotkey) return;
     let ok = false;
     try { ok = globalShortcut.register(settings.hotkey, () => (win.isVisible() && win.isFocused() ? win.hide() : summon())); }
@@ -342,6 +358,8 @@ if (primary) app.whenReady().then(async () => {
     { label: L('Плагин ccPet для Claude Code…', 'ccPet plugin for Claude Code…', 'Claude Code 的 ccPet 插件…'), click: () => void showPluginInfo() },
     { label: L('Уведомлять, когда нужно разрешение', 'Notify when permission is needed', '需要权限时通知'), type: 'checkbox', checked: settings.notify,
       click: (i) => { settings = { ...settings, notify: i.checked }; applySettings(); } },
+    { label: L('Отвечать клавишами Ctrl+Alt+1…9', 'Answer with Ctrl+Alt+1…9', '用 Ctrl+Alt+1…9 回答'), type: 'checkbox', checked: settings.answerKeys,
+      click: (i) => { settings = { ...settings, answerKeys: i.checked }; applySettings(); syncAnswerKeys(); win.webContents.send('pet:answer-keys', i.checked); } },
     { label: L('Размер питомца', 'Pet size', '宠物大小'), submenu: [0.75, 1, 1.25, 1.5, 1.8].filter((v) => v >= PET_SCALE_MIN && v <= PET_SCALE_MAX).map((v) => ({
       label: `${Math.round(v * 100)}%`, type: 'radio' as const, checked: Math.abs(settings.petScale - v) < 0.03,
       click: () => { settings = { ...settings, petScale: v }; applySettings(); win.webContents.send('pet:scale', v); } })) },
@@ -366,7 +384,7 @@ if (primary) app.whenReady().then(async () => {
     cell: p.cell, rows: p.rows, tweaks: p.tweaks,
   });
   ipcMain.handle('pet:config', () => ({
-    bridge: up, snapshot: lastSnapshot, expanded: expandedArg, panel: panelArg, appearance: settings.appearance, permissions: settings.permissions, lang: getLang(), language: settings.language, petScale: settings.petScale,
+    bridge: up, snapshot: lastSnapshot, expanded: expandedArg, panel: panelArg, appearance: settings.appearance, permissions: settings.permissions, answerKeys: settings.answerKeys, lang: getLang(), language: settings.language, petScale: settings.petScale,
     pet: petPayload(pet),
   }));
 

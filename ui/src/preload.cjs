@@ -5,6 +5,8 @@ contextBridge.exposeInMainWorld('petHost', {
   onMsg: (cb) => ipcRenderer.on('pet:msg', (_e, m) => cb(m)),
   onBridge: (cb) => ipcRenderer.on('pet:bridge', (_e, up) => cb(up)),
   onSummon: (cb) => ipcRenderer.on('pet:summon', () => cb()),
+  onAnswerKey: (cb) => ipcRenderer.on('pet:answer-key', (_e, n) => cb(n)),
+  onAnswerKeys: (cb) => ipcRenderer.on('pet:answer-keys', (_e, on) => cb(on)),
   openTerminal: (sessionId) => ipcRenderer.send('pet:open-terminal', sessionId),
   pickFolder: () => ipcRenderer.invoke('pet:pick-folder'),
   focus: () => ipcRenderer.send('pet:focus'),
