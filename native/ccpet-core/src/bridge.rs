@@ -481,6 +481,8 @@ impl Bridge {
         }
     }
 
+    /** the front end the waiter reported (terminal, desktop app, ...) */
+    pub fn set_source(&self, id: &str, source: &str) { let mut g = self.lock(); g.store.set_source(id, source); self.snap(&mut g, true); }
     pub fn has_session(&self, id: &str) -> bool { self.lock().store.get(id).is_some() }
 
     /** For tests and the bridge main: the current state of a session. */
@@ -537,6 +539,48 @@ mod tests {
         t.tool_input = Some(json!({ "command": "npm test" }));
         b.on_hook(t);
         assert_eq!(of(&log, "react")[0]["reaction"], "happy");
+    }
+
+    fn sessions(log: &Log) -> Vec<Value> { of(log, "snapshot").pop().map_or(vec![], |s| s["sessions"].as_array().unwrap().clone()) }
+
+    #[test]
+    fn dismiss_and_end_hide_a_session_until_the_next_prompt() {
+        for kind in ["dismiss", "end"] {
+            let (b, log, _) = make(kind);
+            let mut e = ev("Stop", "t1");
+            e.pet_parents = Some(vec![std::process::id() as i64]); // not a claude process: never killed or remembered
+            b.on_hook(e);
+            assert_eq!(sessions(&log).len(), 1);
+            b.handle(&json!({ "type": kind, "sessionId": "t1" }));
+            assert!(sessions(&log).is_empty());
+            b.on_hook(ev("Stop", "t1"));
+            assert!(sessions(&log).is_empty(), "{kind}: a late Stop must not bring it back");
+            b.on_hook(ev("UserPromptSubmit", "t1"));
+            assert_eq!(sessions(&log)[0]["id"], "t1");
+        }
+    }
+
+    #[test]
+    fn term_mark_without_a_known_pid_fails() {
+        let (b, log, _) = make("tm");
+        b.on_hook(ev("Stop", "t1"));
+        b.handle(&json!({ "type": "term-mark", "sessionId": "t1", "text": "x" }));
+        assert_eq!(of(&log, "termMark")[0], json!({ "type": "termMark", "sessionId": "t1", "ok": false }));
+    }
+
+    #[test]
+    fn stop_rereads_the_history_and_set_source_reaches_the_snapshot() {
+        let (b, log, settings) = make("hist");
+        let tp = settings.with_file_name("t.jsonl");
+        std::fs::write(&tp, "{\"type\":\"user\",\"message\":{\"role\":\"user\",\"content\":\"hello\"}}\n").unwrap();
+        let mut e = ev("Stop", "t1");
+        e.transcript_path = Some(tp.to_string_lossy().into_owned());
+        b.on_hook(e);
+        for _ in 0..40 { if of(&log, "history").len() >= 2 { break; } std::thread::sleep(Duration::from_millis(50)); }
+        assert!(of(&log, "history").len() >= 2, "immediate read plus the re-read");
+        assert!(sessions(&log)[0].get("source").is_none());
+        b.set_source("t1", "claude-desktop");
+        assert_eq!(sessions(&log)[0]["source"], "claude-desktop");
     }
 
     #[test]

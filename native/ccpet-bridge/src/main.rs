@@ -104,7 +104,7 @@ fn main() {
         on_waiter: Some(Box::new(move |sid, cwd, src| {
             // the session exists even if its SessionStart never arrived
             if !b2.has_session(sid) { b2.on_hook(HookEvent::new("SessionStart", sid, cwd)); }
-            let _ = src;
+            if let Some(src) = src { b2.set_source(sid, src); }
         })),
         on_permission: Some(Box::new(move |e, gone| b3.on_permission(e, gone))),
         on_reply: None,
