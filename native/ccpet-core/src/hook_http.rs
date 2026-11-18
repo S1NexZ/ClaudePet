@@ -62,7 +62,7 @@ fn query<'a>(q: &'a str, key: &str) -> Option<String> {
 fn safe_id(s: &str) -> bool { (1..=100).contains(&s.len()) && s.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-') }
 
 fn respond(c: &mut TcpStream, status: u16, ctype: Option<&str>, body: &str) {
-    let reason = match status { 200 => "OK", 204 => "No Content", 400 => "Bad Request", 404 => "Not Found", 409 => "Conflict", _ => "Error" };
+    let reason = match status { 200 => "OK", 204 => "No Content", 400 => "Bad Request", 404 => "Not Found", 409 => "Conflict", 411 => "Length Required", _ => "Error" };
     let ct = ctype.map(|t| format!("Content-Type: {t}\r\n")).unwrap_or_default();
     let _ = write!(c, "HTTP/1.1 {status} {reason}\r\n{ct}Content-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len());
     let _ = c.flush();
@@ -78,19 +78,42 @@ fn client_gone(c: &TcpStream) -> bool {
     gone
 }
 
+const MAX_LINE: usize = 8 * 1024;
+const MAX_HEADERS: usize = 100;
+
+/** One head line, at most MAX_LINE bytes: Err = too long, Ok(None) = EOF. */
+fn read_capped(r: &mut BufReader<TcpStream>, line: &mut String) -> Result<Option<()>, ()> {
+    let mut buf = Vec::new();
+    if r.by_ref().take(MAX_LINE as u64 + 1).read_until(b'\n', &mut buf).is_err() || buf.is_empty() { return Ok(None); }
+    if buf.len() > MAX_LINE { return Err(()); }
+    *line = String::from_utf8_lossy(&buf).into_owned();
+    Ok(Some(()))
+}
+
+/** `?wait=` of a plugin long-poll in seconds: absent / 0 / non-finite -> 20, then 1..25 (Math.min(25, Math.max(1, Number(w) || 20))). */
+fn mod_wait_secs(q: Option<String>) -> f64 {
+    q.and_then(|w| w.parse::<f64>().ok()).filter(|w| w.is_finite() && *w != 0.0).unwrap_or(20.0).clamp(1.0, 25.0)
+}
+
 fn handle(mut c: TcpStream, o: &HookServerOpts) {
     let _ = c.set_read_timeout(Some(Duration::from_secs(10)));
     let Ok(rc) = c.try_clone() else { return };
     let mut r = BufReader::new(rc);
     let mut line = String::new();
-    if r.read_line(&mut line).is_err() { return; }
+    match read_capped(&mut r, &mut line) { Ok(Some(())) => {} Ok(None) => return, Err(()) => return respond(&mut c, 400, None, "") }
     let mut parts = line.split_whitespace();
     let (method, target) = (parts.next().unwrap_or("").to_string(), parts.next().unwrap_or("/").to_string());
     let mut len = 0usize;
-    loop {
+    let mut chunked = false;
+    for n in 0.. {
         let mut h = String::new();
-        if r.read_line(&mut h).unwrap_or(0) == 0 || h.trim().is_empty() { break; }
-        if let Some((k, v)) = h.split_once(':') { if k.eq_ignore_ascii_case("content-length") { len = v.trim().parse().unwrap_or(0); } }
+        match read_capped(&mut r, &mut h) { Ok(Some(())) => {} Ok(None) => break, Err(()) => return respond(&mut c, 400, None, "") }
+        if h.trim().is_empty() { break; }
+        if n >= MAX_HEADERS { return respond(&mut c, 400, None, ""); }
+        if let Some((k, v)) = h.split_once(':') {
+            if k.eq_ignore_ascii_case("content-length") { len = v.trim().parse().unwrap_or(0); }
+            if k.eq_ignore_ascii_case("transfer-encoding") && v.to_ascii_lowercase().contains("chunked") { chunked = true; }
+        }
     }
     let (path, q) = target.split_once('?').unwrap_or((&target, ""));
     let mut seg = path.split('/').skip(1);
@@ -111,7 +134,7 @@ fn handle(mut c: TcpStream, o: &HookServerOpts) {
             if mb.has_waiter(&sid) && !mb.waiter_is_mod(&sid) { mb.cancel(&sid); } // that waiter gets 204 and re-polls into a 409
         } else if mb.is_mod(&sid) { return respond(&mut c, 409, None, ""); }
         if mb.has_waiter(&sid) { return respond(&mut c, 409, None, ""); }
-        let mod_wait = query(q, "wait").and_then(|w| w.parse::<f64>().ok()).filter(|w| *w != 0.0).unwrap_or(20.0).clamp(1.0, 25.0);
+        let mod_wait = mod_wait_secs(query(q, "wait"));
         let wait = if is_mod { Duration::from_secs_f64(mod_wait) } else { Duration::from_millis(o.wait_ms) };
         match mb.wait(&sid, wait, is_mod, &|| client_gone(&c)) {
             Waited::Busy => respond(&mut c, 409, None, ""),
@@ -122,6 +145,7 @@ fn handle(mut c: TcpStream, o: &HookServerOpts) {
     }
 
     if kind == "hook" && method == "POST" {
+        if chunked { return respond(&mut c, 411, None, ""); } // bodies are read by Content-Length only
         if len > MAX_BODY { return respond(&mut c, 400, None, ""); }
         let mut body = vec![0u8; len];
         if r.read_exact(&mut body).is_err() { return respond(&mut c, 400, None, ""); }
@@ -191,6 +215,35 @@ mod tests {
             on_reply: Some(Box::new(|e| (e.session_id == "stop-me").then(|| json!({ "continue": false })))),
         }).unwrap();
         (s, mb, got)
+    }
+
+    fn raw(port: u16, head: &str) -> u16 {
+        let mut c = TcpStream::connect(("127.0.0.1", port)).unwrap();
+        let _ = c.write_all(head.as_bytes());
+        let mut s = String::new();
+        let _ = c.read_to_string(&mut s);
+        s.split_whitespace().nth(1).and_then(|x| x.parse().ok()).unwrap_or(0)
+    }
+
+    #[test]
+    fn wait_secs() {
+        for (q, want) in [("NaN", 20.0), ("inf", 20.0), ("nan", 20.0), ("0", 20.0), ("100", 25.0), ("3", 3.0), ("0.1", 1.0), ("x", 20.0)] {
+            assert_eq!(mod_wait_secs(Some(q.into())), want, "{q}");
+        }
+        assert_eq!(mod_wait_secs(None), 20.0);
+    }
+
+    #[test]
+    fn head_limits_and_chunked() {
+        let (s, _, _) = server(100);
+        let big = "a".repeat(10 * 1024);
+        assert_eq!(raw(s.port, &format!("POST /hook/abc123/Stop HTTP/1.1\r\nX-Big: {big}\r\n\r\n")), 400);
+        assert_eq!(raw(s.port, &format!("GET /{big} HTTP/1.1\r\n\r\n")), 400);
+        let many: String = (0..101).map(|i| format!("X-{i}: v\r\n")).collect();
+        assert_eq!(raw(s.port, &format!("GET /mailbox/abc123/s1 HTTP/1.1\r\n{many}\r\n")), 400);
+        assert_eq!(raw(s.port, "POST /hook/abc123/Stop HTTP/1.1\r\nTransfer-Encoding: chunked\r\n\r\n2\r\n{}\r\n0\r\n\r\n"), 411);
+        assert_eq!(req(s.port, "POST", "/hook/abc123/Stop", r#"{"session_id":"s1"}"#).0, 200);
+        s.close();
     }
 
     #[test]

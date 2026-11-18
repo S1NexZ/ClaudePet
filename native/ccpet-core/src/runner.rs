@@ -44,7 +44,10 @@ struct Live {
     settle: Mutex<Option<Sender<Result<String, String>>>>,
 }
 
-struct Pending { sid: String, input: Value, proc: Arc<ClaudeProc>, request_id: String }
+struct Pending { sid: String, input: Value, proc: Arc<ClaudeProc>, request_id: String, tool_use_id: Option<String> }
+
+/** The SDK echoes the request's tool_use_id in its permission answers. */
+fn verdict(mut v: Value, tool_use_id: &Option<String>) -> Value { if let Some(t) = tool_use_id { v["toolUseID"] = json!(t); } v }
 
 #[derive(Default)]
 struct State {
@@ -135,8 +138,8 @@ impl SessionRunner {
         };
         let proc = ClaudeProc::spawn(Spawn { claude, args, cwd: PathBuf::from(cwd), env: Some(child_env()) }, handlers)?;
         let _ = live.proc.set(proc.clone());
-        let _ = proc.send_user(prompt, resume.unwrap_or(""));
         if let Some(r) = &resume_s { self.bind(&live, r); }
+        let _ = proc.send_user(prompt, resume.unwrap_or(""));
         rx.recv_timeout(Duration::from_secs(60)).unwrap_or_else(|_| Err(l("Claude Code не ответил", "Claude Code did not answer", "Claude Code 没有响应")))
     }
 
@@ -168,11 +171,11 @@ impl SessionRunner {
         let input = req.get("input").cloned().unwrap_or_else(|| json!({}));
         let policy = self.st.lock().unwrap().policy.clone();
         if policy == "all" || (policy == "edits" && EDIT_TOOLS.contains(&tool.as_str())) {
-            return p.respond(&request_id, Ok(json!({ "behavior": "allow", "updatedInput": input })));
+            return p.respond(&request_id, Ok(verdict(json!({ "behavior": "allow", "updatedInput": input }), &req["tool_use_id"].as_str().map(String::from))));
         }
         let Some(sid) = live.sid.lock().unwrap().clone() else { return p.respond(&request_id, Err("no session".into())) };
         let id = req["tool_use_id"].as_str().map(String::from).unwrap_or_else(|| request_id.clone());
-        self.st.lock().unwrap().pending.insert(id.clone(), Pending { sid: sid.clone(), input: input.clone(), proc: p.clone(), request_id });
+        self.st.lock().unwrap().pending.insert(id.clone(), Pending { sid: sid.clone(), input: input.clone(), proc: p.clone(), request_id, tool_use_id: req["tool_use_id"].as_str().map(String::from) });
         self.host.set_pending(&sid, Some(PendingPermission { id, tool: tool.clone(), summary: summarize(&tool, &input), questions: None }));
         self.emit(&sid, "Notification", |e| e.message = Some(format!("Claude needs your permission to use {tool}")));
         self.host.changed();
@@ -191,8 +194,10 @@ impl SessionRunner {
         if let Some(sid) = &sid {
             let mut g = self.st.lock().unwrap();
             if g.live.get(sid).map_or(false, |x| Arc::ptr_eq(x, live)) { g.live.remove(sid); }
-            g.pending.retain(|_, p| &p.sid != sid || !live.proc.get().map_or(false, |lp| Arc::ptr_eq(lp, &p.proc)));
+            let gone: Vec<String> = g.pending.iter().filter(|(_, p)| &p.sid == sid && live.proc.get().map_or(false, |lp| Arc::ptr_eq(lp, &p.proc))).map(|(i, _)| i.clone()).collect();
+            for i in &gone { g.pending.remove(i); }
             drop(g);
+            if !gone.is_empty() { self.host.set_pending(sid, None); self.host.changed(); }
             if let Some(e) = &err {
                 self.emit(sid, "PostToolUse", |ev| ev.tool_response = Some(json!({ "is_error": true })));
                 self.host.chat(sid, json!({ "kind": "end", "error": e }));
@@ -243,7 +248,7 @@ impl SessionRunner {
                 let (live, after) = (live.clone(), self.idle_close);
                 std::thread::spawn(move || {
                     std::thread::sleep(after);
-                    if live.idle_gen.load(Ordering::Relaxed) == gen { if let Some(p) = live.proc.get() { p.kill(); } }
+                    if live.idle_gen.load(Ordering::Relaxed) == gen { if let Some(p) = live.proc.get() { p.close(); } }
                 });
             }
             _ => {}
@@ -255,7 +260,7 @@ impl SessionRunner {
         let Some(p) = self.st.lock().unwrap().pending.remove(id) else { return };
         self.host.set_pending(&p.sid, None);
         self.emit(&p.sid, "PostToolUse", |e| e.tool_response = Some(json!({})));
-        p.proc.respond(&p.request_id, Ok(if allow { json!({ "behavior": "allow", "updatedInput": p.input }) } else { json!({ "behavior": "deny", "message": l("Отклонено в ccPet", "Denied in ccPet", "已在 ccPet 中拒绝") }) }));
+        p.proc.respond(&p.request_id, Ok(verdict(if allow { json!({ "behavior": "allow", "updatedInput": p.input }) } else { json!({ "behavior": "deny", "message": l("Отклонено в ccPet", "Denied in ccPet", "已在 ccPet 中拒绝") }) }, &p.tool_use_id)));
         self.host.changed();
     }
 
@@ -338,7 +343,12 @@ impl Runner for Arc<SessionRunner> {
         };
         live.idle_gen.fetch_add(1, Ordering::Relaxed);
         for id in pend { self.answer(&id, false); }
-        if let Some(p) = live.proc.get() { p.kill(); } // a running turn ends with it
+        if let Some(p) = live.proc.get().cloned() {
+            // a running turn is interrupted first (as the SDK's release does), then the process is closed
+            if self.host.session(session).map_or(false, |s| !idle_state(s.state)) {
+                std::thread::spawn(move || { let _ = p.request(json!({ "subtype": "interrupt" }), Duration::from_secs(2)); p.close(); });
+            } else { p.close(); }
+        }
         self.host.set_owned(session, false);
         self.host.changed();
         true
@@ -372,7 +382,7 @@ impl Runner for Arc<SessionRunner> {
     /** Ends every live process (the app is quitting). */
     fn close_all(&self) {
         let live: Vec<_> = self.st.lock().unwrap().live.drain().map(|(_, l)| l).collect();
-        for l in live { l.idle_gen.fetch_add(1, Ordering::Relaxed); if let Some(p) = l.proc.get() { p.kill(); } }
+        for l in live { l.idle_gen.fetch_add(1, Ordering::Relaxed); if let Some(p) = l.proc.get() { p.close(); } }
     }
 }
 
@@ -398,17 +408,20 @@ for l in sys.stdin:
     m = json.loads(l)
     if m.get('type') == 'user':
         out({{'type': 'system', 'subtype': 'init', 'session_id': sid}})
-        if mode == 'perm':
+        if mode in ('perm', 'permexit', 'permecho'):
             out({{'type': 'control_request', 'request_id': 'r1', 'request': {{'subtype': 'can_use_tool', 'tool_name': 'Bash', 'input': {{'command': 'ls'}}, 'tool_use_id': 'tu1'}}}})
+            if mode == 'permexit': sys.exit(0)
             continue
         out({{'type': 'assistant', 'message': {{'content': [{{'type': 'text', 'text': 'hello ' + m['message']['content']}}, {{'type': 'tool_use', 'name': 'Read', 'input': {{'file_path': '/a'}}}}]}}}})
         out({{'type': 'result', 'subtype': 'success'}})
-    elif m.get('type') == 'control_response' and mode == 'perm':
-        out({{'type': 'assistant', 'message': {{'content': [{{'type': 'text', 'text': 'got ' + m['response']['response']['behavior']}}]}}}})
+    elif m.get('type') == 'control_response' and mode in ('perm', 'permecho'):
+        r = m['response']['response']
+        out({{'type': 'assistant', 'message': {{'content': [{{'type': 'text', 'text': ('got ' + r['behavior']) if mode == 'perm' else 'echo ' + json.dumps(r)}}]}}}})
         out({{'type': 'result', 'subtype': 'success'}})
     elif m.get('type') == 'control_request':
         sub = m['request']['subtype']
         out({{'type': 'control_response', 'response': {{'subtype': 'success', 'request_id': m['request_id'], 'response': {{'models': [{{'value': 'm1', 'displayName': 'M1', 'description': 'd'}}]}} if sub == 'initialize' else {{}}}}}})
+if mode.startswith('eof:'): open(mode[4:], 'w').write('eof')
 "#)).unwrap();
         use std::os::unix::fs::PermissionsExt;
         std::fs::set_permissions(&f, std::fs::Permissions::from_mode(0o755)).unwrap();
@@ -437,6 +450,7 @@ for l in sys.stdin:
         let (b, log, r) = rig(c);
         let cwd = std::env::temp_dir().to_string_lossy().into_owned();
         b.handle(&json!({ "type": "start", "cwd": cwd, "prompt": "hi" }));
+        until("started", || !of(&log, "started").is_empty());
         assert_eq!(of(&log, "started")[0]["sessionId"], "sess-new");
         until("the turn", || chats(&log).contains(&"end:".to_string()));
         assert_eq!(chats(&log), vec!["user:hi", "assistant:hello hi", "tool:", "end:"]);
@@ -474,6 +488,43 @@ for l in sys.stdin:
     }
 
     #[test]
+    fn a_dead_process_clears_the_pending_card() {
+        let Some(c) = fake("permexit", "permexit") else { return };
+        let (b, log, r) = rig(c);
+        let cwd = std::env::temp_dir().to_string_lossy().into_owned();
+        let _ = std::thread::spawn({ let b = b.clone(); move || b.handle(&json!({ "type": "start", "cwd": cwd, "prompt": "go" })) });
+        until("the prompt", || of(&log, "snapshot").iter().any(|s| s["sessions"][0]["pendingPermission"]["id"] == "tu1"));
+        until("the card to clear", || of(&log, "snapshot").pop().map_or(false, |s| s["sessions"][0]["pendingPermission"].is_null()));
+        r.close_all();
+    }
+
+    #[test]
+    fn permission_answers_carry_the_tool_use_id() {
+        let Some(c) = fake("permecho", "permecho") else { return };
+        let (b, log, r) = rig(c);
+        let cwd = std::env::temp_dir().to_string_lossy().into_owned();
+        b.handle(&json!({ "type": "start", "cwd": cwd, "prompt": "go" }));
+        until("the prompt", || of(&log, "snapshot").iter().any(|s| s["sessions"][0]["pendingPermission"]["id"] == "tu1"));
+        b.handle(&json!({ "type": "permission", "id": "tu1", "allow": true }));
+        until("the echo", || chats(&log).iter().any(|c| c.starts_with("assistant:echo ") && c.contains("\"toolUseID\": \"tu1\"")));
+        r.close_all();
+    }
+
+    #[test]
+    fn release_closes_stdin_of_the_process() {
+        let marker = std::env::temp_dir().join(format!("ccpet-eof-{}", std::process::id()));
+        let _ = std::fs::remove_file(&marker);
+        let Some(c) = fake("eof", &format!("eof:{}", marker.display())) else { return };
+        let (b, _log, _r) = rig(c);
+        let cwd = std::env::temp_dir().to_string_lossy().into_owned();
+        b.handle(&json!({ "type": "start", "cwd": cwd, "prompt": "hi" }));
+        until("idle", || b.session_state("sess-new") == Some(PetState::Done));
+        b.handle(&json!({ "type": "release", "sessionId": "sess-new" }));
+        until("EOF on stdin", || marker.exists());
+        let _ = std::fs::remove_file(&marker);
+    }
+
+    #[test]
     fn a_resume_answered_with_another_id_is_refused_and_undone() {
         let Some(c) = fake("copy", "copy") else { return };
         let (b, log, r) = rig(c);
@@ -493,8 +544,10 @@ for l in sys.stdin:
         let Some(c) = fake("models", "chat") else { return };
         let (b, log, r) = rig(c);
         b.handle(&json!({ "type": "models" }));
+        until("models", || !of(&log, "models").is_empty());
         assert_eq!(of(&log, "models")[0]["models"][0]["value"], "m1");
         b.handle(&json!({ "type": "setModel", "sessionId": null, "model": "m1" }));
+        until("modelSet", || !of(&log, "modelSet").is_empty());
         assert_eq!(of(&log, "modelSet")[0]["model"], "m1");
         b.on_hook(crate::types::HookEvent::new("SessionStart", "s9", &std::env::temp_dir().to_string_lossy()));
         b.handle(&json!({ "type": "btw", "sessionId": "s9", "text": "why" }));

@@ -237,6 +237,12 @@ impl Bridge {
         }
     }
 
+    /** Paths that wait for a `claude` process (its start, its model list): off the command thread, so Stop and answers are never queued behind them. */
+    fn in_background(&self, f: impl FnOnce(&Bridge) -> Result<(), String> + Send + 'static) {
+        let b = self.clone();
+        std::thread::spawn(move || { match f(&b) { Ok(()) => b.snapshot(true), Err(e) => b.out(json!({ "type": "error", "message": e })) } });
+    }
+
     /** Ok(true): send a snapshot afterwards. */
     fn run(&self, cmd: &Value) -> Result<bool, String> {
         let kind = cmd.get("type").and_then(Value::as_str).unwrap_or("");
@@ -244,8 +250,9 @@ impl Bridge {
         match kind {
             "start" => {
                 self.need_sdk(&self.lock())?;
-                let sid = self.runner().start(&crate::paths::to_wsl_path(&s(cmd, "cwd")), &s(cmd, "prompt"))?;
-                self.out(json!({ "type": "started", "sessionId": sid }));
+                let (cwd, prompt) = (crate::paths::to_wsl_path(&s(cmd, "cwd")), s(cmd, "prompt"));
+                self.in_background(move |b| { let sid = b.runner().start(&cwd, &prompt)?; b.out(json!({ "type": "started", "sessionId": sid })); Ok(()) });
+                return Ok(false);
             }
             "send" => return self.send(&s(cmd, "sessionId"), &s(cmd, "text")),
             "interrupt" => {
@@ -283,12 +290,12 @@ impl Bridge {
                 return Ok(false);
             }
             "sdk-chats" => { self.lock().sdk_on = on; return Ok(false); }
-            "models" => { self.need_sdk(&self.lock())?; let m = self.runner().models()?; self.out(json!({ "type": "models", "models": m })); return Ok(false); }
+            "models" => { self.need_sdk(&self.lock())?; self.in_background(|b| { let m = b.runner().models()?; b.out(json!({ "type": "models", "models": m })); Ok(()) }); return Ok(false); }
             "setModel" => {
                 let sid = cmd.get("sessionId").filter(|v| !v.is_null()).map(crate::map_event::js_string);
                 self.need_sdk(&self.lock())?;
-                self.runner().set_model(sid.as_deref(), &s(cmd, "model"))?;
-                self.out(json!({ "type": "modelSet", "sessionId": sid, "model": s(cmd, "model") }));
+                let model = s(cmd, "model");
+                self.in_background(move |b| { b.runner().set_model(sid.as_deref(), &model)?; b.out(json!({ "type": "modelSet", "sessionId": sid, "model": model })); Ok(()) });
                 return Ok(false);
             }
             "btw" => {

@@ -60,7 +60,7 @@ impl ClaudeProc {
         let pr = p.clone();
         std::thread::spawn(move || {
             for line in BufReader::new(stdout).lines() {
-                let Ok(line) = line else { break };
+                let Ok(line) = line else { pr.kill(); break }; // a line we cannot read: stop the process instead of leaving it running unattended
                 let Ok(v) = serde_json::from_str::<Value>(&line) else { continue };
                 match v.get("type").and_then(Value::as_str) {
                     Some("control_response") => {
@@ -72,6 +72,7 @@ impl ClaudeProc {
                         }
                     }
                     Some("control_request") => (h.on_request)(&pr, v.get("request_id").and_then(Value::as_str).unwrap_or("").to_string(), v.get("request").cloned().unwrap_or(Value::Null)),
+                    Some("keep_alive") => {}
                     Some("control_cancel_request") => (h.on_cancel)(&pr, v.get("request_id").and_then(Value::as_str).unwrap_or("")),
                     _ => (h.on_message)(&pr, v),
                 }
@@ -120,10 +121,32 @@ impl ClaudeProc {
         self.write(&json!({ "type": "user", "message": { "role": "user", "content": text }, "parent_tool_use_id": null, "session_id": session_id }))
     }
 
-    /** Closes stdin (a graceful end) and kills the process. */
+    /** Hard kill. */
     pub fn kill(&self) {
         self.killed.store(true, Ordering::Relaxed);
         self.stdin.lock().unwrap().take();
         let _ = self.child.lock().unwrap().kill();
+    }
+
+    fn exited_within(&self, ms: u64) -> bool {
+        for _ in 0..ms / 20 {
+            if !matches!(self.child.lock().unwrap().try_wait(), Ok(None)) { return true; }
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        false
+    }
+
+    /** The SDK's graceful end: close stdin (EOF), SIGTERM after 5 s, SIGKILL after 5 s more, so SessionEnd hooks run. */
+    pub fn close(self: &Arc<Self>) {
+        self.killed.store(true, Ordering::Relaxed);
+        self.stdin.lock().unwrap().take();
+        let p = self.clone();
+        std::thread::spawn(move || {
+            if p.exited_within(5000) { return; }
+            let pid = p.child.lock().unwrap().id();
+            let _ = Command::new("kill").arg("-TERM").arg(pid.to_string()).status();
+            if p.exited_within(5000) { return; }
+            let _ = p.child.lock().unwrap().kill();
+        });
     }
 }

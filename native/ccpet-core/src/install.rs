@@ -74,9 +74,9 @@ fn strip(next: &mut Value, pred: impl Fn(&Value) -> bool) {
             if let Some(Value::Array(hs)) = g.get_mut("hooks") { hs.retain(|h| !pred(h)); }
         }
         groups.retain(|g| !matches!(g.get("hooks"), Some(Value::Array(hs)) if hs.is_empty()));
-        if groups.is_empty() { hooks.remove(&ev); } else { hooks.insert(ev, Value::Array(groups)); }
+        if groups.is_empty() { hooks.shift_remove(&ev); } else { hooks.insert(ev, Value::Array(groups)); }
     }
-    if hooks.is_empty() { next.as_object_mut().map(|o| o.remove("hooks")); }
+    if hooks.is_empty() { next.as_object_mut().map(|o| o.shift_remove("hooks")); }
 }
 
 fn add(next: &mut Value, ev: &str, handler: Value, matcher: Option<&str>) {
@@ -91,11 +91,21 @@ fn add(next: &mut Value, ev: &str, handler: Value, matcher: Option<&str>) {
 
 fn object(v: &Value) -> Value { if v.is_object() { v.clone() } else { json!({}) } }
 
+/** `"hooks": null` becomes `{}`; false when `hooks` is some other non-object (then the plan leaves the settings alone). */
+fn prep_hooks(next: &mut Value) -> bool {
+    match next.get("hooks") {
+        None | Some(Value::Object(_)) => true,
+        Some(Value::Null) => { next["hooks"] = json!({}); true }
+        _ => false,
+    }
+}
+
 /** Our events hook for every event (idempotent) and a +/- diff of the hooks section ('' when nothing changes). */
 pub fn plan_hooks(current: &Value, hook_path: &str) -> (Value, String) {
     // `|| true`: if the app is ever removed, a missing hook file must not surface as hook errors in Claude Code
     let command = format!("\"{hook_path}\" 2>/dev/null || true");
     let mut next = object(current);
+    if !prep_hooks(&mut next) { return (current.clone(), String::new()); }
     // the waiter and the statusLine command belong to other plans: left alone here
     strip(&mut next, |h| is_our_hook_command(s(h, "command")) && !is_wait(s(h, "command")) && !is_statusline_cmd(s(h, "command")));
     for ev in HOOK_EVENTS {
@@ -111,6 +121,7 @@ pub struct HostHooks<'a> { pub origin: &'a str, pub token: &'a str, pub hook_pat
 /** Our receiver entries next to the events hook: the mailbox waiter and the permission / question answers over HTTP. */
 pub fn plan_host_hooks(current: &Value, o: &HostHooks) -> (Value, String) {
     let mut next = object(current);
+    if !prep_hooks(&mut next) { return (current.clone(), String::new()); }
     strip(&mut next, is_ours);
     let waiter = json!({ "type": "command", "command": format!("\"{}\" wait", o.hook_path), "asyncRewake": true });
     for ev in ["SessionStart", "Stop"] { add(&mut next, ev, waiter.clone(), None); }
@@ -233,7 +244,7 @@ pub fn remove_status_line(current: &Value) -> (Value, String) {
     let Some(sl) = current.get("statusLine").filter(|v| sl_ours(Some(v))) else { return (current.clone(), String::new()) };
     let mut next = object(current);
     let orig = chained_original(sl);
-    match &orig { Some(o) => { next.as_object_mut().unwrap().insert("statusLine".into(), o.clone()); } None => { next.as_object_mut().unwrap().remove("statusLine"); } }
+    match &orig { Some(o) => { next.as_object_mut().unwrap().insert("statusLine".into(), o.clone()); } None => { next.as_object_mut().unwrap().shift_remove("statusLine"); } }
     let after = orig.map_or(vec![], |o| pretty_lines(&json!({ "statusLine": o })));
     (next, line_diff(&pretty_lines(&json!({ "statusLine": sl })), &after))
 }
@@ -246,7 +257,11 @@ pub fn status_line_state(current: &Value) -> Chain {
 
 /** Reads a settings file; one that is not plain JSON is never touched (the error says so). Returns the settings and whether the file existed. */
 pub fn read_settings(path: &Path) -> Result<(Value, bool), String> {
-    let Ok(raw) = std::fs::read_to_string(path) else { return Ok((json!({}), false)) };
+    let raw = match std::fs::read_to_string(path) {
+        Ok(r) => r,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok((json!({}), false)),
+        Err(e) => return Err(format!("Cannot read settings file {}: {e}, left untouched.", path.display())),
+    };
     if raw.trim().is_empty() { return Ok((json!({}), true)); }
     match serde_json::from_str::<Value>(&raw) {
         Ok(v) if v.is_object() => Ok((v, true)),
@@ -353,5 +368,37 @@ mod tests {
         assert_eq!(std::fs::read_to_string(&b).unwrap(), "{\n  \"a\": 1\n}\n");
         std::fs::write(&p, "{ nope").unwrap();
         assert!(read_settings(&p).unwrap_err().contains("left untouched"));
+    }
+
+    #[test]
+    fn unreadable_settings_are_errors_not_missing() {
+        let d = std::env::temp_dir().join(format!("ccpet-inst-rd-{}", std::process::id()));
+        std::fs::create_dir_all(&d).unwrap();
+        let p = d.join("bad.json");
+        std::fs::write(&p, b"{\"a\":\"\xff\"}").unwrap();
+        assert!(read_settings(&p).unwrap_err().contains("left untouched"));
+        assert!(read_settings(&d).is_err());
+        assert_eq!(read_settings(&d.join("none.json")).unwrap(), (json!({}), false));
+    }
+
+    #[test]
+    fn odd_hooks_values_do_not_panic() {
+        let (n, d) = plan_hooks(&json!({ "hooks": null, "a": 1 }), HOOK);
+        assert!(!d.is_empty() && n["hooks"]["Stop"].is_array());
+        let five = json!({ "hooks": 5 });
+        let o = HostHooks { origin: "http://x", token: "t", hook_path: HOOK, permissions: true };
+        for (n, d) in [plan_hooks(&five, HOOK), plan_host_hooks(&five, &o)] { assert_eq!(n, five); assert_eq!(d, ""); }
+    }
+
+    #[test]
+    fn removal_keeps_key_order() {
+        let n = plan_hooks(&json!({ "a": 1, "b": 2, "c": 3 }), HOOK).0;
+        let with = json!({ "a": 1, "hooks": n["hooks"], "b": 2, "c": 3 });
+        let keys = |v: &Value| v.as_object().unwrap().keys().cloned().collect::<Vec<_>>();
+        assert_eq!(keys(&remove_hooks(&with).0), ["a", "b", "c"]);
+        let sl = plan_status_line(&json!({ "a": 1, "b": 2, "c": 3 }), HOOK).0;
+        let mut sl2 = Map::new();
+        for (k, v) in [("a", json!(1)), ("statusLine", sl["statusLine"].clone()), ("b", json!(2)), ("c", json!(3))] { sl2.insert(k.into(), v); }
+        assert_eq!(keys(&remove_status_line(&Value::Object(sl2)).0), ["a", "b", "c"]);
     }
 }
