@@ -48,7 +48,7 @@ const demo = process.env.CLAUDE_PET_DEMO_PROMPT ? { prompt: process.env.CLAUDE_P
 /** Linux and macOS: one local bridge, no WSL, no Windows host, no desktop-app automation */
 const NATIVE = process.platform !== 'win32';
 /** donations page (ccPet stays free) */
-const SUPPORT_URL = 'https://boosty.to/ccpet';
+const SUPPORT_URL = 'https://boosty.to/cpet';
 /** the highest always-on-top band: above fullscreen players and games on macOS and Linux (Windows has one topmost band) */
 const TOP_LEVEL = 'screen-saver' as const;
 if (process.platform === 'win32') app.commandLine.appendSwitch('disable-features', 'CalculateNativeWinOcclusion'); // a pet behind a fullscreen window must keep drawing when it comes back on top
