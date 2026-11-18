@@ -16,32 +16,28 @@ const PAL = {
   Y: 0xffd36b,              // a spark (done)
 };
 
-// 14 x 14 pixels: 14 cells by 7 rows.
+// 10 x 10 pixels: 10 cells by 5 rows.
 const base = (eyes, extra = {}) => [
-  '....hHHHHh....',
-  '..hHHHHHHHHh..',
-  '.hHHHHHHHHHHh.',
-  '.HHhHSSSSHhHH.',
-  'hHhSSSSSSSShHh',
+  '..hHHHHh..',
+  '.hHHHHHHh.',
+  'hHhSSSShHh',
   eyes[0],
   eyes[1],
-  extra.cheeks || 'hHBSSSMMSSSBHh',
-  '.hHsSSSSSSsHh.',
-  '.hHHdDDDDdHHh.',
-  extra.arms || '..hSDDDDDDSh..',
-  extra.body || '...dDDDDDDd...',
-  '...dDDDDDDd...',
-  '....ss..ss....',
+  'hBSSMMSSBh',
+  '.hsSSSSsh.',
+  extra.arms || '..dDDDDd..',
+  extra.body || '..dDDDDd..',
+  '...s..s...',
 ];
-const OPEN = ['hHSSEWSSEWSShH', 'hHSSEESSEESShH'];
-const BLINK = ['hHSSSSSSSSSShH', 'hHSSEESSEESShH'];
-const UP = ['hHSSWESSWESShH', 'hHSSEESSEESShH'];
-const DOWN = ['hHSSSSSSSSSShH', 'hHSSEESSEESShH'];
-const BOOK = { arms: '..hSKKKKKKSh..', body: '...dKkKKkKd...' };
-const HAPPY = ['hHSSSSSSSSSShH', 'hHSEESSSSEEShH'];
+const OPEN = ['hSEWSSEWSh', 'hSEESSEESh'];
+const BLINK = ['hSSSSSSSSh', 'hSEESSEESh'];
+const UP = ['hSWESSWESh', 'hSEESSEESh'];
+const DOWN = ['hSSSSSSSSh', 'hSEESSEESh'];
+const BOOK = { arms: '.SKKKKKKS.', body: '..dKkkKd..' };
+const HAPPY = ['hSSSSSSSSh', 'hEESSSSEEh'];
 
 /** The sprite one pixel lower (a bob): the top row clears, the last drops off. */
-const bob = (rows) => ['..............', ...rows.slice(0, -1)];
+const bob = (rows) => ['..........', ...rows.slice(0, -1)];
 
 const FRAMES = {
   idle: [base(OPEN), base(OPEN), base(OPEN), base(OPEN), base(BLINK), base(OPEN)],
@@ -50,9 +46,9 @@ const FRAMES = {
   done: [base(HAPPY), bob(base(HAPPY))],
 };
 
-const W = 14, H = 14, DEFAULT = 0x01000000;
+const W = 10, H = 10, DEFAULT = 0x01000000;
 const pack = (rows) => {
-  if (rows.length !== H || rows.some((r) => r.length !== W)) throw new Error('a frame is not 14 x 14: ' + JSON.stringify(rows));
+  if (rows.length !== H || rows.some((r) => r.length !== W)) throw new Error('a frame is not ' + W + ' x ' + H + ': ' + JSON.stringify(rows));
   const px = (x, y) => { const c = rows[y][x]; if (!(c in PAL)) throw new Error('no colour for ' + c); return PAL[c]; };
   const words = new Uint32Array(W * (H / 2) * 3);
   for (let cy = 0; cy < H / 2; cy++) for (let x = 0; x < W; x++) {
