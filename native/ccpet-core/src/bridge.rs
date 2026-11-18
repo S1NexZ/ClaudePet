@@ -389,6 +389,12 @@ impl Bridge {
 
     pub fn on_chat(&self, session_id: &str, event: Value) { self.out(json!({ "type": "chat", "sessionId": session_id, "event": event })); }
 
+    /** a synthetic SessionStart (transcript adoption, a bare waiter): never revives a session the user closed */
+    pub fn adopt(&self, e: HookEvent) {
+        if self.lock().ended.contains(&e.session_id) { return; }
+        self.on_hook(e);
+    }
+
     pub fn on_hook(&self, e: HookEvent) {
         let sid = e.session_id.clone();
         let name = e.hook_event_name.as_str();
@@ -565,6 +571,17 @@ mod tests {
             b.on_hook(ev("UserPromptSubmit", "t1"));
             assert_eq!(sessions(&log)[0]["id"], "t1");
         }
+    }
+
+    #[test]
+    fn adopt_does_not_revive_a_dismissed_session() {
+        let (b, log, _) = make("adopt");
+        b.on_hook(ev("Stop", "t1"));
+        b.handle(&json!({ "type": "dismiss", "sessionId": "t1" }));
+        b.adopt(ev("SessionStart", "t1"));
+        assert!(sessions(&log).is_empty());
+        b.on_hook(ev("UserPromptSubmit", "t1"));
+        assert_eq!(sessions(&log)[0]["id"], "t1");
     }
 
     #[test]

@@ -103,7 +103,7 @@ fn main() {
         on_event: Box::new(move |e| b1.on_hook(e)),
         on_waiter: Some(Box::new(move |sid, cwd, src| {
             // the session exists even if its SessionStart never arrived
-            if !b2.has_session(sid) { b2.on_hook(HookEvent::new("SessionStart", sid, cwd)); }
+            if !b2.has_session(sid) { b2.adopt(HookEvent::new("SessionStart", sid, cwd)); }
             if let Some(src) = src { b2.set_source(sid, src); }
         })),
         on_permission: Some(Box::new(move |e, gone| b3.on_permission(e, gone))),
@@ -145,7 +145,7 @@ fn main() {
                     adopted.insert(r.id.clone());
                     let mut e = HookEvent::new("SessionStart", &r.id, &r.cwd);
                     e.transcript_path = Some(r.path.to_string_lossy().into_owned());
-                    b.on_hook(e);
+                    b.adopt(e);
                 }
             }
         }

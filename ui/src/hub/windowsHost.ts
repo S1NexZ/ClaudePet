@@ -91,7 +91,7 @@ export function createWindowsHost(o: WindowsHostOpts) {
     for (const r of await findRunning(join(o.claudeHome, 'projects'), now, 10 * 60_000)) {
       if (adopted.has(r.id) || store.get(r.id)) continue;
       adopted.add(r.id);
-      bridge.onHook({ hook_event_name: 'SessionStart', session_id: r.id, cwd: r.cwd, transcript_path: r.path });
+      bridge.adopt({ hook_event_name: 'SessionStart', session_id: r.id, cwd: r.cwd, transcript_path: r.path });
     }
   };
   const origin = () => `http://127.0.0.1:${server?.port ?? o.port}`;
@@ -108,7 +108,7 @@ export function createWindowsHost(o: WindowsHostOpts) {
     async start(): Promise<boolean> {
       try {
         server = await startHookServer({ port: o.port, token, mailbox, onWaiter: (sid, cwd, src) => {
-          if (!store.get(sid)) bridge.onHook({ hook_event_name: 'SessionStart', session_id: sid, cwd });
+          if (!store.get(sid)) bridge.adopt({ hook_event_name: 'SessionStart', session_id: sid, cwd });
           if (src && !store.get(sid)?.source) { store.setSource(sid, src); bridge.snapshot(); }
         }, onPty: attachPty, onEvent: (e) => bridge.onHook(e), onReply: (e) => bridge.hookReply(e), onPermission: (e, gone) => bridge.onPermission(e, gone) });
         bridge.snapshot();

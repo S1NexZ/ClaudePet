@@ -130,6 +130,26 @@ describe('SessionStore', () => {
     expect(s.list().find((x) => x.id === 'b')?.state).toBe('idle');
   });
 
+  it('a closed session (SessionEnd) is dropped 30 s later; a later event forgets the close; owned is kept', () => {
+    const s = new SessionStore();
+    s.apply(ev('a', 'UserPromptSubmit'), 0);
+    s.apply(ev('a', 'SessionEnd'), 1000);
+    s.tick(30_999);
+    expect(s.list()).toHaveLength(1);
+    s.tick(31_000);
+    expect(s.list()).toHaveLength(0);
+    s.apply(ev('b', 'UserPromptSubmit'), 0);
+    s.apply(ev('b', 'SessionEnd'), 1000);
+    s.apply(ev('b', 'UserPromptSubmit'), 2000);
+    s.tick(60_000);
+    expect(s.list()).toHaveLength(1);
+    s.apply(ev('c', 'Stop'), 0);
+    s.setOwned('c', true);
+    s.apply(ev('c', 'SessionEnd'), 1000);
+    s.tick(100_000);
+    expect(s.list().some((x) => x.id === 'c')).toBe(true);
+  });
+
   it('remove drops a session', () => {
     const s = new SessionStore();
     s.apply(ev('a', 'Stop'), 0);

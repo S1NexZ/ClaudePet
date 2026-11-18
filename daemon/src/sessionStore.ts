@@ -5,6 +5,8 @@ import type { HookEvent, PendingPermission, PetState, Session } from '../../shar
 const BUSY_DECAY_MS = 120_000;
 const WAITING_DECAY_MS = 30 * 60_000;
 const DONE_TO_IDLE_MS = 30_000;
+/** A session whose SessionEnd arrived (and that was not resumed) leaves the pet after this. */
+const CLOSED_DROP_MS = 30_000;
 const SLEEPING_DROP_MS = 60 * 60_000;
 /** A quiet "idle" session that sent nothing for this long is most likely a closed terminal (no SessionEnd was ever sent). */
 const IDLE_TO_SLEEP_MS = 3 * 60 * 60_000;
@@ -36,6 +38,8 @@ export class SessionStore {
   private sessions = new Map<string, Session>();
   /** Sessions whose process exited while "done" was showing: they sleep after the done period. */
   private ended = new Set<string>();
+  /** id -> when SessionEnd arrived; kept out of Session (which goes to the UI) */
+  private closedAt = new Map<string, number>();
 
   apply(ev: HookEvent, now: number = Date.now()): void {
     let s = this.sessions.get(ev.session_id);
@@ -52,9 +56,11 @@ export class SessionStore {
     if (ev.hook_event_name === 'SessionEnd') {
       delete s.pty; // the wrapper (and its socket) goes away with the claude process
       if (s.owned) return;                                   // the pet can still resume it
+      this.closedAt.set(s.id, now);
       if (s.state === 'done') { this.ended.add(s.id); return; } // let "done" stay visible
     } else {
       this.ended.delete(s.id);
+      this.closedAt.delete(s.id); // resumed
     }
     const next = mapEvent(ev);
     if (next && next !== s.state) this.setState(s, next, now);
@@ -62,6 +68,8 @@ export class SessionStore {
 
   tick(now: number): void {
     for (const s of this.sessions.values()) {
+      const closed = this.closedAt.get(s.id);
+      if (closed !== undefined && now - closed >= CLOSED_DROP_MS) { this.remove(s.id); continue; }
       const quietFor = now - s.lastEventAt;
       if (s.state === 'done' && now - s.since >= DONE_TO_IDLE_MS) {
         this.setState(s, this.ended.delete(s.id) ? 'sleeping' : 'idle', now);
@@ -70,7 +78,7 @@ export class SessionStore {
       else if (!QUIET.includes(s.state) && s.state !== 'waiting' && quietFor >= BUSY_DECAY_MS)
         this.setState(s, 'sleeping', now);
       else if (s.state === 'idle' && !s.owned && quietFor >= IDLE_TO_SLEEP_MS) this.setState(s, 'sleeping', now);
-      else if (s.state === 'sleeping' && now - s.since > SLEEPING_DROP_MS) { this.sessions.delete(s.id); this.ended.delete(s.id); }
+      else if (s.state === 'sleeping' && now - s.since > SLEEPING_DROP_MS) this.remove(s.id);
     }
     this.enforceCap();
   }
@@ -82,7 +90,7 @@ export class SessionStore {
       .sort((a, b) => a.lastEventAt - b.lastEventAt);
     for (const x of droppable) {
       if (this.sessions.size <= MAX_SESSIONS) break;
-      this.sessions.delete(x.id); this.ended.delete(x.id);
+      this.remove(x.id);
     }
   }
 
@@ -137,6 +145,7 @@ export class SessionStore {
   remove(id: string): void {
     this.sessions.delete(id);
     this.ended.delete(id);
+    this.closedAt.delete(id);
   }
 
   get(id: string): Session | undefined {

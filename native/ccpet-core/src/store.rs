@@ -11,6 +11,8 @@ const SLEEPING_DROP_MS: i64 = 60 * 60_000;
 /** A quiet "idle" session that sent nothing for this long is most likely a closed terminal (no SessionEnd was ever sent). */
 const IDLE_TO_SLEEP_MS: i64 = 3 * 60 * 60_000;
 /** Hard cap on the list: beyond it the longest-quiet sleeping/idle sessions go (a live one reappears with its next event). */
+/** a terminal session whose SessionEnd arrived leaves the list after this long (unless an event shows it resumed) */
+const CLOSED_DROP_MS: i64 = 30_000;
 const MAX_SESSIONS: usize = 15;
 
 pub fn project_name(cwd: &str) -> String {
@@ -44,6 +46,8 @@ pub struct Store {
     sessions: HashMap<String, Session>,
     /** sessions whose process exited while "done" was showing: they sleep after the done period */
     ended: HashSet<String>,
+    /** SessionEnd time of sessions that are not owned by the pet; kept out of `Session` so it never reaches the snapshot */
+    closed_at: HashMap<String, i64>,
 }
 
 impl Store {
@@ -66,9 +70,11 @@ impl Store {
         if ev.hook_event_name == "SessionEnd" {
             s.pty = None; // the wrapper (and its socket) goes away with the claude process
             if s.owned { return; } // the pet can still resume it
+            self.closed_at.insert(s.id.clone(), now);
             if s.state == PetState::Done { self.ended.insert(s.id.clone()); return; } // let "done" stay visible
         } else {
             self.ended.remove(&ev.session_id);
+            self.closed_at.remove(&ev.session_id); // resumed
         }
         if let Some(next) = map_event(ev) {
             if next != s.state { s.state = next; s.since = now; }
@@ -92,6 +98,7 @@ impl Store {
             } else if s.state == PetState::Sleeping && now - s.since > SLEEPING_DROP_MS {
                 drop.push(id.clone());
             }
+            if self.closed_at.get(id).map_or(false, |t| now - t >= CLOSED_DROP_MS) && !drop.contains(id) { drop.push(id.clone()); }
         }
         for id in drop { self.remove(&id); }
         self.enforce_cap();
@@ -138,6 +145,7 @@ impl Store {
         self.sessions.remove(id);
         self.order.retain(|x| x != id);
         self.ended.remove(id);
+        self.closed_at.remove(id);
     }
     pub fn get(&self, id: &str) -> Option<&Session> { self.sessions.get(id) }
     pub fn list(&self) -> Vec<Session> { self.order.iter().map(|id| self.sessions[id].clone()).collect() }
@@ -168,6 +176,27 @@ mod tests {
         assert_eq!(st.get("a").unwrap().state, PetState::Sleeping);
         st.tick(100_000 + DONE_TO_IDLE_MS + SLEEPING_DROP_MS + 1);
         assert!(st.get("a").is_none());
+    }
+
+    #[test]
+    fn closed_terminal_session_is_dropped_after_30s_unless_resumed_or_owned() {
+        let mut st = Store::new();
+        st.apply(&ev("SessionStart", "a"), 0);
+        st.apply(&ev("SessionEnd", "a"), 1_000);
+        st.tick(1_000 + CLOSED_DROP_MS - 1);
+        assert!(st.get("a").is_some());
+        st.tick(1_000 + CLOSED_DROP_MS);
+        assert!(st.get("a").is_none());
+        st.apply(&ev("SessionStart", "b"), 0);
+        st.apply(&ev("SessionEnd", "b"), 1_000);
+        st.apply(&ev("UserPromptSubmit", "b"), 2_000);
+        st.tick(60_000);
+        assert!(st.get("b").is_some());
+        st.apply(&ev("SessionStart", "c"), 0);
+        st.sessions.get_mut("c").unwrap().owned = true;
+        st.apply(&ev("SessionEnd", "c"), 1_000);
+        st.tick(100_000);
+        assert!(st.get("c").is_some());
     }
 
     #[test]

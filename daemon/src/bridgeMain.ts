@@ -76,7 +76,7 @@ listenHooks(defaultSocketPath(), (e) => bridge.onHook(e))
       for (const r of await findRunning(join(homedir(), '.claude', 'projects'), now, 10 * 60_000)) {
         if (adopted.has(r.id) || store.get(r.id)) continue;
         adopted.add(r.id);
-        bridge.onHook({ hook_event_name: 'SessionStart', session_id: r.id, cwd: r.cwd, transcript_path: r.path });
+        bridge.adopt({ hook_event_name: 'SessionStart', session_id: r.id, cwd: r.cwd, transcript_path: r.path });
       }
     };
     const timer = setInterval(() => { const now = Date.now(); bridge.tick(now); if (now - lastAdopt > 15_000) { lastAdopt = now; void adoptRecent(now).catch(() => {}); } }, 1500);

@@ -253,6 +253,16 @@ describe('bridge', () => {
     expect(last(out, 'snapshot')?.sessions.map((x) => x.id)).toEqual(['t1']);
   });
 
+  it('after dismiss, adopt(SessionStart) does not bring the session back; a real UserPromptSubmit does', async () => {
+    const { bridge, out } = setup();
+    bridge.onHook({ hook_event_name: 'Stop', session_id: 't1', cwd: '/x' } as any);
+    await bridge.handle({ type: 'dismiss', sessionId: 't1' } as any);
+    bridge.adopt({ hook_event_name: 'SessionStart', session_id: 't1', cwd: '/x' });
+    expect(last(out, 'snapshot')?.sessions).toEqual([]);
+    bridge.onHook({ hook_event_name: 'UserPromptSubmit', session_id: 't1', cwd: '/x' });
+    expect(last(out, 'snapshot')?.sessions.map((x) => x.id)).toEqual(['t1']);
+  });
+
   it('history is pushed as soon as a terminal session\'s transcript path becomes known (e.g. after a restart)', async () => {
     const { bridge, out } = setup();
     bridge.onHook({ hook_event_name: 'PreToolUse', tool_name: 'Edit', session_id: 't9', cwd: '/x', transcript_path: '/a/t9.jsonl' });

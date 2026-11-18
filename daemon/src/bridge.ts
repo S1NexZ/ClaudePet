@@ -313,6 +313,10 @@ export function createBridge(o: {
         o.out({ type: 'error', message: (e as Error).message });
       }
     },
+    /** synthetic SessionStart (transcript adoption, mailbox waiter): never revives a session the user closed */
+    adopt(e: HookPayload): void {
+      if (!ended.has(e.session_id)) this.onHook(e);
+    },
     onHook(e: HookPayload): void {
       if (e.hook_event_name !== 'SessionStart') hooked.add(e.session_id);
       // the question was answered somewhere else (in the terminal or the app): the tool ran, the turn moved on or ended. Drop the pet's

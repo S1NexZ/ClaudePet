@@ -136,5 +136,20 @@ describe('windows host: adoption', () => {
     const snap = [...out].reverse().find((m) => m.type === 'snapshot') as any;
     expect(snap.sessions.find((x: any) => x.id === 'w9')).toMatchObject({ project: 'proj', state: 'idle', source: 'claude-vscode', pty: '\\\\.\\pipe\\claude-pet-77' });
   });
+  it('a dismissed session is not brought back by its waiter', async () => {
+    const { host, out } = boot();
+    await host.start();
+    const poll = async () => {
+      const ctl = new AbortController();
+      void fetch(`http://127.0.0.1:${host.port}/mailbox/${host.token}/w8?cwd=${encodeURIComponent('C:\\x\\proj')}`, { signal: ctl.signal }).catch(() => {});
+      await new Promise((r) => setTimeout(r, 150));
+      ctl.abort();
+    };
+    await poll();
+    await host.handle({ type: 'dismiss', sessionId: 'w8' } as any);
+    await poll();
+    const snap = [...out].reverse().find((m) => m.type === 'snapshot') as any;
+    expect(snap.sessions.find((x: any) => x.id === 'w8')).toBeUndefined();
+  });
 });
 
