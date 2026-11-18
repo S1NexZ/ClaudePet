@@ -37,6 +37,7 @@ public static class PetWin {
   [DllImport("user32.dll")] public static extern bool BringWindowToTop(IntPtr h);
   [DllImport("user32.dll")] public static extern bool IsIconic(IntPtr h);
   [DllImport("user32.dll")] public static extern bool ShowWindowAsync(IntPtr h, int c);
+  [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr h, int c);
   [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr h, IntPtr pid);
   [DllImport("kernel32.dll")] public static extern uint GetCurrentThreadId();
   [DllImport("user32.dll")] public static extern bool AttachThreadInput(uint a, uint b, bool attach);
@@ -57,14 +58,14 @@ public static class PetWin {
 '@
 $A = [Windows.Automation.AutomationElement]; $S = [Windows.Automation.TreeScope]::Descendants
 function Win { Get-Process -Name Claude -ErrorAction SilentlyContinue | Where-Object { $_.MainWindowHandle -ne 0 -and $_.Path -notlike '*\\.local\\bin\\*' } | Select-Object -First 1 }
-$LAYERED = 0x80000
+$LAYERED = 0x80000; $NOREDIR = 0x200000
 # safety net (also run by the pet after a failed or killed attempt, and once when it starts): a window we left invisible is made visible again
 if ($env:PET_MODE -eq 'unhide') {
   $w = Win
   if ($w) {
     $h = $w.MainWindowHandle; $ex = [PetWin]::GetWindowLong($h, -20)
     $k = 0; $al = [byte]0; $f = 0
-    if (($ex -band $LAYERED) -ne 0 -and [PetWin]::GetLayeredWindowAttributes($h, [ref]$k, [ref]$al, [ref]$f) -and ($f -band 2) -ne 0 -and $al -eq 0) {
+    if (($ex -band $LAYERED) -ne 0 -and [PetWin]::GetLayeredWindowAttributes($h, [ref]$k, [ref]$al, [ref]$f) -and ($f -band 2) -ne 0 -and ($al -eq 0 -or (($ex -band $NOREDIR) -ne 0 -and $al -eq 255))) {
       [void][PetWin]::SetLayeredWindowAttributes($h, 0, 255, 2); [void][PetWin]::SetWindowLong($h, -20, ($ex -band (-bnot $LAYERED))); 'unhidden'
     }
   }
@@ -89,7 +90,10 @@ function Hide {
     $k = 0; $al = [byte]0; $f = 0
     # a window that draws itself with per-pixel alpha (no attributes to read back) is left alone: it simply is not hidden
     if (-not [PetWin]::GetLayeredWindowAttributes($script:h, [ref]$k, [ref]$al, [ref]$f)) { return }
-    $script:layOrig = @($k, $al, $f)
+    # Chromium draws without a redirection bitmap and is never layered by itself: a fully opaque layered flag is one an
+    # interrupted earlier attempt left behind (it garbles the window), so the window is given back without it
+    if (($script:exOrig -band $NOREDIR) -ne 0 -and ($f -band 2) -ne 0 -and $al -eq 255) { $script:exOrig = $script:exOrig -band (-bnot $LAYERED) }
+    else { $script:layOrig = @($k, $al, $f) }
   }
   else { [void][PetWin]::SetWindowLong($script:h, -20, ($script:exOrig -bor $LAYERED)) }
   [void][PetWin]::SetLayeredWindowAttributes($script:h, 0, 0, 2)
@@ -101,9 +105,18 @@ function Unhide {
   else { [void][PetWin]::SetLayeredWindowAttributes($script:h, 0, 255, 2); [void][PetWin]::SetWindowLong($script:h, -20, $script:exOrig) }
   $script:hidden = $false
 }
+# a minimized Chromium window does not render: the prompt ignores the text and the Send button never shows up.
+# While invisible it is restored without activation, and minimized again before it becomes visible
+function Restore {
+  if (-not $script:p -or -not [PetWin]::IsIconic($script:p.MainWindowHandle)) { return }
+  Hide
+  [void][PetWin]::ShowWindow($script:p.MainWindowHandle, 4)
+  for ($i = 0; $i -lt 40 -and [PetWin]::IsIconic($script:p.MainWindowHandle); $i++) { Start-Sleep -Milliseconds 25 }
+  Start-Sleep -Milliseconds 120
+}
+function ReMin { if ($script:p -and $wasIcon -and -not [PetWin]::IsIconic($script:p.MainWindowHandle)) { [void][PetWin]::ShowWindow($script:p.MainWindowHandle, 7) } }
 function GiveBack {
   if (-not $script:p) { return }
-  if ($wasIcon) { [void][PetWin]::ShowWindowAsync($script:p.MainWindowHandle, 7) }
   if ($prev -ne [IntPtr]::Zero -and $prev -ne $script:p.MainWindowHandle) { [void][PetWin]::GiveBack($prev) }
 }
 $stolenMs = -1
@@ -113,6 +126,7 @@ function Main {
   if ($env:PET_LINK -and -not $already) { Hide; Start-Process $env:PET_LINK }
   if (-not $already) { for ($i = 0; $i -lt 120 -and -not $script:p; $i++) { $script:p = Win; if (-not $script:p) { Start-Sleep -Milliseconds 100 } }; Hide }
   if (-not $script:p) { return 'no-window' }
+  Restore
   $root = $A::FromHandle($script:p.MainWindowHandle)
   if ($title -and -not $already) {
     $ok = $false
@@ -159,7 +173,7 @@ function Main {
   return 'ok'
 }
 $result = 'error'
-try { $result = Main } finally { Unhide; GiveBack }
+try { $result = Main } finally { ReMin; Unhide; GiveBack }
 "stolen=$stolenMs"
 $result
 `;
