@@ -4,20 +4,17 @@
 //  - asks the pet's local receiver (127.0.0.1, a port and a token the pet keeps in a 0600 file in your home folder) whether you
 //    wrote something to this session in the pet, and submits it as your own message, exactly as if you had typed it;
 //  - when Claude Code's plan-limit figures change, writes them to ~/.claude-pet/usage.json, the file the pet's limits ring reads;
-//  - draws the pet (a few terminal cells) next to the spinner while a turn runs, and a row above the prompt with your plan limits.
-// It sends nothing anywhere else, calls no model, and changes no tool call or prompt. `/ccpet` turns the pet and the row on or off.
+//  - draws a row above the prompt with your plan limits.
+// It sends nothing anywhere else, calls no model, and changes no tool call or prompt. `/ccpet limits` turns the row off or on.
 import { atom, read, update } from 'claude-code'
-import { COLS, ROWS, FRAMES } from './sprites.js'
 
 const MARKER = /\[(?:ccPet|Claude Pet) message\]\s*/
 const POLL_WAIT_S = 20     // one $.http.fetch lasts 30 s at most: the receiver answers well before that
 const RETRY_MS = 15_000    // the pet is not running (or its file is unreadable): look again shortly (reading one small file)
-const FRAME_MS = 220       // the pet's pace next to the spinner
 const ORANGE = '#d97757'
 
 const limits = atom({ plugin: 'ccpet', key: 'limits' }, null)
 const bandHidden = atom({ plugin: 'ccpet', key: 'bandHidden' }, false)
-const spinnerPet = atom({ plugin: 'ccpet', key: 'spinnerPet' }, true)
 const linked = atom({ plugin: 'ccpet', key: 'linked' }, false)
 
 let hub = null             // { base, token } of the pet's receiver
@@ -28,10 +25,6 @@ let cwd = ''
 let entrypoint = ''
 let pending = null         // a message the session refused (the user had just stopped a turn): submitted again after the next turn
 let ru = false
-let lastTool = ''
-let spinKind = 'think'
-let frame = 0
-const spinners = new Set() // requestIds of the spinners this plugin drew the pet in
 let samples = []           // { t, pct } of the 5-hour window, for the forecast
 
 // ---- the pet's receiver: messages written in the pet ----
@@ -170,25 +163,6 @@ const span = (ms) => {
 const bar = (pct) => { const n = Math.max(0, Math.min(8, Math.round(pct / 12.5))); return '█'.repeat(n) + '░'.repeat(8 - n) }
 const tone = (pct) => (pct >= 90 ? 'red' : pct >= 70 ? 'yellow' : 'green')
 
-// ---- the pet next to the spinner ----
-
-const READING = new Set(['Read', 'Grep', 'Glob', 'WebFetch', 'WebSearch', 'LS', 'NotebookRead'])
-function kindFor(mode) {
-  if (mode === 'tool-use' || mode === 'tool-input') return READING.has(lastTool) ? 'read' : 'think'
-  return 'think'
-}
-const cellsOf = (kind, f) => { const list = FRAMES[kind] || FRAMES.think; return list[f % list.length] }
-
-function tick($) {
-  if (!spinners.size) return
-  frame++
-  for (const requestId of [...spinners]) {
-    $.ui.blit({ requestId, key: 'ccpet-pet', cells: cellsOf(spinKind, frame) })
-      .then((r) => { if (r && r.deny) spinners.delete(requestId) })
-      .catch(() => spinners.delete(requestId))
-  }
-}
-
 export function register(on) {
   on('session.start', async ($, e, next) => {
     sessionId = await $.session.id()
@@ -203,13 +177,11 @@ export function register(on) {
     const stored = await $.store.get('prefs')
     if (stored && typeof stored === 'object') {
       if (stored.lang === 'ru' || stored.lang === 'en') ru = stored.lang === 'ru'
-      if (typeof stored.spinnerPet === 'boolean') await update($, spinnerPet, () => stored.spinnerPet)
       if (typeof stored.bandHidden === 'boolean') await update($, bandHidden, () => stored.bandHidden)
     }
-    await $.command.register({ name: 'ccpet', description: 'ccPet: pet | limits (turn the pet by the spinner or the limits row on or off), ru | en (language of the row)' })
+    await $.command.register({ name: 'ccpet', description: 'ccPet: limits (turn the limits row off or on), ru | en (language of the row)' })
     // one poll at a time; a new one starts within a second of the last answer
     $.clock.every(1000, () => poll($))
-    $.clock.every(FRAME_MS, () => tick($))
     // limits as the status line has them (free: no query); session.measure brings each change in between
     const refresh = async () => { try { const u = await $.session.usage(); await takeLimits($, u.rateLimits) } catch { /* not on a subscription */ } }
     void refresh()
@@ -219,11 +191,6 @@ export function register(on) {
 
   on('session.measure', async ($, e, next) => {
     if (Array.isArray(e.changed) && e.changed.includes('rateLimits')) await takeLimits($, e.rateLimits)
-    return next(e)
-  })
-
-  on('tool.call', ($, e, next) => {
-    if (!e.agentId) lastTool = e.tool
     return next(e)
   })
 
@@ -240,26 +207,13 @@ export function register(on) {
     const arg = String(e.args || '').trim().toLowerCase()
     const stored = (await $.store.get('prefs')) || {}
     let lang = stored.lang
-    if (arg === 'pet' || arg === 'spinner') await update($, spinnerPet, (v) => !v)
-    else if (arg === 'limits' || arg === 'band') await update($, bandHidden, (v) => !v)
+    if (arg === 'limits' || arg === 'band') await update($, bandHidden, (v) => !v)
     else if (arg === 'ru' || arg === 'en') { lang = arg; ru = arg === 'ru'; await update($, limits, (v) => (v ? { ...v } : v)) } // redraw the row in the new language
-    else return { text: 'ccPet: /ccpet pet (the pet next to the spinner) or /ccpet limits (the row above the prompt) turns it on or off; /ccpet ru or /ccpet en sets the row\'s language.' }
-    const prefs = { spinnerPet: await read($, spinnerPet), bandHidden: await read($, bandHidden), ...(lang ? { lang } : {}) }
+    else return { text: 'ccPet: /ccpet limits turns the row above the prompt off or on; /ccpet ru or /ccpet en sets its language.' }
+    const prefs = { bandHidden: await read($, bandHidden), ...(lang ? { lang } : {}) }
     await $.store.set('prefs', prefs)
     const on2 = (v) => (v ? (ru ? 'вкл' : 'on') : (ru ? 'выкл' : 'off'))
-    return { text: ru ? 'питомец у спиннера: ' + on2(prefs.spinnerPet) + ', строка лимитов: ' + on2(!prefs.bandHidden) : 'pet by the spinner: ' + on2(prefs.spinnerPet) + ', limits row: ' + on2(!prefs.bandHidden) }
-  })
-
-  on('ui.render', { component: 'Spinner' }, async ($, e, next) => {
-    if (e.surface !== 'terminal' || !(await read($, spinnerPet))) return next(e)
-    const line = await next(e)
-    if (!line) return line
-    spinKind = kindFor(e.props.mode)
-    spinners.add(e.requestId)
-    const { Box, Raster } = $.ui.resolve(e)
-    return h(Box, { flexDirection: 'row', alignItems: 'center', gap: 1 },
-      h(Raster, { key: 'ccpet-pet', columns: COLS, rows: ROWS, cells: cellsOf(spinKind, frame) }),
-      h(Box, { flexDirection: 'column', flexGrow: 1 }, line))
+    return { text: ru ? 'строка лимитов: ' + on2(!prefs.bandHidden) : 'limits row: ' + on2(!prefs.bandHidden) }
   })
 
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {

@@ -4,6 +4,6 @@ export type CcpetLimits = { five: CcpetWindow | null; seven: CcpetWindow | null;
 
 declare module 'claude-code' {
   interface PluginState {
-    ccpet: { limits: CcpetLimits | null; bandHidden: boolean; spinnerPet: boolean; linked: boolean }
+    ccpet: { limits: CcpetLimits | null; bandHidden: boolean; linked: boolean }
   }
 }
