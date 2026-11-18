@@ -43,7 +43,15 @@ pub fn parse_ts(s: &str) -> Option<i64> {
         ms = format!("{:0<3}", &frac[..frac.len().min(3)]).parse::<i64>().ok()?;
         i = end;
     }
-    if s.get(i..) != Some("Z") { return None; }
+    // `Z` or a `+HH:MM` / `-HH:MM` offset
+    let off = match s.get(i..)? {
+        "Z" => 0,
+        o if o.len() == 6 && (o.starts_with('+') || o.starts_with('-')) && o.as_bytes()[3] == b':' => {
+            let m = o[1..3].parse::<i64>().ok()? * 60 + o[4..6].parse::<i64>().ok()?;
+            if o.starts_with('+') { m } else { -m }
+        }
+        _ => return None,
+    };
     // days since 1970-01-01 (Howard Hinnant's civil algorithm)
     let (y, m) = if mo <= 2 { (y - 1, mo + 9) } else { (y, mo - 3) };
     let era = y.div_euclid(400);
@@ -51,7 +59,7 @@ pub fn parse_ts(s: &str) -> Option<i64> {
     let doy = (153 * m + 2) / 5 + d - 1;
     let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
     let days = era * 146097 + doe - 719468;
-    Some(((days * 24 + h) * 60 + mi) * 60_000 + sec * 1000 + ms)
+    Some(((days * 24 + h) * 60 + mi - off) * 60_000 + sec * 1000 + ms)
 }
 
 fn ts_of(e: &Value) -> Option<i64> { e.get("timestamp").and_then(Value::as_str).and_then(parse_ts) }
@@ -230,6 +238,7 @@ mod tests {
     fn timestamps() {
         assert_eq!(parse_ts("1970-01-01T00:00:00Z"), Some(0));
         assert_eq!(parse_ts("2026-01-01T10:00:30.5Z"), Some(1767261630500));
+        assert_eq!(parse_ts("2026-01-01T10:00:30.5Z"), parse_ts("2026-01-01T12:00:30.500000+02:00"));
         assert_eq!(parse_ts("nope"), None);
     }
 

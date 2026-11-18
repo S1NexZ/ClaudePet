@@ -16,3 +16,6 @@ pub mod procinfo;
 pub mod pty_send;
 pub mod hook_http;
 pub mod bridge;
+pub mod claude_proc;
+pub mod live_usage;
+pub mod runner;

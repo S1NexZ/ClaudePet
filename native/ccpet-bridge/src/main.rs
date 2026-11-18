@@ -7,7 +7,9 @@ use ccpet_core::hook_socket::{default_socket_path, HookSocket};
 use ccpet_core::install::is_pet_status_line;
 use ccpet_core::paths::pet_dir;
 use ccpet_core::types::HookEvent;
-use ccpet_core::usage::{default_usage_path, now_ms, UsageSource};
+use ccpet_core::live_usage::{claude_fetch, LivePoller};
+use ccpet_core::runner::SessionRunner;
+use ccpet_core::usage::{default_usage_path, now_ms, LiveSource, UsageSource};
 use ccpet_core::{adopt, mailbox::Mailbox};
 use serde_json::{json, Value};
 use std::io::{BufRead, Read, Write};
@@ -81,10 +83,17 @@ fn main() {
 
     let mut o = BridgeOpts::new(Box::new(|v| send(&v)), settings.clone(), &stable_hook());
     o.mailbox = mailbox.clone();
-    // no limits query at start; the ring is fed by Claude Code's own status line (the live query comes with the claude client)
-    o.usage = Some(UsageSource::new(default_usage_path(), settings, claude.clone(), None, is_pet_status_line));
+    // the limits query runs only when the user clicks the ring (never on a timer, never at start); CLAUDE_PET_LIVE_USAGE=0 removes it.
+    // The ring is otherwise fed by Claude Code's own status line
+    let live_on = std::env::var("CLAUDE_PET_LIVE_USAGE").map_or(true, |v| v != "0");
+    let poller = claude.clone().filter(|_| live_on).map(|c| LivePoller::new(claude_fetch(c, pet_dir().join("usage-query"), Duration::from_secs(25)), Duration::from_secs(60)));
+    let live: Option<Box<dyn LiveSource + Send>> = poller.clone().map(|p| Box::new(p) as Box<dyn LiveSource + Send>);
+    o.usage = Some(UsageSource::new(default_usage_path(), settings, claude.clone(), live, is_pet_status_line));
     o.host_hooks = Some((format!("http://127.0.0.1:{port}"), token.clone()));
     let bridge = Bridge::new(o);
+    if let Some(p) = &poller { let b = bridge.clone(); p.set_notify(move || b.push_usage()); }
+    let runner = SessionRunner::new(Arc::new(bridge.clone()), claude.clone());
+    bridge.set_runner(Arc::new(runner));
 
     let (b1, b2, b3) = (bridge.clone(), bridge.clone(), bridge.clone());
     let http = HookServer::start(HookServerOpts {
@@ -145,6 +154,7 @@ fn main() {
         if let Ok(cmd) = serde_json::from_str::<Value>(&line) { bridge.handle(&cmd); }
     }
     // the app went away
+    bridge.close_runner();
     sock.close();
     if let Some(h) = http { h.close(); }
 }

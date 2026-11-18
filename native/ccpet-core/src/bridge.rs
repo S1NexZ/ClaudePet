@@ -33,6 +33,8 @@ pub trait Runner: Send + Sync {
     fn send(&self, session: &str, text: &str) -> Result<(), String>;
     fn interrupt(&self, session: &str) -> Result<(), String>;
     fn respond_permission(&self, id: &str, allow: bool);
+    /** the app is quitting: end every process this runner started */
+    fn close_all(&self) {}
 }
 
 /** No claude client: every path that would need one says so. */
@@ -52,7 +54,6 @@ impl Runner for NoRunner {
 
 pub struct BridgeOpts {
     pub out: Box<dyn Fn(Value) + Send + Sync>,
-    pub runner: Box<dyn Runner>,
     pub mailbox: Arc<Mailbox>,
     pub usage: Option<UsageSource>,
     pub settings_path: PathBuf,
@@ -68,7 +69,7 @@ pub struct BridgeOpts {
 
 impl BridgeOpts {
     pub fn new(out: Box<dyn Fn(Value) + Send + Sync>, settings_path: PathBuf, hook_path: &str) -> Self {
-        BridgeOpts { out, runner: Box::new(NoRunner), mailbox: Arc::new(Mailbox::new()), usage: None, settings_path, hook_path: hook_path.into(), host_hooks: None,
+        BridgeOpts { out, mailbox: Arc::new(Mailbox::new()), usage: None, settings_path, hook_path: hook_path.into(), host_hooks: None,
             permission_id_prefix: "hl-".into(), stop_recheck_ms: 700, permission_timeout_ms: 30_000, question_timeout_ms: 590_000 }
     }
 }
@@ -94,7 +95,7 @@ struct State {
     checking: HashSet<String>,
 }
 
-struct Inner { o: BridgeOpts, st: Mutex<State>, usage: Mutex<Option<UsageSource>> }
+struct Inner { o: BridgeOpts, st: Mutex<State>, usage: Mutex<Option<UsageSource>>, runner: OnceLock<Arc<dyn Runner>> }
 
 #[derive(Clone)]
 pub struct Bridge(Arc<Inner>);
@@ -145,8 +146,13 @@ fn s<'a>(cmd: &'a Value, k: &str) -> String { cmd.get(k).map(crate::map_event::j
 impl Bridge {
     pub fn new(mut o: BridgeOpts) -> Bridge {
         let usage = o.usage.take();
-        Bridge(Arc::new(Inner { o, st: Mutex::new(State::default()), usage: Mutex::new(usage) }))
+        Bridge(Arc::new(Inner { o, st: Mutex::new(State::default()), usage: Mutex::new(usage), runner: OnceLock::new() }))
     }
+
+    /** The claude client (set once, after the bridge exists: the runner works on the bridge's store). Until then every claude path says "not available". */
+    pub fn set_runner(&self, r: Arc<dyn Runner>) { let _ = self.0.runner.set(r); }
+    fn runner(&self) -> &dyn Runner { self.0.runner.get().map_or(&NoRunner as &dyn Runner, |r| r.as_ref()) }
+    pub fn close_runner(&self) { self.runner().close_all(); }
 
     fn lock(&self) -> MutexGuard<'_, State> { self.0.st.lock().unwrap_or_else(|e| e.into_inner()) }
     fn out(&self, v: Value) { (self.0.o.out)(v) }
@@ -235,11 +241,10 @@ impl Bridge {
     fn run(&self, cmd: &Value) -> Result<bool, String> {
         let kind = cmd.get("type").and_then(Value::as_str).unwrap_or("");
         let on = cmd.get("on") == Some(&Value::Bool(true));
-        let o = &self.0.o;
         match kind {
             "start" => {
                 self.need_sdk(&self.lock())?;
-                let sid = o.runner.start(&crate::paths::to_wsl_path(&s(cmd, "cwd")), &s(cmd, "prompt"))?;
+                let sid = self.runner().start(&crate::paths::to_wsl_path(&s(cmd, "cwd")), &s(cmd, "prompt"))?;
                 self.out(json!({ "type": "started", "sessionId": sid }));
             }
             "send" => return self.send(&s(cmd, "sessionId"), &s(cmd, "text")),
@@ -248,10 +253,10 @@ impl Bridge {
                 let sess = self.lock().store.get(&id).cloned();
                 if let Some(pty) = sess.as_ref().filter(|x| !x.owned).and_then(|x| x.pty.clone()) {
                     match send_esc(&pty) { Ok(()) => { self.lock().store.mark_interrupted(&id, now_ms()); self.reread_later(&id); } Err(PtyGone) => self.lock().store.clear_pty(&id) }
-                } else { o.runner.interrupt(&id)?; }
+                } else { self.runner().interrupt(&id)?; }
             }
             "language" => { if let Some(l) = cmd.get("lang").and_then(Value::as_str) { set_lang(l); } return Ok(true); }
-            "permission-mode" => { if let Some(m) = cmd.get("mode").and_then(Value::as_str).filter(|m| ["ask", "edits", "all"].contains(m)) { o.runner.set_permission_policy(m); } }
+            "permission-mode" => { if let Some(m) = cmd.get("mode").and_then(Value::as_str).filter(|m| ["ask", "edits", "all"].contains(m)) { self.runner().set_permission_policy(m); } }
             "hook-permissions" => { self.lock().perm_on = on; return Ok(false); }
             "permission" => {
                 let id = s(cmd, "id");
@@ -266,7 +271,7 @@ impl Bridge {
                         };
                         let _ = a.tx.send(d);
                     }
-                    None => o.runner.respond_permission(&id, cmd.get("allow") == Some(&Value::Bool(true))),
+                    None => self.runner().respond_permission(&id, cmd.get("allow") == Some(&Value::Bool(true))),
                 }
             }
             "history" => { self.history_now(&s(cmd, "sessionId")); return Ok(false); }
@@ -278,24 +283,24 @@ impl Bridge {
                 return Ok(false);
             }
             "sdk-chats" => { self.lock().sdk_on = on; return Ok(false); }
-            "models" => { self.need_sdk(&self.lock())?; let m = o.runner.models()?; self.out(json!({ "type": "models", "models": m })); return Ok(false); }
+            "models" => { self.need_sdk(&self.lock())?; let m = self.runner().models()?; self.out(json!({ "type": "models", "models": m })); return Ok(false); }
             "setModel" => {
                 let sid = cmd.get("sessionId").filter(|v| !v.is_null()).map(crate::map_event::js_string);
                 self.need_sdk(&self.lock())?;
-                o.runner.set_model(sid.as_deref(), &s(cmd, "model"))?;
+                self.runner().set_model(sid.as_deref(), &s(cmd, "model"))?;
                 self.out(json!({ "type": "modelSet", "sessionId": sid, "model": s(cmd, "model") }));
                 return Ok(false);
             }
             "btw" => {
                 let id = s(cmd, "sessionId");
                 { let g = self.lock(); if !g.store.get(&id).map_or(false, |x| x.owned) { self.need_sdk(&g)?; } }
-                o.runner.btw(&id, &s(cmd, "text"))?;
+                self.runner().btw(&id, &s(cmd, "text"))?;
                 return Ok(false);
             }
-            "release" => { o.runner.release(&s(cmd, "sessionId")); }
+            "release" => { self.runner().release(&s(cmd, "sessionId")); }
             "end" => {
                 let id = s(cmd, "sessionId");
-                if !o.runner.release(&id) {
+                if !self.runner().release(&id) {
                     let pid = self.lock().pids.get(&id).copied();
                     // no process found = already closed: the stale row is simply dropped
                     if let Some(pid) = pid.filter(|p| proc_name(*p).as_deref() == Some("claude")) { let _ = std::process::Command::new("kill").arg(pid.to_string()).status(); }
@@ -346,7 +351,7 @@ impl Bridge {
         }
         if !sess.as_ref().map_or(false, |x| x.owned) { self.need_sdk(&self.lock())?; } // a session the pet already runs may keep going; resuming a terminal one needs a second claude
         self.ensure_resume_cwd(id);
-        o.runner.send(id, text)?;
+        self.runner().send(id, text)?;
         Ok(true)
     }
 
@@ -480,6 +485,16 @@ impl Bridge {
 
     /** For tests and the bridge main: the current state of a session. */
     pub fn session_state(&self, id: &str) -> Option<PetState> { self.lock().store.get(id).map(|x| x.state) }
+}
+
+impl crate::runner::RunnerHost for Bridge {
+    fn session(&self, id: &str) -> Option<crate::types::Session> { self.lock().store.get(id).cloned() }
+    fn apply(&self, ev: HookEvent) { self.lock().store.apply(&ev, now_ms()); }
+    fn set_owned(&self, id: &str, owned: bool) { self.lock().store.set_owned(id, owned); }
+    fn set_pending(&self, id: &str, p: Option<PendingPermission>) { self.lock().store.set_pending(id, p); }
+    fn restore(&self, id: &str, state: PetState, since: i64, owned: bool) { self.lock().store.restore(id, state, since, owned); }
+    fn chat(&self, id: &str, event: Value) { self.on_chat(id, event); }
+    fn changed(&self) { self.snapshot(true); }
 }
 
 #[cfg(test)]
