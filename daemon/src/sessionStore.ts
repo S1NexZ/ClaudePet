@@ -3,6 +3,8 @@ import { mapEvent } from './mapEvent.js';
 import type { HookEvent, PendingPermission, PetState, Session } from '../../shared/src/types.js';
 
 const BUSY_DECAY_MS = 120_000;
+/** a tool is running (a long build, a test suite, a wait): its PostToolUse comes when it ends, so quiet means busy, not lost */
+const TOOL_DECAY_MS = 30 * 60_000;
 const WAITING_DECAY_MS = 30 * 60_000;
 const DONE_TO_IDLE_MS = 30_000;
 /** A session whose SessionEnd arrived (and that was not resumed) leaves the pet after this. */
@@ -111,7 +113,7 @@ export class SessionStore {
         this.setState(s, this.ended.delete(s.id) ? 'sleeping' : 'idle', now);
       }
       else if (s.state === 'waiting' && quietFor >= WAITING_DECAY_MS) this.setState(s, 'sleeping', now);
-      else if (!QUIET.includes(s.state) && s.state !== 'waiting' && !hasAgents && quietFor >= BUSY_DECAY_MS)
+      else if (!QUIET.includes(s.state) && s.state !== 'waiting' && !hasAgents && quietFor >= (s.state === 'running' || s.state === 'testing' ? TOOL_DECAY_MS : BUSY_DECAY_MS))
         this.setState(s, 'sleeping', now);
       else if (s.state === 'idle' && !s.owned && quietFor >= IDLE_TO_SLEEP_MS) this.setState(s, 'sleeping', now);
       else if (s.state === 'sleeping' && now - s.since > SLEEPING_DROP_MS) this.remove(s.id);

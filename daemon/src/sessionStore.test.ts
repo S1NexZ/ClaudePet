@@ -52,6 +52,15 @@ describe('SessionStore', () => {
     expect(s.attention()?.id).toBe('b');
   });
 
+  it('tick: a running tool (no PostToolUse yet) is not lost after 120s, only after 30 min', () => {
+    const s = new SessionStore();
+    s.apply({ hook_event_name: 'PreToolUse', session_id: 'a', cwd: '/w', tool_name: 'Bash', tool_input: { command: 'gh run watch 1' } }, 0);
+    s.tick(5 * 60_000);
+    expect(s.list()[0].state).toBe('running');
+    s.tick(30 * 60_000);
+    expect(s.list()[0].state).toBe('sleeping');
+  });
+
   it('tick: a busy session with no events for 120s decays to sleeping', () => {
     const s = new SessionStore();
     s.apply(ev('a', 'UserPromptSubmit'), 0);

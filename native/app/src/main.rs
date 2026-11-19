@@ -503,8 +503,9 @@ fn push_snapshot(h: &AppHandle) {
     }
     let attention = if sessions.iter().any(|s| s["id"] == snap["attention"]) { snap["attention"].clone() } else { merge::pick_attention(&sessions).map_or(Value::Null, |s| s["id"].clone()) };
     let out = json!({ "type": "snapshot", "sessions": sessions, "attention": attention });
-    app.ui.lock().unwrap().snapshot = Some(out.clone());
-    let _ = h.emit("pet:msg", out);
+    // only a changed list goes to the renderer (the timers call this often; every send redraws the list and the chat)
+    let changed = { let mut ui = app.ui.lock().unwrap(); let c = ui.snapshot.as_ref() != Some(&out); ui.snapshot = Some(out.clone()); c };
+    if changed { let _ = h.emit("pet:msg", out); }
     drop(one);
     sync_answer_keys(h);
     drain_queue(h);
@@ -1340,7 +1341,7 @@ fn keep_visible(h: AppHandle, win: WebviewWindow) {
         std::thread::sleep(Duration::from_secs(2));
         let app = h.state::<Arc<App>>();
         if !win.is_visible().unwrap_or(false) || app.ui.lock().unwrap().last_move.is_some() { continue; }
-        let _ = win.set_always_on_top(false);
+        // re-assert the topmost flag (a fullscreen app can take it); dropping it first made the window blink every 2 s
         let _ = win.set_always_on_top(true);
         let (Ok(p), Ok(sf)) = (win.outer_position(), win.scale_factor()) else { continue };
         let (x, y) = (p.x as f64 / sf, p.y as f64 / sf);

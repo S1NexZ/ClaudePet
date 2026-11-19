@@ -7,6 +7,8 @@ use std::collections::{HashMap, HashSet};
 /** an agent id not seen this long is forgotten: SubagentStop may never come after a crash/Esc */
 const SUBAGENT_STALE_MS: i64 = 10 * 60_000;
 const BUSY_DECAY_MS: i64 = 120_000;
+/** a tool is running (a long build, a test suite, a wait): its PostToolUse comes when it ends, so quiet means busy, not lost */
+const TOOL_DECAY_MS: i64 = 30 * 60_000;
 const WAITING_DECAY_MS: i64 = 30 * 60_000;
 const DONE_TO_IDLE_MS: i64 = 30_000;
 const SLEEPING_DROP_MS: i64 = 60 * 60_000;
@@ -133,7 +135,8 @@ impl Store {
                 s.since = now;
             } else if s.state == PetState::Waiting && quiet_for >= WAITING_DECAY_MS {
                 s.state = PetState::Sleeping; s.since = now;
-            } else if !has_agents && !s.state.quiet() && s.state != PetState::Waiting && quiet_for >= BUSY_DECAY_MS {
+            } else if !has_agents && !s.state.quiet() && s.state != PetState::Waiting
+                && quiet_for >= if matches!(s.state, PetState::Running | PetState::Testing) { TOOL_DECAY_MS } else { BUSY_DECAY_MS } {
                 s.state = PetState::Sleeping; s.since = now;
             } else if s.state == PetState::Idle && !s.owned && quiet_for >= IDLE_TO_SLEEP_MS {
                 s.state = PetState::Sleeping; s.since = now;
@@ -262,6 +265,19 @@ mod tests {
         st.tick(BUSY_DECAY_MS + 1);
         assert_eq!(st.get("a").unwrap().state, PetState::Sleeping);
         assert_eq!(st.get("b").unwrap().state, PetState::Waiting);
+    }
+
+    #[test]
+    fn a_running_tool_is_not_lost_after_two_minutes() {
+        let mut st = Store::new();
+        let mut e = ev("PreToolUse", "a");
+        e.tool_name = Some("Bash".into());
+        e.tool_input = Some(serde_json::json!({ "command": "gh run watch 1" }));
+        st.apply(&e, 0);
+        st.tick(5 * 60_000);
+        assert_eq!(st.get("a").unwrap().state, PetState::Running);
+        st.tick(TOOL_DECAY_MS);
+        assert_eq!(st.get("a").unwrap().state, PetState::Sleeping);
     }
 
     fn aev(name: &str, id: &str, agent: &str) -> HookEvent {
