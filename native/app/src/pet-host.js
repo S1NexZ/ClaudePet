@@ -44,6 +44,9 @@
   };
   // right-click on the pet: the app's menu, as under Electron (never the webview's own)
   window.addEventListener('contextmenu', (e) => { e.preventDefault(); if (dragRegion(e.target)) fire('context_menu'); }, true);
+  // the window is not activated by clicks (a fullscreen video keeps its fullscreen); a text field asks for the keyboard, losing it gives that up
+  window.addEventListener('mousedown', (e) => { if (e.target.matches?.('input, textarea, select, [contenteditable]')) fire('focus'); }, true);
+  window.addEventListener('blur', () => fire('unfocus'));
   window.addEventListener('mousedown', (e) => { if (e.button === 0 && dragRegion(e.target)) { e.preventDefault(); fire('start_drag'); } }, true);
 
   window.petHost = {

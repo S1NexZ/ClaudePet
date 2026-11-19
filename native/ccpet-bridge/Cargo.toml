@@ -1,6 +1,6 @@
 [package]
 name = "ccpet-bridge"
-version = "0.7.1"
+version = "0.7.2"
 edition = "2021"
 description = "ccPet's bridge for WSL, Linux and macOS: hook receivers and the JSON-lines protocol to the app"
 license = "MIT"

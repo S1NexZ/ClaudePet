@@ -257,7 +257,7 @@ fn update_settings(h: &AppHandle, f: impl FnOnce(&mut Settings)) {
 
 /** Bring the pet to the front with the chat open (hotkey, second launch). */
 fn summon(h: &AppHandle) {
-    if let Some(w) = main_window(h) { let _ = w.show(); let _ = w.set_always_on_top(true); let _ = w.set_focus(); let _ = w.emit("pet:summon", ()); }
+    if let Some(w) = main_window(h) { let _ = w.show(); let _ = w.set_always_on_top(true); set_activation(&w, true); let _ = w.set_focus(); let _ = w.emit("pet:summon", ()); }
     refresh_tray(h);
 }
 
@@ -821,7 +821,32 @@ fn resize(app: St, win: WebviewWindow, h: f64) {
 }
 
 #[tauri::command]
-fn focus(win: WebviewWindow) { let _ = win.set_focus(); }
+fn focus(win: WebviewWindow) { set_activation(&win, true); let _ = win.set_focus(); }
+
+/** the window gave up the keyboard: a click on the pet must not take the foreground again */
+#[tauri::command]
+fn unfocus(win: WebviewWindow) { set_activation(&win, false); }
+
+/** Windows: without WS_EX_NOACTIVATE a click on the pet makes it the foreground window, and a fullscreen video loses its fullscreen (the taskbar slides in).
+ * The pet is not activated by clicks; whatever needs typing (the chat, a text field, the hotkey) asks for focus first. */
+static KEYBOARD: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+fn set_activation(win: &WebviewWindow, activatable: bool) {
+    KEYBOARD.store(activatable, std::sync::atomic::Ordering::Relaxed);
+    #[cfg(windows)]
+    if let Ok(hwnd) = win.hwnd() {
+        use windows_sys::Win32::UI::WindowsAndMessaging::{GetWindowLongPtrW, SetWindowLongPtrW, GWL_EXSTYLE};
+        const WS_EX_NOACTIVATE: isize = 0x0800_0000;
+        let h = hwnd.0 as _;
+        unsafe {
+            let st = GetWindowLongPtrW(h, GWL_EXSTYLE);
+            let next = if activatable { st & !WS_EX_NOACTIVATE } else { st | WS_EX_NOACTIVATE };
+            if next != st { SetWindowLongPtrW(h, GWL_EXSTYLE, next); }
+        }
+    }
+    #[cfg(not(windows))]
+    { let _ = (win, activatable); }
+}
 
 #[tauri::command]
 fn start_drag(win: WebviewWindow) { let _ = win.start_dragging(); }
@@ -1302,6 +1327,7 @@ fn watch_cursor(win: WebviewWindow, app: Arc<App>) {
         loop {
             std::thread::sleep(Duration::from_millis(40));
             if !win.is_visible().unwrap_or(false) { continue; }
+            if !KEYBOARD.load(std::sync::atomic::Ordering::Relaxed) { set_activation(&win, false); } // Windows resets the style when the window is shown or restyled: keep it
             let (c, p, sf) = (win.cursor_position(), win.outer_position(), win.scale_factor());
             let (c, p, sf) = match (&c, &p, &sf) {
                 (Ok(c), Ok(p), Ok(sf)) => (*c, *p, *sf),
@@ -1421,7 +1447,7 @@ fn main() {
         .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_opener::init())
         .manage(app.clone())
-        .invoke_handler(tauri::generate_handler![config, cmd, rects, hover_rects, resize, focus, start_drag, context_menu, set_scale, set_appearance, set_permissions, set_language, copy_text, open_url, notify, pick_folder, open_terminal, connections, connections_apply, answer_permissions, sdk_chats, new_chat_in, desktop_send, diagnostics_report, models_list, models_data, models_use, models_install_zip, models_remove, models_codex_scan, models_codex_import, models_reveal])
+        .invoke_handler(tauri::generate_handler![config, cmd, rects, hover_rects, resize, focus, unfocus, start_drag, context_menu, set_scale, set_appearance, set_permissions, set_language, copy_text, open_url, notify, pick_folder, open_terminal, connections, connections_apply, answer_permissions, sdk_chats, new_chat_in, desktop_send, diagnostics_report, models_list, models_data, models_use, models_install_zip, models_remove, models_codex_scan, models_codex_import, models_reveal])
         .setup(move |tapp| {
             #[cfg(target_os = "macos")]
             tapp.set_activation_policy(tauri::ActivationPolicy::Accessory); // a menu-bar style app: no Dock icon
@@ -1436,9 +1462,10 @@ fn main() {
                 .maximizable(false).minimizable(false).visible(false).focused(false)
                 .initialization_script(include_str!("pet-host.js"))
                 .build()?;
+            set_activation(&win, false);
             // the pet runs the way it is dragged
             let (app2, w2) = (app.clone(), win.clone());
-            win.on_window_event(move |e| if let WindowEvent::Moved(p) = e {
+            win.on_window_event(move |e| if let WindowEvent::Focused(false) = e { set_activation(&w2, false); } else if let WindowEvent::Moved(p) = e {
                 let sf = w2.scale_factor().unwrap_or(1.0);
                 let x = p.x as f64 / sf;
                 let mut ui = app2.ui.lock().unwrap();

@@ -359,7 +359,8 @@ async function main() {
   const input = $('input') as HTMLInputElement;
   const list = $('chat-list');
   let pendingBottom = false;
-  const setExpanded = (on: boolean) => {
+  /** grab: take the keyboard too (the hotkey); a click on the pet opens the chat without becoming the foreground window, so a fullscreen video keeps its fullscreen */
+  const setExpanded = (on: boolean, grab = false) => {
     expanded = on;
     // the sessions panel belongs to the open chat: it folds away with it
     if (!on) { chatMenu.hidden = true; switchBtn.setAttribute('aria-expanded', 'false'); $('sessions').hidden = true; }
@@ -367,7 +368,8 @@ async function main() {
     if (on) {
       if (!chatSession()) chatId = current()?.id ?? null;
       mode = chatSession() ? 'reply' : 'new';
-      host.focus(); input.focus();
+      if (grab) host.focus();
+      input.focus();
       // a hidden list forgets its scroll position (display: none): open at the last message, also for what arrived while it was closed
       pendingBottom = true; list.scrollTop = list.scrollHeight;
     }
@@ -569,7 +571,7 @@ async function main() {
   };
   $('btn-allow').addEventListener('click', () => answer(true));
   $('btn-deny').addEventListener('click', () => answer(false));
-  host.onSummon(() => setExpanded(true));
+  host.onSummon(() => setExpanded(true, true));
   // Ctrl+Alt+<n> (registered by the app only while an answer is awaited) presses the n-th button of the question or permission
   const answerButtons = () => Array.from($('perm').querySelectorAll<HTMLButtonElement>('button')).filter((b) => !b.hidden && b.offsetParent !== null);
   const numberAnswers = () => answerButtons().forEach((b, i) => { if (i < 9) b.dataset.key = String(i + 1); else delete b.dataset.key; });

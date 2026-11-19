@@ -4,7 +4,7 @@ version = 4
 
 [[package]]
 name = "ccpet-bridge"
-version = "0.7.1"
+version = "0.7.2"
 dependencies = [
  "ccpet-core",
  "serde",
@@ -13,7 +13,7 @@ dependencies = [
 
 [[package]]
 name = "ccpet-core"
-version = "0.7.1"
+version = "0.7.2"
 dependencies = [
  "regex-lite",
  "serde",
@@ -22,7 +22,7 @@ dependencies = [
 
 [[package]]
 name = "ccpet-hook"
-version = "0.7.1"
+version = "0.7.2"
 dependencies = [
  "serde_json",
 ]
