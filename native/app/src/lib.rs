@@ -5,3 +5,5 @@ pub mod queue;
 pub mod settings;
 pub mod desktop;
 pub mod terminal;
+pub mod winshell;
+pub mod diagnostics;

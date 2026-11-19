@@ -540,6 +540,7 @@ impl Bridge {
 
     /** the front end the waiter reported (terminal, desktop app, ...) */
     pub fn set_source(&self, id: &str, source: &str) { let mut g = self.lock(); g.store.set_source(id, source); self.snap(&mut g, true); }
+    pub fn mailbox(&self) -> Arc<Mailbox> { self.0.o.mailbox.clone() }
     pub fn has_session(&self, id: &str) -> bool { self.lock().store.get(id).is_some() }
 
     /** For tests and the bridge main: the current state of a session. */

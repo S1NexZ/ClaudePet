@@ -5,10 +5,13 @@
 //! Not yet (M3/M4): the Windows host, several distros, models, connections panel, desktop app sending, update check.
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod windows_host;
 mod wsl;
 
 use base64::Engine;
-use ccpet_app::{merge, placement, queue::MessageQueue, settings::{self, Settings}};
+use ccpet_app::{desktop, diagnostics, merge, placement, queue::MessageQueue, settings::{self, Settings}, terminal, winshell};
+use std::collections::{HashMap, HashSet};
+use windows_host::WindowsHost;
 use serde::Deserialize;
 use serde_json::{json, Value};
 use std::io::Write;
@@ -59,6 +62,17 @@ struct Ui {
     anchor: Option<placement::Anchor>,
     answer_keys_on: bool,
     hooks_manual: bool,
+    /** the Windows host's own snapshot and whether its receiver runs */
+    win_snap: Option<Value>,
+    win_up: bool,
+    /** limits as each host reports them (the ring shows the freshest numbers) */
+    usage_by: HashMap<String, Value>,
+    /** our own set_position/set_size: the Moved event it causes is not a drag */
+    own_move_until: Option<Instant>,
+    /** a new Windows chat whose first prompt is typed once its session shows up: (cwd, at, prompt, known ids) */
+    pending_new_chat: Option<(String, f64, String, Vec<String>)>,
+    /** sessions whose SDK-fallback warning the user already accepted */
+    warned: HashSet<String>,
 }
 
 struct App {
@@ -72,6 +86,16 @@ struct App {
     ui: Mutex<Ui>,
     queue: Mutex<MessageQueue>,
     wsl: Mutex<Option<Arc<wsl::WslHost>>>,
+    win: Mutex<Option<Arc<WindowsHost>>>,
+    /** the stable copy of pet-helper.exe (mailbox waiter, statusLine, PTY wrapper); None without one */
+    helper: Option<String>,
+    /** the desktop app's session list (re-read at most every 5 s, changed files only) */
+    desktop: Mutex<(desktop::DesktopRegistry, Option<Instant>, HashMap<String, desktop::DesktopEntry>)>,
+    /** one snapshot / answer-key update at a time (several threads call them) */
+    push_lock: Mutex<()>,
+    keys_lock: Mutex<()>,
+    /** PowerShell's execution policy (profiles do not run under Restricted / AllSigned) */
+    ps_policy: Mutex<Option<String>>,
 }
 
 impl App {
@@ -84,7 +108,22 @@ impl App {
         match *self.lang.lock().unwrap() { "ru" => ru, "zh" => zh, _ => en }.to_string()
     }
     fn s(&self) -> Settings { self.settings.lock().unwrap().clone() }
-    fn to_bridge(&self, cmd: Value) { if let Some(h) = self.wsl.lock().unwrap().as_ref() { h.send(&cmd); } }
+    fn to_bridge(&self, cmd: Value) { if let Some(h) = self.wsl_host() { h.send(&cmd); } }
+    fn wsl_host(&self) -> Option<Arc<wsl::WslHost>> { self.wsl.lock().unwrap().clone() }
+    fn win_host(&self) -> Option<Arc<WindowsHost>> { self.win.lock().unwrap().clone() }
+    fn to_all_bridges(&self, cmd: Value) { self.to_bridge(cmd.clone()); if let Some(w) = self.win_host() { w.bridge.handle(&cmd); } }
+    fn desktop_entries(&self) -> HashMap<String, desktop::DesktopEntry> {
+        let mut d = self.desktop.lock().unwrap();
+        if d.1.map_or(true, |t| t.elapsed() > Duration::from_secs(5)) { d.1 = Some(Instant::now()); d.2 = d.0.by_cli_id(); }
+        d.2.clone()
+    }
+    fn session(&self, id: &str) -> Option<Value> {
+        self.ui.lock().unwrap().snapshot.as_ref().and_then(|s| s["sessions"].as_array().and_then(|l| l.iter().find(|x| x["id"] == id).cloned()))
+    }
+    fn parts(&self) -> Vec<merge::HostPart> {
+        let ui = self.ui.lock().unwrap();
+        vec![merge::HostPart { host: "wsl".into(), snap: ui.wsl_snap.clone(), distro: None }, merge::HostPart { host: "windows".into(), snap: ui.win_snap.clone(), distro: None }]
+    }
 }
 
 /** `2026-11-19T00:12:34.567Z`, like the Electron app's log */
@@ -162,7 +201,7 @@ fn main_window(h: &AppHandle) -> Option<WebviewWindow> { h.get_webview_window("m
 fn apply_settings(h: &AppHandle, app: &App) {
     let s = app.s();
     if let Err(e) = settings::save(&app.data_dir.join("settings.json"), &s) { app.log(&format!("settings: {e}")); }
-    if app.packaged {
+    if app.packaged && !app.sandbox {
         let al = h.autolaunch();
         let r = if s.autostart { al.enable() } else { al.disable() };
         if let Err(e) = r { app.log(&format!("autostart: {e}")); }
@@ -213,7 +252,8 @@ fn register_hotkey(h: &AppHandle) {
 /** Ctrl+Alt+1-9 press the answer buttons of a question or permission on the pet, from any app; held only while one waits. */
 fn sync_answer_keys(h: &AppHandle) {
     let app = h.state::<Arc<App>>();
-    let want = app.s().answer_keys && {
+    let _one = app.keys_lock.lock().unwrap();
+    let want = !app.sandbox && app.s().answer_keys && {
         let ui = app.ui.lock().unwrap();
         ui.snapshot.as_ref().map_or(false, |s| {
             let att = &s["attention"];
@@ -358,15 +398,26 @@ fn on_hooks(h: &AppHandle, m: &Value) {
 
 fn push_snapshot(h: &AppHandle) {
     let app = h.state::<Arc<App>>();
-    let snap = {
-        let ui = app.ui.lock().unwrap();
-        merge::merge_snapshots(&[merge::HostPart { host: "wsl".into(), snap: ui.wsl_snap.clone(), distro: None }])
-    };
-    let sessions = app.queue.lock().unwrap().decorate(snap["sessions"].as_array().cloned().unwrap_or_default());
+    let one = app.push_lock.lock().unwrap();
+    let snap = merge::merge_snapshots(&app.parts());
+    let sessions = desktop::decorate_desktop(snap["sessions"].as_array().cloned().unwrap_or_default(), &app.desktop_entries());
+    let sessions = app.queue.lock().unwrap().decorate(sessions);
+    // a new Windows chat: its first prompt is typed in once the session shows up (through its pet-helper pipe)
+    let pending = app.ui.lock().unwrap().pending_new_chat.clone();
+    if let Some((cwd, at, prompt, known)) = pending {
+        if let Some(id) = terminal::match_new_session(&sessions, &cwd, at, &known) {
+            app.ui.lock().unwrap().pending_new_chat = None;
+            if let Some(w) = app.win_host() { std::thread::spawn(move || w.bridge.handle(&json!({ "type": "send", "sessionId": id, "text": prompt }))); }
+        } else if now_ms() - at > 120_000.0 {
+            app.ui.lock().unwrap().pending_new_chat = None;
+            app.log("new Windows chat: the session did not appear in time, first prompt dropped");
+        }
+    }
     let attention = if sessions.iter().any(|s| s["id"] == snap["attention"]) { snap["attention"].clone() } else { merge::pick_attention(&sessions).map_or(Value::Null, |s| s["id"].clone()) };
     let out = json!({ "type": "snapshot", "sessions": sessions, "attention": attention });
     app.ui.lock().unwrap().snapshot = Some(out.clone());
     let _ = h.emit("pet:msg", out);
+    drop(one);
     sync_answer_keys(h);
     drain_queue(h);
 }
@@ -379,7 +430,7 @@ fn drain_queue(h: &AppHandle) {
     for (sid, m) in due {
         let text = m["text"].as_str().unwrap_or("").to_string();
         let s = sessions.iter().find(|x| x["id"] == sid.as_str());
-        let reachable = s.map_or(false, |s| s["owned"] == true || !s["pty"].is_null() && s.get("pty").is_some() || s["mailbox"] == true);
+        let reachable = s.map_or(false, |s| s["owned"] == true || !s["pty"].is_null() && s.get("pty").is_some() || s["mailbox"] == true || s["host"] == "windows");
         if !reachable {
             app.log(&format!("queue: {sid} cannot take a message without the user; dropped"));
             let note = app.l(&format!("Сообщение из очереди не отправлено: у сессии нет связи с питомцем. Текст: {text}"), &format!("A queued message was not sent: the session has no link to the pet. Text: {text}"), &format!("排队消息未发送：会话未连接到宠物。内容：{text}"));
@@ -387,11 +438,29 @@ fn drain_queue(h: &AppHandle) {
             continue;
         }
         app.log(&format!("queue: sending a waiting message to {sid}"));
-        app.to_bridge(json!({ "type": "send", "sessionId": sid, "text": text, "queued": true }));
+        let h = h.clone();
+        std::thread::spawn(move || on_cmd(&h, json!({ "type": "send", "sessionId": sid, "text": text, "queued": true })));
     }
 }
 
 fn now_ms() -> f64 { std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0.0, |d| d.as_millis() as f64) }
+
+/** limits come from every host (the WSL bridge, the Windows status line): the ring shows the freshest numbers */
+fn host_usage(h: &AppHandle, host: &str, u: Value) {
+    let app = h.state::<Arc<App>>();
+    let all: Vec<Value> = { let mut ui = app.ui.lock().unwrap(); ui.usage_by.insert(host.into(), u); ui.usage_by.values().cloned().collect() };
+    if let Some(m) = merge::merge_usage(&all) { let _ = h.emit("pet:msg", json!({ "type": "usage", "usage": m })); }
+}
+
+/** the Windows host's messages (main.ts: snapshot -> winSnap, the rest as the WSL bridge's) */
+fn windows_message(h: &AppHandle, m: Value) {
+    let app = h.state::<Arc<App>>();
+    match m["type"].as_str() {
+        Some("snapshot") => { app.ui.lock().unwrap().win_snap = Some(m); push_snapshot(h); }
+        Some("usage") => host_usage(h, "windows", m["usage"].clone()),
+        _ => { let _ = h.emit("pet:msg", m); }
+    }
+}
 
 /** the WSL bridge's messages, as main.ts handles them */
 struct Events { handle: AppHandle }
@@ -399,6 +468,7 @@ impl wsl::HostEvents for Events {
     fn ready(&self, claude: &str) {
         let app = self.handle.state::<Arc<App>>();
         let s = app.s();
+        app.ui.lock().unwrap().hooks_manual = false;
         app.to_bridge(json!({ "type": "language", "lang": *app.lang.lock().unwrap() }));
         app.to_bridge(json!({ "type": "permission-mode", "mode": s.permissions }));
         app.to_bridge(json!({ "type": "hook-permissions", "on": s.answer_permissions }));
@@ -412,8 +482,8 @@ impl wsl::HostEvents for Events {
     }
     fn up(&self, up: bool) {
         let app = self.handle.state::<Arc<App>>();
-        { let mut ui = app.ui.lock().unwrap(); ui.up = up; if !up { ui.wsl_snap = None; } }
-        let _ = self.handle.emit("pet:bridge", up);
+        let any = { let mut ui = app.ui.lock().unwrap(); ui.up = up; if !up { ui.wsl_snap = None; } ui.up || ui.win_up };
+        let _ = self.handle.emit("pet:bridge", any);
         if !up { push_snapshot(&self.handle); }
         refresh_tray(&self.handle);
     }
@@ -421,7 +491,7 @@ impl wsl::HostEvents for Events {
         let app = self.handle.state::<Arc<App>>();
         match m["type"].as_str() {
             Some("snapshot") => { app.ui.lock().unwrap().wsl_snap = Some(m); push_snapshot(&self.handle); }
-            Some("usage") => { let u = merge::merge_usage(&[m["usage"].clone()]); let _ = self.handle.emit("pet:msg", json!({ "type": "usage", "usage": u })); }
+            Some("usage") => host_usage(&self.handle, "wsl", m["usage"].clone()),
             Some("hooks") => { let h = self.handle.clone(); std::thread::spawn(move || on_hooks(&h, &m)); }
             Some("statusline") | Some("termMark") => {} // M3: connections panel, terminal focus
             _ => { let _ = self.handle.emit("pet:msg", m); }
@@ -440,7 +510,7 @@ fn config(app: St) -> Result<Value, String> {
     let dir = model_dir(&app.models_dirs, &s.model).ok_or("no pet model found")?;
     let ui = app.ui.lock().unwrap();
     Ok(json!({
-        "bridge": ui.up, "snapshot": ui.snapshot, "expanded": false, "panel": false,
+        "bridge": ui.up || ui.win_up, "snapshot": ui.snapshot, "expanded": false, "panel": false,
         "appearance": s.appearance, "permissions": s.permissions, "answerKeys": s.answer_keys,
         "lang": *app.lang.lock().unwrap(), "language": s.language, "petScale": s.pet_scale,
         "pet": pet_payload(&dir)?,
@@ -448,21 +518,124 @@ fn config(app: St) -> Result<Value, String> {
 }
 
 #[tauri::command]
-fn cmd(h: AppHandle, app: St, cmd: Value) {
-    let t = cmd["type"].as_str().unwrap_or("");
+fn cmd(h: AppHandle, cmd: Value) { std::thread::spawn(move || on_cmd(&h, cmd)); } // dialogs may block: never on the UI thread
+
+/** a session's commands go to the host that owns it (new chats, models and limits stay with the WSL bridge) */
+fn route(h: &AppHandle, cmd: Value) {
+    let app = h.state::<Arc<App>>();
+    let parts = app.parts();
+    let host = if cmd["type"] == "permission" { merge::host_of_permission(cmd["id"].as_str().unwrap_or(""), &parts) } else { cmd["sessionId"].as_str().and_then(|id| merge::host_of(id, &parts)) };
+    if host.as_deref() == Some("windows") { if let Some(w) = app.win_host() { w.bridge.handle(&cmd); } return; }
+    app.to_bridge(cmd);
+}
+
+fn spawn_launch(app: &App, c: &terminal::Launch) -> bool {
+    let mut p = std::process::Command::new(&c.file);
+    p.args(&c.args);
+    if let Some(d) = &c.cwd { p.current_dir(d); }
+    #[cfg(windows)]
+    { use std::os::windows::process::CommandExt; p.creation_flags(0x0000_0008); } // DETACHED_PROCESS: the terminal outlives nothing of ours
+    match p.spawn() { Ok(_) => true, Err(e) => { app.log(&format!("terminal ({}) failed: {e}", c.file)); false } }
+}
+/** Windows Terminal first, the plain console when it is missing */
+fn launch(app: &App, make: impl Fn(bool) -> Result<terminal::Launch, String>) {
+    for wt in [true, false] {
+        match make(wt) { Ok(c) => if spawn_launch(app, &c) { return; }, Err(e) => { app.log(&format!("terminal: {e}")); return; } }
+    }
+}
+
+/** the pet's command handler (main.ts onCmd) */
+fn on_cmd(h: &AppHandle, cmd: Value) {
+    let app = h.state::<Arc<App>>().inner().clone();
+    let t = cmd["type"].as_str().unwrap_or("").to_string();
+    let sid = cmd["sessionId"].as_str().unwrap_or("").to_string();
     // messages for later live in the app (it sees every host's state)
     if t == "queue" {
-        if let (Some(sid), Some(text)) = (cmd["sessionId"].as_str(), cmd["text"].as_str().map(str::trim).filter(|x| !x.is_empty())) {
-            app.queue.lock().unwrap().add(sid, text, cmd["at"].as_f64().filter(|a| a.is_finite()));
-            push_snapshot(&h);
+        if let Some(text) = cmd["text"].as_str().map(str::trim).filter(|x| !x.is_empty()) {
+            if !sid.is_empty() { app.queue.lock().unwrap().add(&sid, text, cmd["at"].as_f64().filter(|a| a.is_finite())); push_snapshot(h); }
         }
         return;
     }
-    if t == "unqueue" {
-        if let Some(sid) = cmd["sessionId"].as_str() { app.queue.lock().unwrap().remove(sid, cmd["id"].as_str()); push_snapshot(&h); }
+    if t == "unqueue" { if !sid.is_empty() { app.queue.lock().unwrap().remove(&sid, cmd["id"].as_str()); push_snapshot(h); } return; }
+    let s = app.s();
+    if t == "start" && !s.sdk_chats {
+        let cwd = cmd["cwd"].as_str().unwrap_or("").to_string();
+        let prompt = cmd["prompt"].as_str().unwrap_or("").trim().to_string();
+        if s.new_chat_in == "desktop" {
+            // a new chat inside the Claude desktop app (needs a Windows folder; the app fills the prompt, the pet presses Send)
+            if let Some(link) = (!prompt.is_empty()).then(|| desktop::new_chat_link(&cwd, &prompt)).flatten() {
+                let r = winshell::send_to_desktop(&prompt, None, None, Some(&link));
+                if r != "ok" {
+                    winshell::focus_desktop_app();
+                    let detail = if r == "needs-trust" { app.l("Приложение Claude спрашивает, доверять ли этой папке. Решить это можете только вы: ответьте в приложении и нажмите «Отправить» (текст уже введён).", "The Claude app asks whether to trust this folder. Only you can decide that: answer in the app and press Send (the text is already filled in).", "Claude 应用正在询问是否信任此文件夹。只有您能决定：请在应用中回答并点击“发送”（文本已填好）。") }
+                        else { app.l(&format!("Чат открыт в приложении Claude, но питомец не смог нажать «Отправить» ({r}). Отправьте сообщение там сами."), &format!("The chat is open in the Claude app, but the pet could not press Send ({r}). Send the message there yourself."), &format!("聊天已在 Claude 应用中打开，但宠物无法点击“发送”（{r}）。请在那里自行发送。")) };
+                    info(h, &app.l("Сообщение не отправлено", "The message was not sent", "消息未发送"), &detail);
+                }
+                return;
+            }
+            if prompt.is_empty() && !cwd.is_empty() {
+                let enc: String = cwd.bytes().map(|b| if b.is_ascii_alphanumeric() || b"-_.!~*'()".contains(&b) { (b as char).to_string() } else { format!("%{b:02X}") }).collect();
+                let _ = h.opener().open_url(format!("claude://code/new?folder={enc}"), None::<&str>);
+                winshell::focus_desktop_app();
+                return;
+            }
+            app.log("new chat in the desktop app needs a Windows folder; starting it in a terminal instead");
+        }
+        let wsl_up = app.wsl_host().map_or(false, |w| w.is_up());
+        if s.new_chat_in == "windows" || !wsl_up {
+            // the first prompt is typed into the new session once it shows up (it needs the wrapper's pipe for that)
+            let known: Vec<String> = app.ui.lock().unwrap().snapshot.as_ref().and_then(|x| x["sessions"].as_array().map(|l| l.iter().filter_map(|y| y["id"].as_str().map(String::from)).collect())).unwrap_or_default();
+            app.ui.lock().unwrap().pending_new_chat = (!prompt.is_empty() && app.helper.is_some()).then(|| (cwd.clone(), now_ms(), prompt.clone(), known));
+            if !prompt.is_empty() && app.helper.is_none() { // without the wrapper nothing can type it: keep the text for the user instead of losing it
+                let _ = h.clipboard().write_text(prompt.clone());
+                info(h, &app.l("Первое сообщение не отправлено", "The first message was not sent", "首条消息未发送"), &app.l("Без pet-helper.exe питомец не может ввести его в новую сессию. Текст скопирован в буфер обмена: вставьте его в открывшееся окно.", "Without pet-helper.exe the pet cannot type it into the new session. The text is on the clipboard: paste it into the new window.", "没有 pet-helper.exe，宠物无法把它输入到新会话中。文本已复制到剪贴板：请粘贴到新窗口中。"));
+            }
+            launch(&app, |wt| Ok(terminal::windows_new_session_command(&cwd, app.helper.as_deref(), wt)));
+            return;
+        }
+        let w = app.wsl_host().unwrap();
+        let (distro, claude) = (w.distro(), w.claude());
+        launch(&app, |wt| terminal::new_session_command(&distro, &cwd, &claude, Some(&prompt).filter(|p| !p.is_empty()).map(|p| p.as_str()), wt));
         return;
     }
-    app.to_bridge(cmd);
+    if t == "send" {
+        if let Some(x) = app.session(&sid) {
+            let text = cmd["text"].as_str().unwrap_or("");
+            let has_images = cmd["images"].as_array().map_or(false, |a| !a.is_empty());
+            // a queued message never drives the Claude app's window (it would take the focus, e.g. from a fullscreen game): it goes through the hook
+            if let (Some(did), false) = (x["desktopId"].as_str(), x["mod"] == true) {
+                if s.desktop_send == "real" && cmd["queued"] != true && !text.trim().is_empty() && !has_images {
+                    let r = winshell::send_to_desktop(text, x["project"].as_str(), Some(did), None);
+                    if r == "ok" { return; }
+                    app.log(&format!("desktop send: {r}; delivering through the hook instead"));
+                    let note = if r == "busy" { app.l("Чат в приложении занят: сообщение доставлено через хук (в приложении оно выглядит бледной вставкой).", "The chat in the app is busy: the message went through the hook (the app shows it as faint text).", "应用中的聊天正忙：消息已通过钩子发送（在应用中显示为淡色文字）。") }
+                        else { app.l(&format!("Не удалось ввести сообщение в приложение ({r}): оно доставлено через хук и выглядит там бледной вставкой."), &format!("Could not type the message into the app ({r}): it went through the hook and looks faint there."), &format!("无法在应用中输入消息（{r}）：已通过钩子发送，在应用中显示为淡色文字。")) };
+                    let _ = h.emit("pet:msg", json!({ "type": "chat", "sessionId": sid, "event": { "kind": "note", "text": note } }));
+                }
+            }
+            // the warning is for the SDK fallback only: a session reachable through its mailbox (or on the Windows host) is woken by a hook
+            let fallback = x["owned"] != true && x["pty"].is_null() && x["mailbox"] != true && x["host"] != "windows";
+            if fallback && !app.ui.lock().unwrap().warned.contains(&sid) {
+                let project = x["project"].as_str().unwrap_or("").to_string();
+                let ok = confirm(h, &app.l(&format!("«{project}» открыта в терминале"), &format!("“{project}” is open in a terminal"), &format!("“{project}”已在终端中打开")),
+                    &app.l("Ответ запишется в тот же диалог, но в уже открытом окне терминала он не появится, пока сессию не откроют заново (кнопка «в терминал» в чате питомца). Писать в обе стороны одновременно не стоит.\n\nСовет: нажми «в терминал» в чате, и питомец продолжит эту сессию в новом окне.", "The reply is written to the same conversation, but it will not appear in the terminal window that is already open until the session is reopened (the “terminal” button in the pet chat). Do not write from both sides at once.\n\nTip: press “terminal” in the chat and the pet will continue this session in a new window.", "回复会写入同一个对话，但在重新打开会话之前，不会显示在已打开的终端窗口中（宠物聊天中的“终端”按钮）。请勿同时从两边写入。\n\n提示：在聊天中点“终端”，宠物会在新窗口中继续此会话。"),
+                    &app.l("Отправить", "Send", "发送"), &app.l("Отмена", "Cancel", "取消"));
+                if !ok { return; }
+                app.ui.lock().unwrap().warned.insert(sid.clone());
+            }
+        }
+    }
+    if t == "end" {
+        let x = app.session(&sid);
+        let project = x.as_ref().and_then(|x| x["project"].as_str().map(String::from)).unwrap_or_else(|| sid.clone());
+        let detail = if x.as_ref().map_or(false, |x| x["owned"] == true) {
+            app.l("Питомец закроет её процесс Claude Code. Переписка сохранится: её можно продолжить позже в терминале.", "The pet will close its Claude Code process. The conversation is kept: you can continue it later in a terminal.", "宠物将关闭它的 Claude Code 进程。对话会保留：稍后可在终端中继续。")
+        } else {
+            app.l("Процесс claude этой сессии будет остановлен (окно терминала останется). Если Claude сейчас работает, текущий шаг прервётся.", "The claude process of this session will be stopped (the terminal window stays). If Claude is working right now, the current step is interrupted.", "此会话的 claude 进程将被停止（终端窗口保留）。如果 Claude 正在工作，当前步骤会被中断。")
+        };
+        if !confirm(h, &app.l(&format!("Завершить сессию «{project}»?"), &format!("End the session “{project}”?"), &format!("结束会话“{project}”？")), &detail, &app.l("Завершить", "End", "结束"), &app.l("Отмена", "Cancel", "取消")) { return; }
+    }
+    route(h, cmd);
 }
 
 #[tauri::command]
@@ -534,6 +707,272 @@ async fn pick_folder(h: AppHandle) -> Option<String> {
         .await.ok().flatten()
 }
 
+// ---------- connections: our hooks in each host's settings.json (always with the diff and the user's consent) ----------
+
+fn confirm_hooks(h: &AppHandle, title: &str, items: &[(String, String)], note: Option<String>) -> bool {
+    let app = h.state::<Arc<App>>();
+    let body: Vec<String> = items.iter().map(|(f, d)| { let d = if d.chars().count() > 1400 { format!("{}\n…", d.chars().take(1400).collect::<String>()) } else { d.clone() }; format!("{f}\n{d}") }).collect();
+    let note = note.unwrap_or_else(|| app.l("Копия файла сохранится рядом (settings.json.bak). Хуки только сообщают питомцу о событиях; свои хуки пользователя не затрагиваются.", "A copy of the file is kept next to it (settings.json.bak). The hooks only tell the pet about events; your own hooks are not touched.", "文件的备份会保存在旁边（settings.json.bak）。钩子只向宠物通知事件，不会改动你自己的钩子。"));
+    confirm(h, title, &format!("{}\n\n{note}", body.join("\n\n")), &app.l("Применить", "Apply", "应用"), &app.l("Отмена", "Cancel", "取消"))
+}
+
+fn windows_settings_label() -> String { std::env::var("USERPROFILE").map(|u| format!("{u}\\.claude\\settings.json")).unwrap_or_else(|_| "settings.json".into()) }
+
+/** the PowerShell profiles the wrapper goes into: Windows PowerShell always, PowerShell 7 when its profile folder exists */
+fn ps_profiles() -> Vec<PathBuf> {
+    let docs = std::env::var("USERPROFILE").map(|u| PathBuf::from(u).join("Documents")).unwrap_or_default();
+    terminal::profile_paths(&docs).into_iter().enumerate().filter(|(i, p)| *i == 0 || p.parent().map_or(false, |d| d.exists())).map(|(_, p)| p).collect()
+}
+
+fn wrapper_state(app: &App) -> Value {
+    let Some(helper) = app.helper.as_deref() else { return Value::Null };
+    let files = ps_profiles();
+    let states: Vec<&str> = files.iter().map(|p| match terminal::read_profile(p) {
+        Ok(c) => match terminal::profile_state(&c, helper) { terminal::ProfileState::Ours => "ours", terminal::ProfileState::Stale => "stale", terminal::ProfileState::None => "none" },
+        Err(_) => "ansi",
+    }).collect();
+    let state = if states.contains(&"ansi") { "ansi" } else if states.contains(&"stale") { "stale" } else if states.iter().all(|x| *x == "ours") { "ours" } else if states.contains(&"ours") { "partial" } else { "none" };
+    json!({ "state": state, "files": files, "policy": *app.ps_policy.lock().unwrap() })
+}
+
+fn last_event_by_host(app: &App) -> std::collections::BTreeMap<String, f64> {
+    let sessions = app.ui.lock().unwrap().snapshot.as_ref().and_then(|s| s["sessions"].as_array().cloned()).unwrap_or_default();
+    diagnostics::last_event_by_host(&sessions)
+}
+
+fn wsl_row(app: &App) -> Value {
+    let s = app.s();
+    let last = last_event_by_host(app);
+    let Some(w) = app.wsl_host() else { return json!({ "id": "wsl", "up": false }) };
+    let hk = w.request(&json!({ "type": "hooks", "apply": false, "permissions": s.answer_permissions }), "hooks").unwrap_or(Value::Null);
+    let sl = w.request(&json!({ "type": "statusline" }), "statusline").unwrap_or(Value::Null);
+    json!({ "id": "wsl", "statusLine": sl["kind"], "statusLineDiff": sl["diff"].as_str().unwrap_or(""), "statusLineError": sl["error"], "up": w.is_up(), "distro": w.distro(),
+        "events": hk["events"] == true, "mailbox": hk["mailbox"] == true, "permissions": hk["permissions"] == true, "diff": hk["diff"].as_str().unwrap_or(""), "error": hk["error"], "lastEventAt": last.get("wsl") })
+}
+
+fn connections_state(app: &App) -> Value {
+    let s = app.s();
+    let last = last_event_by_host(app);
+    let windows = match app.win_host() {
+        Some(w) => {
+            let mut st = w.state(s.answer_permissions);
+            let sl = w.status_line(false, false);
+            st["port"] = json!(w.port()); st["up"] = json!(app.ui.lock().unwrap().win_up);
+            st["statusLine"] = sl["kind"].clone(); st["statusLineDiff"] = sl["diff"].clone(); st["statusLineError"] = sl["error"].clone();
+            st["lastEventAt"] = json!(last.get("windows"));
+            st
+        }
+        None => json!({ "events": false, "mailbox": false, "permissions": false, "port": 0, "up": false, "settingsPath": "", "diff": "", "statusLine": "none", "statusLineDiff": "" }),
+    };
+    json!({ "native": false, "answerPermissions": s.answer_permissions, "sdkChats": s.sdk_chats, "newChatIn": s.new_chat_in, "desktopSend": s.desktop_send,
+        "helper": app.helper.is_some(), "helperPath": app.helper, "wrapper": wrapper_state(app), "windows": windows, "wsl": wsl_row(app), "others": [] })
+}
+
+/** Our Windows entries are there but out of date (the app moved, the helper changed, the token is new): offer to update them once per start. */
+fn offer_windows_repair(h: &AppHandle) {
+    let app = h.state::<Arc<App>>();
+    let Some(w) = app.win_host() else { return };
+    let perm = app.s().answer_permissions;
+    let st = w.state(perm);
+    let sl = w.status_line(false, false);
+    let mut items = vec![];
+    let hooks_diff = st["diff"].as_str().unwrap_or("").to_string();
+    if st.get("error").is_none() && (st["events"] == true || st["mailbox"] == true) && !hooks_diff.is_empty() { items.push((windows_settings_label(), hooks_diff.clone())); }
+    let sl_diff = sl["diff"].as_str().unwrap_or("").to_string();
+    if sl.get("error").is_none() && sl["kind"] != "none" && !sl_diff.is_empty() { items.push((format!("{} (statusLine)", windows_settings_label()), sl_diff.clone())); }
+    if items.is_empty() { return; }
+    if !confirm_hooks(h, &app.l("Обновить подключение Windows?", "Update the Windows connection?", "更新 Windows 连接？"), &items, None) { return; }
+    if items.iter().any(|i| i.1 == hooks_diff) { if let Err(e) = w.apply(perm) { app.log(&format!("windows repair: {e}")); } }
+    if !sl_diff.is_empty() && sl["kind"] != "none" { w.status_line(true, false); }
+}
+
+#[tauri::command]
+async fn connections(h: AppHandle) -> Value {
+    tauri::async_runtime::spawn_blocking(move || connections_state(&h.state::<Arc<App>>())).await.unwrap_or(Value::Null)
+}
+
+#[tauri::command]
+async fn connections_apply(h: AppHandle, host: String, action: String) -> Value {
+    tauri::async_runtime::spawn_blocking(move || { connections_apply_now(&h, &host, &action); connections_state(&h.state::<Arc<App>>()) }).await.unwrap_or(Value::Null)
+}
+
+fn connections_apply_now(h: &AppHandle, host: &str, action: &str) {
+    let app = h.state::<Arc<App>>();
+    let perm = app.s().answer_permissions;
+    let remove = action == "disconnect";
+    let cant_read = || app.l("Не удалось прочитать settings.json", "Could not read settings.json", "无法读取 settings.json");
+    let cant_write = || app.l("Не удалось записать настройки", "Could not write the settings", "无法写入设置");
+    let sl_title = |off: bool| if off { app.l("Отключить статус-строку от питомца?", "Disconnect the status line from the pet?", "断开状态栏与宠物的连接？") } else { app.l("Подключить статус-строку (лимиты)?", "Connect the status line (limits)?", "连接状态栏（额度）？") };
+    if host == "windows" && (action == "wrapper" || action == "wrapper-off") {
+        let Some(helper) = app.helper.clone() else { return };
+        let off = action == "wrapper-off";
+        let r: Result<(), String> = (|| {
+            let mut items = vec![];
+            for f in ps_profiles() {
+                let cur = terminal::read_profile(&f)?;
+                let (next, diff) = if off { terminal::remove_from_profile(&cur) } else { terminal::plan_profile(&cur, &helper) };
+                if !diff.is_empty() { items.push((f, next, diff)); }
+            }
+            let shown: Vec<(String, String)> = items.iter().map(|(f, _, d)| (f.to_string_lossy().into_owned(), d.clone())).collect();
+            let title = if off { app.l("Убрать обёртку claude из профиля PowerShell?", "Remove the claude wrapper from the PowerShell profile?", "从 PowerShell 配置文件中移除 claude 包装器？") } else { app.l("Добавить обёртку claude в профиль PowerShell?", "Add the claude wrapper to the PowerShell profile?", "将 claude 包装器添加到 PowerShell 配置文件？") };
+            let note = app.l("Копия файла сохранится рядом (.bak). Меняются только строки между метками ccPet. Новые окна PowerShell будут запускать claude через обёртку.", "A copy of the file is kept next to it (.bak). Only the lines between the ccPet markers change. New PowerShell windows will start claude through the wrapper.", "文件的备份会保存在旁边（.bak）。只修改 ccPet 标记之间的行。新的 PowerShell 窗口将通过包装器启动 claude。");
+            if !items.is_empty() && confirm_hooks(h, &title, &shown, Some(note)) { for (f, next, _) in &items { terminal::apply_profile(f, next)?; } }
+            Ok(())
+        })();
+        if let Err(e) = r { info(h, &app.l("Не удалось изменить профиль PowerShell", "Could not change the PowerShell profile", "无法修改 PowerShell 配置文件"), &e); }
+    } else if host == "windows" && (action == "statusline" || action == "statusline-off") {
+        let Some(w) = app.win_host() else { return };
+        let off = action == "statusline-off";
+        let p = w.status_line(false, off);
+        if let Some(e) = p["error"].as_str() { info(h, &cant_read(), e); return; }
+        let diff = p["diff"].as_str().unwrap_or("");
+        if !diff.is_empty() && confirm_hooks(h, &sl_title(off), &[(windows_settings_label(), diff.into())], None) {
+            let r = w.status_line(true, off);
+            if let Some(e) = r["error"].as_str() { info(h, &cant_write(), e); } else { w.bridge.push_usage(); }
+        }
+    } else if host == "windows" {
+        let Some(w) = app.win_host() else { return };
+        let st = w.state(perm);
+        if let Some(e) = st["error"].as_str() { info(h, &cant_read(), e); return; }
+        let diff = if remove { w.remove_diff() } else { st["diff"].as_str().unwrap_or("").to_string() };
+        let title = if remove { app.l("Отключить Windows от питомца?", "Disconnect Windows from the pet?", "断开 Windows 与宠物的连接？") } else { app.l("Подключить Windows-сессии Claude Code?", "Connect Windows Claude Code sessions?", "连接 Windows 的 Claude Code 会话？") };
+        if !diff.is_empty() && confirm_hooks(h, &title, &[(windows_settings_label(), diff)], None) {
+            if let Err(e) = if remove { w.remove() } else { w.apply(perm) } { info(h, &cant_write(), &e); }
+        }
+    } else if host == "wsl" && !app.sandbox {
+        let Some(w) = app.wsl_host() else { return };
+        let label = format!("WSL{}", if w.distro().is_empty() { String::new() } else { format!(": {}", w.distro()) });
+        if action == "statusline" || action == "statusline-off" {
+            let off = action == "statusline-off";
+            let p = w.request(&json!({ "type": "statusline", "remove": off }), "statusline").unwrap_or(Value::Null);
+            if let Some(e) = p["error"].as_str() { info(h, &cant_read(), e); return; }
+            let diff = p["diff"].as_str().unwrap_or("");
+            if !diff.is_empty() && confirm_hooks(h, &sl_title(off), &[(format!("~/.claude/settings.json ({label})"), diff.into())], None) {
+                w.request(&json!({ "type": "statusline", "apply": true, "remove": off }), "statusline");
+            }
+        } else {
+            let p = w.request(&json!({ "type": "hooks", "apply": false, "remove": remove, "permissions": perm }), "hooks").unwrap_or(Value::Null);
+            if let Some(e) = p["error"].as_str() { info(h, &cant_read(), e); return; }
+            let diff = p["diff"].as_str().unwrap_or("");
+            let title = if remove { app.l(&format!("Отключить {label} от питомца?"), &format!("Disconnect {label} from the pet?"), &format!("断开 {label} 与宠物的连接？")) } else { app.l(&format!("Подключить сессии Claude Code ({label})?"), &format!("Connect Claude Code sessions ({label})?"), &format!("连接 Claude Code 会话（{label}）？")) };
+            if !diff.is_empty() && confirm_hooks(h, &title, &[(format!("~/.claude/settings.json ({label})"), diff.into())], None) {
+                w.request(&json!({ "type": "hooks", "apply": true, "remove": remove, "permissions": perm }), "hooks");
+            }
+        }
+    }
+}
+
+#[tauri::command]
+async fn new_chat_in(h: AppHandle, place: Option<String>) -> Value {
+    let w = match place.as_deref() { Some("windows") => "windows", Some("desktop") => "desktop", _ => "wsl" };
+    update_settings(&h, |s| s.new_chat_in = w.into());
+    tauri::async_runtime::spawn_blocking(move || connections_state(&h.state::<Arc<App>>())).await.unwrap_or(Value::Null)
+}
+
+#[tauri::command]
+async fn desktop_send(h: AppHandle, how: Option<String>) -> Value {
+    let v = if how.as_deref() == Some("hook") { "hook" } else { "real" };
+    update_settings(&h, |s| s.desktop_send = v.into());
+    tauri::async_runtime::spawn_blocking(move || connections_state(&h.state::<Arc<App>>())).await.unwrap_or(Value::Null)
+}
+
+#[tauri::command]
+async fn sdk_chats(h: AppHandle, on: bool) -> Value {
+    tauri::async_runtime::spawn_blocking(move || {
+        let app = h.state::<Arc<App>>();
+        if on && !confirm(&h, &app.l("Разрешить питомцу запускать Claude Code через Agent SDK?", "Let the pet start Claude Code through the Agent SDK?", "允许宠物通过 Agent SDK 启动 Claude Code？"),
+            &app.l("Питомец сможет начинать новые чаты и продолжать терминальные сессии, запуская второй процесс claude под вашим входом (как если бы вы набрали команду сами). Важно: по правилам Anthropic (code.claude.com/docs/en/legal-and-compliance) сторонние программы на Agent SDK должны работать с API-ключом, а не через вход по подписке Free/Pro/Max. Включайте, только если Claude Code у вас вошёл по API-ключу или вы принимаете этот риск. Без этого новые чаты открываются в терминале, а общаться с уже запущенными сессиями можно через хуки.", "The pet will be able to start new chats and continue terminal sessions by running a second claude process under your login (as if you typed the command yourself). Important: Anthropic rules (code.claude.com/docs/en/legal-and-compliance) say third-party tools built on the Agent SDK should use an API key, not a Free/Pro/Max subscription login. Turn this on only if your Claude Code signs in with an API key or you accept that risk. Without this, new chats open in a terminal, and running sessions can still be reached through the hooks.", "宠物将能够新建聊天并继续终端会话，方式是在您的登录下运行第二个 claude 进程（就像您自己输入命令）。重要：根据 Anthropic 的规则（code.claude.com/docs/en/legal-and-compliance），基于 Agent SDK 的第三方工具应使用 API 密钥，而不是 Free/Pro/Max 订阅登录。仅当您的 Claude Code 使用 API 密钥登录或您接受该风险时才开启。关闭时，新聊天会在终端中打开，已运行的会话仍可通过钩子联系。"),
+            &app.l("Включить", "Turn on", "开启"), &app.l("Отмена", "Cancel", "取消")) {
+            return connections_state(&app);
+        }
+        update_settings(&h, |s| s.sdk_chats = on);
+        app.to_all_bridges(json!({ "type": "sdk-chats", "on": on }));
+        connections_state(&app)
+    }).await.unwrap_or(Value::Null)
+}
+
+#[tauri::command]
+async fn answer_permissions(h: AppHandle, on: bool) -> Value {
+    tauri::async_runtime::spawn_blocking(move || {
+        let app = h.state::<Arc<App>>();
+        let mut items: Vec<(String, String)> = vec![];
+        let ws = app.win_host().map(|w| w.state(on)).unwrap_or(Value::Null);
+        let win_diff = ws["diff"].as_str().unwrap_or("").to_string();
+        if ws["events"] == true && ws.get("error").is_none() && !win_diff.is_empty() { items.push((windows_settings_label(), win_diff.clone())); }
+        let wsl = if app.sandbox { None } else { app.wsl_host() };
+        let wp = wsl.as_ref().and_then(|w| w.request(&json!({ "type": "hooks", "apply": false, "permissions": on }), "hooks")).unwrap_or(Value::Null);
+        let wsl_diff = wp["diff"].as_str().unwrap_or("").to_string();
+        if wp["events"] == true && wp.get("error").map_or(true, Value::is_null) && !wsl_diff.is_empty() { items.push(("~/.claude/settings.json (WSL)".into(), wsl_diff.clone())); }
+        let title = if on { app.l("Отвечать на разрешения в питомце?", "Answer permission questions in the pet?", "在宠物中回答权限请求？") } else { app.l("Больше не отвечать на разрешения в питомце?", "Stop answering permission questions in the pet?", "不再在宠物中回答权限请求？") };
+        if !items.is_empty() && !confirm_hooks(&h, &title, &items, None) { return connections_state(&app); }
+        if !win_diff.is_empty() && ws["events"] == true { if let Some(w) = app.win_host() { if let Err(e) = w.apply(on) { info(&h, &app.l("Не удалось записать настройки", "Could not write the settings", "无法写入设置"), &e); } } }
+        if !wsl_diff.is_empty() { if let Some(w) = &wsl { w.request(&json!({ "type": "hooks", "apply": true, "permissions": on }), "hooks"); } }
+        update_settings(&h, |s| s.answer_permissions = on);
+        app.to_all_bridges(json!({ "type": "hook-permissions", "on": on }));
+        connections_state(&app)
+    }).await.unwrap_or(Value::Null)
+}
+
+/** "why don't I see my session": every check in one copyable report (no user name, tokens or e-mail in it) */
+#[tauri::command]
+async fn diagnostics_report(h: AppHandle) -> String {
+    tauri::async_runtime::spawn_blocking(move || {
+        let app = h.state::<Arc<App>>();
+        let c = connections_state(&app);
+        let sessions = app.ui.lock().unwrap().snapshot.as_ref().and_then(|s| s["sessions"].as_array().cloned()).unwrap_or_default();
+        let row = |id: &str, x: &Value| {
+            let of: Vec<&Value> = sessions.iter().filter(|s| diagnostics::host_id_of(s) == id).collect();
+            let mut sources: Vec<String> = of.iter().map(|s| s["source"].as_str().unwrap_or("?").to_string()).collect();
+            sources.dedup();
+            diagnostics::HostDiag { id: id.into(), distro: x["distro"].as_str().map(String::from), up: x["up"] == true, events: x["events"] == true, mailbox: x["mailbox"] == true, permissions: x["permissions"] == true,
+                status_line: x["statusLine"].as_str().map(String::from), last_event_at: x["lastEventAt"].as_f64(), sessions: of.len(), sources, error: x["error"].as_str().map(String::from) }
+        };
+        let s = app.s();
+        let user = std::env::var("USERNAME").unwrap_or_default();
+        let desktop_chats = app.desktop_entries().values().map(|e| e.desktop_id.clone()).collect::<HashSet<_>>().len();
+        let text = diagnostics::format_diagnostics(&diagnostics::DiagData {
+            version: env!("CARGO_PKG_VERSION").into(), os: "win32".into(), now: now_ms(), user,
+            hosts: vec![row("windows", &c["windows"]), row("wsl", &c["wsl"])],
+            helper: app.helper.is_some(), wrapper: c["wrapper"]["state"].as_str().map(String::from), policy: c["wrapper"]["policy"].as_str().map(String::from),
+            desktop_chats, new_chat_in: s.new_chat_in.clone(), sdk_chats: s.sdk_chats,
+        });
+        let _ = h.clipboard().write_text(text.clone());
+        text
+    }).await.unwrap_or_default()
+}
+
+/** open a session in a real terminal (claude --resume); a pet-owned one is released first so only one client writes */
+#[tauri::command]
+fn open_terminal(h: AppHandle, session_id: String) {
+    std::thread::spawn(move || {
+        let app = h.state::<Arc<App>>();
+        let Some(s) = app.session(&session_id) else { return };
+        let (cwd, project) = (s["cwd"].as_str().unwrap_or("").to_string(), s["project"].as_str().unwrap_or("").to_string());
+        if let Some(did) = s["desktopId"].as_str() { // a desktop app session: open that very chat in the app (its own deep link), never a second claude
+            if let Some(link) = desktop::chat_link(did) { let _ = h.opener().open_url(link, None::<&str>); winshell::focus_desktop_app(); }
+            return;
+        }
+        let mark = format!("{project} - Claude {}", session_id.chars().take(4).collect::<String>());
+        if s["host"] == "windows" {
+            // a wrapped session (pet-helper pty): raise its own terminal; otherwise (or if that fails) a new terminal resumes it
+            let marked = s["pty"].as_str().map_or(false, |pipe| ccpet_core::pty_send::send_title(pipe, &mark).is_ok());
+            if marked { std::thread::sleep(Duration::from_millis(350)); if winshell::focus_by_title(&mark) { return; } }
+            launch(&app, |wt| terminal::windows_terminal_command(&cwd, &session_id, wt));
+            return;
+        }
+        let Some(w) = app.wsl_host() else { return };
+        let owned = s["owned"] == true;
+        if !owned {
+            if w.mark_terminal(&session_id, &mark) { std::thread::sleep(Duration::from_millis(350)); if winshell::focus_by_title(&mark) { return; } }
+        } else {
+            w.send(&json!({ "type": "release", "sessionId": session_id }));
+            std::thread::sleep(Duration::from_millis(500));
+        }
+        let (distro, claude) = (w.distro(), w.claude());
+        launch(&app, |wt| terminal::terminal_command(&distro, &cwd, &claude, &session_id, wt));
+    });
+}
+
 // ---------- window ----------
 
 fn anchor_file(app: &App) -> PathBuf { app.data_dir.join("window.json") }
@@ -587,7 +1026,7 @@ fn watch_cursor(win: WebviewWindow, app: Arc<App>) {
             let hov = over_any(x, y, &ui.hover, 4.0);
             let hit = over_any(x, y, &ui.hit, 2.0);
             // a drag ended: remember where the pet stands, apply a height asked for meanwhile
-            let drag_done = ui.last_move.map_or(false, |t| t.elapsed() > Duration::from_millis(600));
+            let drag_done = ui.last_move.map_or(false, |t| t.elapsed() > Duration::from_millis(1500));
             let mut pending = None;
             if drag_done {
                 ui.last_move = None;
@@ -623,6 +1062,7 @@ fn keep_visible(h: AppHandle, win: WebviewWindow) {
         let anchor = app.ui.lock().unwrap().anchor.unwrap_or(placement::Anchor { cx: x + STAGE_W / 2.0, bottom: y + IDLE_H });
         let wa = nearest_area(&h, anchor.cx, anchor.bottom - 1.0, areas[0]);
         let r = placement::place_stage(anchor, STAGE_W, STAGE_H, wa);
+        app.ui.lock().unwrap().own_move_until = Some(Instant::now() + Duration::from_millis(300));
         let _ = win.set_position(LogicalPosition::new(r.x, r.y));
         app.ui.lock().unwrap().anchor = Some(placement::Anchor { cx: r.x + STAGE_W / 2.0, bottom: r.y + IDLE_H });
         app.log(&format!("the pet was off screen: moved back to {},{}", r.x, r.y));
@@ -642,6 +1082,13 @@ fn main() {
     let res = |packaged: &str, dev: PathBuf| { let p = exe_dir.join("resources").join(packaged); if p.exists() { p } else { dev } };
     let bridge = std::env::var("CCPET_BRIDGE").map(PathBuf::from).unwrap_or_else(|_| res("hook/ccpet-bridge", repo.join("build").join("hook").join("ccpet-bridge")));
     let settings = settings::load(&data_dir.join("settings.json"));
+    // hooks, the status line and the PowerShell wrapper use a stable copy of pet-helper.exe (it is busy for as long as sessions live; the install
+    // folder must stay replaceable by the next installer); a sandbox uses the installed one as it is
+    let installed_helper = res("helper/pet-helper.exe", repo.join("ui").join("helper").join("pet-helper.exe"));
+    let helper = if !installed_helper.is_file() { None } else if sandbox { Some(installed_helper.to_string_lossy().into_owned()) } else {
+        let dir = std::env::var("LOCALAPPDATA").map(PathBuf::from).unwrap_or_else(|_| data_dir.clone()).join("ccPet").join("bin");
+        winshell::sync_helper(&installed_helper, &dir).path
+    };
     let queue_file = data_dir.join("queue.json");
     let loaded = std::fs::read_to_string(&queue_file).ok().and_then(|t| serde_json::from_str(&t).ok());
     let qf = queue_file.clone();
@@ -652,6 +1099,9 @@ fn main() {
         packaged: !cfg!(debug_assertions),
         lang: Mutex::new(resolve_lang(&settings.language)),
         settings: Mutex::new(settings),
+        helper,
+        desktop: Mutex::new((desktop::DesktopRegistry::new(move || desktop::find_registry_roots(&std::env::var("LOCALAPPDATA").unwrap_or_default(), &std::env::var("APPDATA").unwrap_or_default())), None, HashMap::new())),
+        push_lock: Mutex::new(()), keys_lock: Mutex::new(()), ps_policy: Mutex::new(None), win: Mutex::new(None),
         queue: Mutex::new(MessageQueue::new(Box::new(move |d| { let _ = std::fs::write(&qf, d.to_string()); }), loaded)),
         data_dir, ui: Mutex::new(Ui::default()), wsl: Mutex::new(None),
     });
@@ -666,7 +1116,7 @@ fn main() {
         .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_opener::init())
         .manage(app.clone())
-        .invoke_handler(tauri::generate_handler![config, cmd, rects, hover_rects, resize, focus, start_drag, context_menu, set_scale, set_appearance, set_permissions, set_language, copy_text, open_url, notify, pick_folder])
+        .invoke_handler(tauri::generate_handler![config, cmd, rects, hover_rects, resize, focus, start_drag, context_menu, set_scale, set_appearance, set_permissions, set_language, copy_text, open_url, notify, pick_folder, open_terminal, connections, connections_apply, answer_permissions, sdk_chats, new_chat_in, desktop_send, diagnostics_report])
         .setup(move |tapp| {
             let handle = tapp.handle().clone();
             let anchor = start_anchor(&app, &handle);
@@ -676,7 +1126,7 @@ fn main() {
             let win = WebviewWindowBuilder::new(tapp, "main", WebviewUrl::App("index.html".into()))
                 .title("ccPet").inner_size(STAGE_W, STAGE_H).position(r.x, r.y)
                 .decorations(false).transparent(true).always_on_top(true).skip_taskbar(true).resizable(false).shadow(false)
-                .maximizable(false).minimizable(false).visible(false)
+                .maximizable(false).minimizable(false).visible(false).focused(false)
                 .initialization_script(include_str!("pet-host.js"))
                 .build()?;
             // the pet runs the way it is dragged
@@ -685,6 +1135,7 @@ fn main() {
                 let sf = w2.scale_factor().unwrap_or(1.0);
                 let x = p.x as f64 / sf;
                 let mut ui = app2.ui.lock().unwrap();
+                if ui.own_move_until.map_or(false, |t| Instant::now() < t) { ui.last_x = Some(x); return; } // our own move, not the user dragging
                 let dx = ui.last_x.map_or(0.0, |l| x - l);
                 ui.last_x = Some(x);
                 ui.last_move = Some(Instant::now());
@@ -707,6 +1158,46 @@ fn main() {
                 vec![("CLAUDE_PET_DIR".into(), "$HOME/.claude-pet-tauri".into()), ("CLAUDE_PET_HOOK_PORT".into(), "47993".into()), ("CLAUDE_PET_LIVE_USAGE".into(), "0".into())]
             } else { vec![] };
             *app.wsl.lock().unwrap() = Some(wsl::WslHost::start(bridge.to_string_lossy().into_owned(), exports, Arc::new(Events { handle: handle.clone() })));
+            // the Windows host: Claude Code's HTTP hooks on 127.0.0.1:47821; a sandbox leaves that port to the running pet (CCPET_WIN_PORT
+            // gives it its own, with its own token: nothing installed points there, it only adopts sessions from transcripts)
+            let win_port = if app.sandbox { std::env::var("CCPET_WIN_PORT").ok().and_then(|p| p.parse::<u16>().ok()) } else { Some(windows_host::PORT) };
+            if let Some(port) = win_port {
+                let home = std::env::var("USERPROFILE").map(PathBuf::from).unwrap_or_default();
+                let h3 = handle.clone();
+                let w = WindowsHost::new(&app.data_dir, home.join(".claude"), port, app.helper.clone(), Box::new(move |m| windows_message(&h3, m)));
+                w.bridge.handle(&json!({ "type": "language", "lang": *app.lang.lock().unwrap() }));
+                w.bridge.handle(&json!({ "type": "hook-permissions", "on": app.s().answer_permissions }));
+                *app.win.lock().unwrap() = Some(w.clone());
+                let h4 = handle.clone();
+                std::thread::spawn(move || {
+                    let app = h4.state::<Arc<App>>();
+                    match w.start() {
+                        Ok(()) => {
+                            app.ui.lock().unwrap().win_up = true;
+                            let _ = h4.emit("pet:bridge", true);
+                            app.log(&format!("windows host listening on 127.0.0.1:{}", w.port()));
+                            w.bridge.push_usage();
+                            if !app.sandbox {
+                                winshell::unhide_desktop(); // a send cut short by a crash must not leave the Claude app's window invisible
+                                offer_windows_repair(&h4);
+                            }
+                        }
+                        Err(e) => { app.log(&format!("windows host not started: {e}")); let _ = h4.emit("pet:msg", json!({ "type": "error", "message": e })); }
+                    }
+                });
+                // a chat renamed, archived or deleted in the app shows up within 5 s (the registry is re-read when older)
+                let h5 = handle.clone();
+                std::thread::spawn(move || loop { std::thread::sleep(Duration::from_secs(5)); push_snapshot(&h5); });
+                // PowerShell's execution policy, for the wrapper row of Connections
+                let h6 = handle.clone();
+                std::thread::spawn(move || {
+                    let mut c = std::process::Command::new("powershell.exe");
+                    c.args(["-NoProfile", "-NonInteractive", "-Command", "Get-ExecutionPolicy"]);
+                    #[cfg(windows)]
+                    { use std::os::windows::process::CommandExt; c.creation_flags(0x0800_0000); }
+                    if let Ok(o) = c.output() { *h6.state::<Arc<App>>().ps_policy.lock().unwrap() = Some(String::from_utf8_lossy(&o.stdout).trim().to_string()); }
+                });
+            }
             // timed messages and turns that ended without a fresh snapshot
             let h2 = handle.clone();
             std::thread::spawn(move || loop { std::thread::sleep(Duration::from_secs(2)); drain_queue(&h2); });
@@ -716,7 +1207,10 @@ fn main() {
         .build(tauri::generate_context!())
         .expect("tauri app")
         .run(|h, e| if let tauri::RunEvent::Exit = e {
-            if let Some(w) = h.state::<Arc<App>>().wsl.lock().unwrap().take() { w.stop(); }
+            let app = h.state::<Arc<App>>();
+            if let Some(w) = app.wsl.lock().unwrap().take() { w.stop(); }
+            let win = app.win.lock().unwrap().take();
+            if let Some(w) = win { w.stop(); }
         });
 }
 
