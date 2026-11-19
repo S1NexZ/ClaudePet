@@ -1337,7 +1337,8 @@ fn main() {
         models_dirs: vec![res("models", repo.join("models")), data_dir.join("models")],
         scripts_dir: res("scripts", repo.join("scripts")),
         sandbox,
-        packaged: !cfg!(debug_assertions),
+        // installed by the setup (autostart, update check): a build run from the repo or the cargo target folder is not
+        packaged: !cfg!(debug_assertions) && exe_dir.join("uninstall.exe").is_file(),
         lang: Mutex::new(resolve_lang(&settings.language)),
         settings: Mutex::new(settings),
         helper,
@@ -1347,9 +1348,10 @@ fn main() {
         data_dir, ui: Mutex::new(Ui::default()), wsl: Mutex::new(None),
     });
 
-    tauri::Builder::default()
-        // a second launch only summons the running pet
-        .plugin(tauri_plugin_single_instance::init(|h, _, _| summon(h)))
+    let mut builder = tauri::Builder::default();
+    // a second launch only summons the running pet; a sandbox runs next to the installed pet, so it skips the lock
+    if !sandbox { builder = builder.plugin(tauri_plugin_single_instance::init(|h, _, _| summon(h))); }
+    builder
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .plugin(tauri_plugin_autostart::init(tauri_plugin_autostart::MacosLauncher::LaunchAgent, None))
         .plugin(tauri_plugin_notification::init())

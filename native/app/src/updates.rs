@@ -105,4 +105,13 @@ mod tests {
         let draft = json!({"tag_name": "v9.0.0", "html_url": "https://github.com/S1NexZ/ccPet/releases/tag/v9.0.0", "draft": true});
         assert!(newer("0.5.0", &draft).is_none());
     }
+
+    /** hits GitHub: run by hand with `cargo test --lib live_github -- --ignored` */
+    #[test]
+    #[ignore]
+    fn live_github() {
+        let u = check_latest("0.0.1");
+        eprintln!("latest: {u:?}");
+        assert!(u.is_some(), "no release found (network, API rate limit, or no non-draft release)");
+    }
 }

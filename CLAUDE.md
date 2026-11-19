@@ -56,6 +56,26 @@ Display logic: `ui/src/renderer/usage.ts` (stale after a failed request or 15 mi
 Models are Codex-format packs (`pet.json` + 1536×1872 sheet, 8×9 cells of 192×208). `ui/src/models/zip.ts` reads ZIPs in memory with strict checks; `install.ts` validates, installs atomically and never overwrites. Settings (`ui/src/settings.ts`): autostart, notify, hotkey, active model, appearance colors (`#rrggbb`).
 The renderer can switch models without a restart (`loadSprite` in `app.ts`).
 
+## Tauri app (0.7, replaces Electron; installed on the owner's PC since 2026-11-19)
+`native/app` is its own cargo workspace and uses `native/ccpet-core` by path.
+- **`main.rs`** replaces `ui/src/main.ts`: window, tray, hotkeys, hosts, commands, dialogs.
+- **Hosts:** `windows_host.rs` is the in-process Windows host; `wsl.rs` runs one bridge per distro.
+- **Library modules** are TS ports with tests: settings, placement, queue, merge, desktop, terminal, winshell, diagnostics, models, updates.
+- **Renderer:** `ui/dist` unchanged; `src/pet-host.js` gives it the same `window.petHost` as `preload.cjs`.
+- **Dialogs:** `confirm()` is its own TaskDialog with the safe button focused. The dialog plugin's default is the action, so it is never used for questions.
+
+**Build, test, install:**
+- Debug build (WSL): `cmd.exe /c "cd /d C:\ClaudePet-v2\native\app && set CARGO_TARGET_DIR=%LOCALAPPDATA%\ccpet-target&& %USERPROFILE%\.cargo\bin\cargo.exe build"` (`test` for the tests).
+- Installer: `npm run dist:tauri` produces `ui/release/ccPet-<ver>_x64-setup.exe`, about 6 MB.
+- The installer goes to `%LOCALAPPDATA%\ccPet`. Install it with `/S`, then start it with PowerShell `Start-Process`.
+
+**Sandbox** (test next to the installed pet without touching it):
+- `CCPET_SANDBOX=1`: its own data dir `%APPDATA%\ccPet-sandbox`, bridge dir `~/.claude-pet-tauri` and port 47993. No hotkeys, no single-instance lock, no hook offers, never writes the real settings or profiles, never drives the Claude app.
+- `CCPET_WIN_PORT=<port>`: also run a Windows host there, on its own port and token.
+- `CCPET_AT=x,y`: window position. `CCPET_DEBUG=1`: cursor log.
+- `WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS=--remote-debugging-port=9334`: DevTools (drive it with PowerShell; WSL cannot reach that port).
+- Synthetic mouse input from PowerShell is DPI-unaware: use logical (CSS) coordinates.
+
 ## Build and test (verified)
 ```
 export PATH=$HOME/.local/node/bin:$PATH
