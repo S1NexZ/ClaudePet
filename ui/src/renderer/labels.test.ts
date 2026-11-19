@@ -50,3 +50,14 @@ describe('island words', () => {
     expect(statusView(null, false, 0).chip).toBe('Нет связи');
   });
 });
+
+import { sessionLabel } from './labels.js';
+import { setLang } from '../../../shared/src/i18n.js';
+describe('sessionLabel', () => {
+  it('counts several running subagents', () => {
+    setLang('en');
+    expect(sessionLabel({ state: 'subagent', subagents: 3 })).toBe('Subagent working ×3');
+    expect(sessionLabel({ state: 'subagent', subagents: 1 })).toBe('Subagent working');
+    expect(sessionLabel({ state: 'thinking', subagents: 2 })).toBe('Thinking');
+  });
+});

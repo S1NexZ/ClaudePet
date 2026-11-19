@@ -65,7 +65,7 @@ impl Store {
             self.sessions.insert(ev.session_id.clone(), Session {
                 id: ev.session_id.clone(), cwd: ev.cwd.clone(), project: project_name(&ev.cwd), state: PetState::Idle,
                 since: now, last_event_at: now, owned: false, pty: None, resume_cwd: None, pending_permission: None,
-                source: None, soft_stop: None, mailbox: None, is_mod: None,
+                source: None, soft_stop: None, mailbox: None, is_mod: None, subagents: None,
             });
         }
         let s = self.sessions.get_mut(&ev.session_id).unwrap();
@@ -192,7 +192,13 @@ impl Store {
         self.turn_done.remove(id);
     }
     pub fn get(&self, id: &str) -> Option<&Session> { self.sessions.get(id) }
-    pub fn list(&self) -> Vec<Session> { self.order.iter().map(|id| self.sessions[id].clone()).collect() }
+    pub fn list(&self) -> Vec<Session> {
+        self.order.iter().map(|id| {
+            let mut s = self.sessions[id].clone();
+            s.subagents = self.agents.get(id).map(|m| m.len() as u32).filter(|n| *n > 0);
+            s
+        }).collect()
+    }
     pub fn attention(&self) -> Option<String> { pick_attention(&self.list()).map(|s| s.id.clone()) }
 }
 
@@ -263,6 +269,17 @@ mod tests {
         e.agent_id = Some(agent.into());
         if name == "PreToolUse" { e.tool_name = Some("Read".into()); }
         e
+    }
+
+    #[test]
+    fn snapshot_counts_running_subagents() {
+        let mut st = Store::new();
+        st.apply(&aev("PreToolUse", "a", "x"), 0);
+        st.apply(&aev("PreToolUse", "a", "y"), 1);
+        assert_eq!(st.list()[0].subagents, Some(2));
+        st.apply(&aev("SubagentStop", "a", "x"), 2);
+        st.apply(&aev("SubagentStop", "a", "y"), 3);
+        assert_eq!(st.list()[0].subagents, None);
     }
 
     #[test]

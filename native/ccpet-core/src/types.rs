@@ -115,6 +115,9 @@ pub struct Session {
     #[serde(skip_serializing_if = "Option::is_none")]
     #[serde(rename = "mod")]
     pub is_mod: Option<bool>,
+    /** subagents of this session running right now (only when there are any) */
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub subagents: Option<u32>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize)]

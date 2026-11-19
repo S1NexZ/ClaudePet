@@ -191,7 +191,7 @@ export class SessionStore {
   }
 
   list(): Session[] {
-    return [...this.sessions.values()];
+    return [...this.sessions.values()].map((s) => { const n = this.agents.get(s.id)?.size ?? 0; return n ? { ...s, subagents: n } : s; });
   }
 
   /** The session the pet should show (see pickAttention). */

@@ -52,6 +52,8 @@ export interface Session {
   source?: string;
   /** Stop works through this session's hooks (answered with continue:false at the next tool call); set by hosts with HTTP hooks */
   softStop?: boolean;
+  /** subagents of this session running right now (only when there are any) */
+  subagents?: number;
   /** the Claude desktop app's id of this session (`local_…`): it is opened in the app with `claude://code/continue?session=<id>` */
   desktopId?: string;
   /** a mailbox waiter is armed: a message sent from the pet is delivered even without a PTY */

@@ -1,4 +1,4 @@
-import { statusView, STATE_LABEL, formatElapsed, hostTag, chipLabel } from './labels.js';
+import { statusView, sessionLabel, formatElapsed, hostTag, chipLabel } from './labels.js';
 import { createConnectionsTab, type ConnectionsHost } from './connectionsTab.js';
 import { pinSnapshot, focusSnapshot } from './view.js';
 import { sessionRows, nextChatId, isQuiet } from './switcher.js';
@@ -585,7 +585,7 @@ async function main() {
     if (!expanded) return;
     const newChat = mode === 'new' && !!folder;
     const sid = newChat ? null : s?.id ?? null;
-    const title = newChat ? `${L('Новый чат', 'New chat', '新聊天')} · ${folder!.replace(/[\\/]+$/, '').split(/[\\/]/).pop()}` : s ? `${s.project} · ${STATE_LABEL[s.state]}` : L('Чат', 'Chat', '聊天');
+    const title = newChat ? `${L('Новый чат', 'New chat', '新聊天')} · ${folder!.replace(/[\\/]+$/, '').split(/[\\/]/).pop()}` : s ? `${s.project} · ${sessionLabel(s)}` : L('Чат', 'Chat', '聊天');
     if ($('chat-title').textContent !== title) $('chat-title').textContent = title;
     show($('btn-term'), !!sid); show($('btn-end'), !!sid);
     const openLabel = s?.desktopId ? L('Открыть в приложении Claude', 'Open in the Claude app', '在 Claude 应用中打开') : L('Открыть в терминале', 'Open in terminal', '在终端中打开');
@@ -666,7 +666,7 @@ async function main() {
     const data = foldRows(list.map((x) => ({
       id: x.id, current: x.id === snap?.attention,
       tone: x.state === 'waiting' || x.state === 'error' ? 'alert' : x.state === 'idle' || x.state === 'sleeping' ? 'quiet' : '',
-      name: x.project, meta: `${hostTag(x) ? `${hostTag(x)} · ` : ''}${STATE_LABEL[x.state]} · ${formatElapsed(now - x.since)}`, tip: x.cwd, dismissable: !x.owned, quiet: isQuiet(x, snap?.attention ?? null, now),
+      name: x.project, meta: `${hostTag(x) ? `${hostTag(x)} · ` : ''}${sessionLabel(x)} · ${formatElapsed(now - x.since)}`, tip: x.cwd, dismissable: !x.owned, quiet: isQuiet(x, snap?.attention ?? null, now),
     })));
     syncRows(panel, data, { toggle: toggleQuiet, open: (id) => openChat(id), dismiss: (id) => host.send({ type: 'dismiss', sessionId: id }), dismissLabel });
   };

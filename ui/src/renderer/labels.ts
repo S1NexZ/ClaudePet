@@ -43,6 +43,11 @@ export function formatElapsed(ms: number): string {
   return h > 0 ? `${h}:${String(m).padStart(2, '0')}:${ss}` : `${m}:${ss}`;
 }
 
+/** a session's state in words; several running subagents get their count ("Subagent working ×2") */
+export function sessionLabel(s: { state: PetState; subagents?: number }): string {
+  return s.state === 'subagent' && (s.subagents ?? 0) > 1 ? `${STATE_LABEL[s.state]} ×${s.subagents}` : STATE_LABEL[s.state];
+}
+
 export interface StatusView { label: string; /** the short word for the island */ chip: string; detail: string; state: PetState; attention: boolean }
 
 export function statusView(snap: Snapshot | null, connected: boolean, now: number): StatusView {
@@ -51,7 +56,7 @@ export function statusView(snap: Snapshot | null, connected: boolean, now: numbe
   if (!s) return { label: L('Жду Claude Code…', 'Waiting for Claude Code…', '正在等待 Claude Code…'), chip: L('Ожидание', 'Waiting', '等待中'), detail: '', state: 'idle', attention: false };
   return {
     // Claude asks a question (not a tool permission): say so
-    label: s.pendingPermission?.questions ? L('Claude задаёт вопрос', 'Claude asks a question', 'Claude 在提问') : STATE_LABEL[s.state],
+    label: s.pendingPermission?.questions ? L('Claude задаёт вопрос', 'Claude asks a question', 'Claude 在提问') : sessionLabel(s),
     chip: s.pendingPermission?.questions ? L('Вопрос', 'Question', '提问') : chipLabel(s.state),
     detail: `${s.project} · ${formatElapsed(now - s.since)}`,
     state: s.state,

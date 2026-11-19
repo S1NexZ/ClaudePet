@@ -1,4 +1,4 @@
-import { STATE_LABEL, formatElapsed, hostTag } from './labels.js';
+import { sessionLabel, formatElapsed, hostTag } from './labels.js';
 import type { Session } from '../../../shared/src/types.js';
 
 export interface SessionRow {
@@ -26,7 +26,7 @@ export function sessionRows(sessions: Session[], currentId: string | null, now: 
     .map((x) => ({
       id: x.id,
       title: (count.get(x.project) ?? 0) > 1 ? `${x.project} · ${x.id.slice(0, 4)}` : x.project,
-      meta: `${hostTag(x) ? `${hostTag(x)} · ` : ''}${STATE_LABEL[x.state]} · ${formatElapsed(now - x.since)}`,
+      meta: `${hostTag(x) ? `${hostTag(x)} · ` : ''}${sessionLabel(x)} · ${formatElapsed(now - x.since)}`,
       tone: x.state === 'waiting' || x.state === 'error' ? 'alert' : x.state === 'idle' || x.state === 'sleeping' ? 'quiet' : 'busy',
       current: x.id === currentId,
       cwd: x.cwd,
