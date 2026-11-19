@@ -1407,6 +1407,7 @@ fn main() {
         data_dir, ui: Mutex::new(Ui::default()), wsl: Mutex::new(None),
     });
 
+    app.log(&format!("starting {} on {}", env!("CARGO_PKG_VERSION"), std::env::consts::OS)); // before Tauri: a start that hangs still leaves a trace
     let mut builder = tauri::Builder::default();
     // a second launch only summons the running pet; a sandbox runs next to the installed pet, so it skips the lock
     if !sandbox { builder = builder.plugin(tauri_plugin_single_instance::init(|h, _, _| summon(h))); }

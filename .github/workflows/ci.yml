@@ -112,7 +112,7 @@ jobs:
         with: { name: ccPet-linux, path: dl }
       - name: Install the .deb and run the app under Xvfb with a fake claude
         run: |
-          sudo apt-get update -qq && sudo apt-get install -y -qq xvfb
+          sudo apt-get update -qq && sudo apt-get install -y -qq xvfb dbus-x11
           DEB=$(find "$PWD/dl" -type f -name '*.deb' | head -1)   # apt needs a path, else it reads a package name
           echo "deb: $DEB"
           sudo apt-get install -y -qq "$DEB"
@@ -120,7 +120,8 @@ jobs:
           LOG="$HOME/.config/Claude Pet/pet.log"
           BIN=$(dpkg -L "$(dpkg-deb -f "$DEB" Package)" | grep '/usr/bin/' | head -1)
           echo "binary: $BIN"
-          timeout 20 xvfb-run -a "$BIN" || true
+          # a desktop session has a D-Bus session bus (single instance, tray, notifications use it); the runner has none
+          timeout 25 dbus-run-session -- xvfb-run -a "$BIN" || true
           cat "$LOG"
           grep -q "\[tauri\] started" "$LOG"
           grep -q "bridge wsl ready" "$LOG"
