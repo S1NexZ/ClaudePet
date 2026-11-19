@@ -281,7 +281,7 @@ mod tests {
         assert_eq!(req(s.port, "POST", "/hook/abc123/Stop", r#"{"session_id":"s1"}"#), (200, String::new()));
         assert_eq!(req(s.port, "POST", "/hook/abc123/%zz", r#"{"session_id":"s2"}"#).0, 200);
         assert_eq!(req(s.port, "POST", "/hook/abc123/Stop", r#"{"session_id":"stop-me"}"#), (200, r#"{"continue":false}"#.to_string()));
-        assert_eq!(got.lock().unwrap()[0], "Stop:s1");
+        assert_eq!(got.lock().unwrap()[1], "Stop:s1"); // [0] is the rescan command above
         s.close();
     }
 
