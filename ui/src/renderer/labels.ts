@@ -4,22 +4,22 @@ import { L, getLang } from '../../../shared/src/i18n.js';
 const RU_LABEL: Record<PetState, string> = {
   idle: 'Готов', thinking: 'Думает', reading: 'Изучает', writing: 'Пишет код',
   running: 'Запускает команду', testing: 'Тестирует', waiting: 'Ждёт разрешения',
-  subagent: 'Субагент работает', done: 'Готово', error: 'Ошибка', sleeping: 'Спит',
+  subagent: 'Агент работает', done: 'Готово', error: 'Ошибка', sleeping: 'Спит',
 };
 const EN_LABEL: Record<PetState, string> = {
   idle: 'Ready', thinking: 'Thinking', reading: 'Reading', writing: 'Writing code',
   running: 'Running a command', testing: 'Testing', waiting: 'Needs permission',
-  subagent: 'Subagent working', done: 'Done', error: 'Error', sleeping: 'Asleep',
+  subagent: 'Agent working', done: 'Done', error: 'Error', sleeping: 'Asleep',
 };
 const ZH_LABEL: Record<PetState, string> = {
   idle: '就绪', thinking: '思考中', reading: '阅读中', writing: '编写代码',
   running: '运行命令', testing: '测试中', waiting: '需要权限',
-  subagent: '子代理工作中', done: '完成', error: '出错', sleeping: '休眠',
+  subagent: '代理工作中', done: '完成', error: '出错', sleeping: '休眠',
 };
 /** One short word per state for the status island (the long labels above stay for the session lists and notifications). */
-const RU_CHIP: Record<PetState, string> = { idle: 'Готов', thinking: 'Думает', reading: 'Читает', writing: 'Пишет', running: 'Запуск', testing: 'Тесты', waiting: 'Разрешить?', subagent: 'Субагент', done: 'Готово', error: 'Ошибка', sleeping: 'Спит' };
-const EN_CHIP: Record<PetState, string> = { idle: 'Ready', thinking: 'Thinking', reading: 'Reading', writing: 'Writing', running: 'Running', testing: 'Testing', waiting: 'Allow?', subagent: 'Subagent', done: 'Done', error: 'Error', sleeping: 'Asleep' };
-const ZH_CHIP: Record<PetState, string> = { idle: '就绪', thinking: '思考中', reading: '阅读中', writing: '编写中', running: '运行中', testing: '测试中', waiting: '需授权', subagent: '子代理', done: '完成', error: '出错', sleeping: '休眠' };
+const RU_CHIP: Record<PetState, string> = { idle: 'Готов', thinking: 'Думает', reading: 'Читает', writing: 'Пишет', running: 'Запуск', testing: 'Тесты', waiting: 'Разрешить?', subagent: 'Агент', done: 'Готово', error: 'Ошибка', sleeping: 'Спит' };
+const EN_CHIP: Record<PetState, string> = { idle: 'Ready', thinking: 'Thinking', reading: 'Reading', writing: 'Writing', running: 'Running', testing: 'Testing', waiting: 'Allow?', subagent: 'Agent', done: 'Done', error: 'Error', sleeping: 'Asleep' };
+const ZH_CHIP: Record<PetState, string> = { idle: '就绪', thinking: '思考中', reading: '阅读中', writing: '编写中', running: '运行中', testing: '测试中', waiting: '需授权', subagent: '代理', done: '完成', error: '出错', sleeping: '休眠' };
 const chipTable = () => ({ en: EN_CHIP, ru: RU_CHIP, zh: ZH_CHIP } as const)[getLang()];
 export const chipLabel = (st: PetState): string => chipTable()[st];
 /** read lazily, so the label follows the language chosen at runtime */
@@ -43,9 +43,12 @@ export function formatElapsed(ms: number): string {
   return h > 0 ? `${h}:${String(m).padStart(2, '0')}:${ss}` : `${m}:${ss}`;
 }
 
-/** a session's state in words; several running subagents get their count ("Subagent working ×2") */
+/** how many agents run: " ×2" (empty when none) */
+const agentCount = (n?: number): string => (n ?? 0) > 0 ? ` ×${n}` : '';
+
+/** a session's state in words; running agents get their count ("Agent working ×2") */
 export function sessionLabel(s: { state: PetState; subagents?: number }): string {
-  return s.state === 'subagent' && (s.subagents ?? 0) > 1 ? `${STATE_LABEL[s.state]} ×${s.subagents}` : STATE_LABEL[s.state];
+  return s.state === 'subagent' ? `${STATE_LABEL[s.state]}${agentCount(s.subagents)}` : STATE_LABEL[s.state];
 }
 
 export interface StatusView { label: string; /** the short word for the island */ chip: string; detail: string; state: PetState; attention: boolean }
@@ -57,7 +60,7 @@ export function statusView(snap: Snapshot | null, connected: boolean, now: numbe
   return {
     // Claude asks a question (not a tool permission): say so
     label: s.pendingPermission?.questions ? L('Claude задаёт вопрос', 'Claude asks a question', 'Claude 在提问') : sessionLabel(s),
-    chip: s.pendingPermission?.questions ? L('Вопрос', 'Question', '提问') : chipLabel(s.state),
+    chip: s.pendingPermission?.questions ? L('Вопрос', 'Question', '提问') : `${chipLabel(s.state)}${s.state === 'subagent' ? agentCount(s.subagents) : ''}`,
     detail: `${s.project} · ${formatElapsed(now - s.since)}`,
     state: s.state,
     attention: s.state === 'waiting' || s.state === 'error',

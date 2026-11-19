@@ -103,6 +103,8 @@ struct State {
     hooked: HashSet<String>,
     /** a PTY pipe reported (by a waiter) before its session was known */
     pending_ptys: HashMap<String, String>,
+    /** the user asked to look for sessions again (reload button): the adoption loop scans at once, further back */
+    rescan: bool,
 }
 
 struct Inner { o: BridgeOpts, st: Mutex<State>, usage: Mutex<Option<UsageSource>>, runner: OnceLock<Arc<dyn Runner>> }
@@ -297,6 +299,8 @@ impl Bridge {
             }
             "history" => { self.history_now(&s(cmd, "sessionId")); return Ok(false); }
             "statusline" => { self.statusline(cmd); return Ok(false); }
+            // closed-by-the-user marks are forgotten too: the user asked for everything that still runs
+            "rescan" => { let mut g = self.lock(); g.ended.clear(); g.rescan = true; return Ok(false); }
             "usage-refresh" | "usage" => {
                 // only on the user's own click (never on a timer or at start): the live query runs under the user's login
                 if kind == "usage-refresh" { if let Some(u) = self.0.usage.lock().unwrap().as_ref() { u.refresh(); } }
@@ -541,6 +545,8 @@ impl Bridge {
     /** the front end the waiter reported (terminal, desktop app, ...) */
     pub fn set_source(&self, id: &str, source: &str) { let mut g = self.lock(); g.store.set_source(id, source); self.snap(&mut g, true); }
     pub fn mailbox(&self) -> Arc<Mailbox> { self.0.o.mailbox.clone() }
+    /** true once after a `rescan` command: the adoption loop then scans at once and forgets what it adopted before */
+    pub fn take_rescan(&self) -> bool { std::mem::take(&mut self.lock().rescan) }
     pub fn has_session(&self, id: &str) -> bool { self.lock().store.get(id).is_some() }
 
     /** For tests and the bridge main: the current state of a session. */
@@ -645,6 +651,20 @@ mod tests {
             b.on_hook(ev("UserPromptSubmit", "t1"));
             assert_eq!(sessions(&log)[0]["id"], "t1");
         }
+    }
+
+    #[test]
+    fn rescan_forgets_dismissals_and_asks_for_one_scan() {
+        let (b, _log, _) = make("rescan");
+        b.adopt(ev("SessionStart", "t1"));
+        b.handle(&json!({ "type": "dismiss", "sessionId": "t1" }));
+        b.adopt(ev("SessionStart", "t1"));
+        assert!(!b.has_session("t1"));
+        assert!(!b.take_rescan());
+        b.handle(&json!({ "type": "rescan" }));
+        assert!(b.take_rescan() && !b.take_rescan());
+        b.adopt(ev("SessionStart", "t1"));
+        assert!(b.has_session("t1"));
     }
 
     #[test]

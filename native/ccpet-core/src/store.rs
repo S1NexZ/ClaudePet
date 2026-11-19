@@ -6,7 +6,8 @@ use std::collections::{HashMap, HashSet};
 
 /** an agent id not seen this long is forgotten: SubagentStop may never come after a crash/Esc */
 const SUBAGENT_STALE_MS: i64 = 10 * 60_000;
-const BUSY_DECAY_MS: i64 = 120_000;
+/** a model turn can run silently for minutes (long thinking, a big answer): only a very long silence means the session is gone */
+const BUSY_DECAY_MS: i64 = 30 * 60_000;
 /** a tool is running (a long build, a test suite, a wait): its PostToolUse comes when it ends, so quiet means busy, not lost */
 const TOOL_DECAY_MS: i64 = 30 * 60_000;
 const WAITING_DECAY_MS: i64 = 30 * 60_000;
@@ -262,6 +263,8 @@ mod tests {
         n.message = Some("needs your permission".into());
         st.apply(&n, 6);
         assert_eq!(st.attention().as_deref(), Some("b")); // waiting beats all
+        st.tick(10 * 60_000);
+        assert_eq!(st.get("a").unwrap().state, PetState::Thinking); // a long silent turn is not a lost session
         st.tick(BUSY_DECAY_MS + 1);
         assert_eq!(st.get("a").unwrap().state, PetState::Sleeping);
         assert_eq!(st.get("b").unwrap().state, PetState::Waiting);

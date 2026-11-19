@@ -138,9 +138,11 @@ fn main() {
             std::thread::sleep(Duration::from_millis(1500));
             let now = now_ms();
             b.tick(now);
-            if now - last_adopt > 15_000 {
+            let force = b.take_rescan();
+            if force || now - last_adopt > 15_000 {
                 last_adopt = now;
-                for r in adopt::find_running(&projects, now, 10 * 60_000) {
+                if force { adopted.clear(); }
+                for r in adopt::find_running(&projects, now, if force { adopt::RESCAN_MS } else { 10 * 60_000 }) {
                     if adopted.contains(&r.id) || b.has_session(&r.id) { continue; }
                     adopted.insert(r.id.clone());
                     let mut e = HookEvent::new("SessionStart", &r.id, &r.cwd);

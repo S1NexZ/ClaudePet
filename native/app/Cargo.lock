@@ -494,7 +494,7 @@ dependencies = [
 
 [[package]]
 name = "ccpet-app"
-version = "0.7.0"
+version = "0.7.1"
 dependencies = [
  "base64 0.22.1",
  "ccpet-core",
@@ -517,7 +517,7 @@ dependencies = [
 
 [[package]]
 name = "ccpet-core"
-version = "0.7.0"
+version = "0.7.1"
 dependencies = [
  "regex-lite",
  "serde",

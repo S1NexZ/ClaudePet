@@ -2,7 +2,8 @@ import { posix } from 'node:path';
 import { mapEvent } from './mapEvent.js';
 import type { HookEvent, PendingPermission, PetState, Session } from '../../shared/src/types.js';
 
-const BUSY_DECAY_MS = 120_000;
+/** a model turn can run silently for minutes (long thinking, a big answer): only a very long silence means the session is gone */
+const BUSY_DECAY_MS = 30 * 60_000;
 /** a tool is running (a long build, a test suite, a wait): its PostToolUse comes when it ends, so quiet means busy, not lost */
 const TOOL_DECAY_MS = 30 * 60_000;
 const WAITING_DECAY_MS = 30 * 60_000;

@@ -1,6 +1,6 @@
 [package]
 name = "ccpet-core"
-version = "0.7.0"
+version = "0.7.1"
 edition = "2021"
 description = "ccPet's core: Claude Code sessions, hooks, mailbox, transcripts, limits and settings changes"
 license = "MIT"

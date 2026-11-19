@@ -653,6 +653,7 @@ async function main() {
   const panel = $('sessions');
   if (cfg.panel) panel.hidden = false;
   $('btn-activity').addEventListener('click', () => { panel.hidden = !panel.hidden; });
+  $('btn-reload').addEventListener('click', () => host.send({ type: 'rescan' })); // sessions the pet lost: every host looks for them again
   let panelEmpty: HTMLElement | null = null;
   const renderPanel = (snap: Snapshot | null) => {
     if (panel.hidden) return;

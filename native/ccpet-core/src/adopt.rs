@@ -21,6 +21,9 @@ fn head_of(path: &std::path::Path) -> (String, Option<String>) {
     (cwd, source)
 }
 
+/** how far back the reload button looks for a session that went quiet (the automatic scan only takes the last 10 minutes) */
+pub const RESCAN_MS: i64 = 6 * 60 * 60_000;
+
 /** Transcripts written to in the last `max_age_ms`, newest first; sessions run by SDK clients (`sdk-cli`) are skipped. */
 pub fn find_running(projects_dir: &std::path::Path, now_ms: i64, max_age_ms: i64) -> Vec<Running> {
     let mut out = vec![];

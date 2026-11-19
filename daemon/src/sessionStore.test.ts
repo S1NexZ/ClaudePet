@@ -61,16 +61,16 @@ describe('SessionStore', () => {
     expect(s.list()[0].state).toBe('sleeping');
   });
 
-  it('tick: a busy session with no events for 120s decays to sleeping', () => {
+  it('tick: a busy session survives a long silent turn, decays to sleeping after 30 min', () => {
     const s = new SessionStore();
     s.apply(ev('a', 'UserPromptSubmit'), 0);
-    s.tick(119_000);
+    s.tick(10 * 60_000);
     expect(s.list()[0].state).toBe('thinking');
-    s.tick(120_000);
+    s.tick(30 * 60_000);
     expect(s.list()[0].state).toBe('sleeping');
   });
 
-  it('tick: waiting is exempt from the 120s decay but decays after 30 min', () => {
+  it('tick: waiting is exempt from the busy decay but decays after 30 min', () => {
     const s = new SessionStore();
     s.apply(ev('a', 'Notification', { message: 'needs your permission' }), 0);
     s.tick(10 * 60_000);

@@ -38,6 +38,7 @@
       const r = getComputedStyle(el).getPropertyValue('-webkit-app-region') || getComputedStyle(el).getPropertyValue('app-region');
       if (r === 'drag') return true;
       if (r === 'no-drag') return false;
+      if (el.id === 'sprite') return true; // WKWebView (macOS) has no app-region in computed style: the sprite is the drag handle
     }
     return false;
   };

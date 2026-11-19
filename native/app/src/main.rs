@@ -657,6 +657,7 @@ fn cmd(h: AppHandle, cmd: Value) { std::thread::spawn(move || on_cmd(&h, cmd)); 
 /** a session's commands go to the host that owns it (new chats, models and limits stay with the WSL bridge) */
 fn route(h: &AppHandle, cmd: Value) {
     let app = h.state::<Arc<App>>();
+    if cmd["type"] == "rescan" { app.to_all_bridges(cmd); return; } // every host looks for its sessions again
     let parts = app.parts();
     let host = if cmd["type"] == "permission" { merge::host_of_permission(cmd["id"].as_str().unwrap_or(""), &parts) } else { cmd["sessionId"].as_str().and_then(|id| merge::host_of(id, &parts)) };
     if host.as_deref() == Some("windows") { if let Some(w) = app.win_host() { w.bridge.handle(&cmd); } return; }

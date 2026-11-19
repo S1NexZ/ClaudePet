@@ -123,9 +123,11 @@ impl WindowsHost {
                 if me.server.lock().unwrap().is_none() { break; }
                 let now = now_ms();
                 me.bridge.tick(now);
-                if now - last > 15_000 {
+                let force = me.bridge.take_rescan();
+                if force || now - last > 15_000 {
                     last = now;
-                    for r in adopt::find_running(&projects, now, 10 * 60_000) {
+                    if force { adopted.clear(); }
+                    for r in adopt::find_running(&projects, now, if force { adopt::RESCAN_MS } else { 10 * 60_000 }) {
                         if adopted.contains(&r.id) || me.bridge.has_session(&r.id) { continue; }
                         adopted.insert(r.id.clone());
                         let mut e = HookEvent::new("SessionStart", &r.id, &r.cwd);

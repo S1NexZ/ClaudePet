@@ -26,4 +26,5 @@ export function localizeHtml(doc: Document = document): void {
   set('btn-new', { title: L('Чат', 'Chat', '聊天'), aria: L('Чат', 'Chat', '聊天') });
   set('btn-settings', { title: L('Настройки', 'Settings', '设置'), aria: L('Настройки', 'Settings', '设置') });
   set('btn-activity', { title: L('Сессии', 'Sessions', '会话'), aria: L('Сессии', 'Sessions', '会话') });
+  set('btn-reload', { title: L('Найти сессии заново', 'Find sessions again', '重新查找会话'), aria: L('Найти сессии заново', 'Find sessions again', '重新查找会话') });
 }
