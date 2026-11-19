@@ -97,7 +97,7 @@ fn main() {
     let runner = SessionRunner::new(Arc::new(bridge.clone()), claude.clone());
     bridge.set_runner(Arc::new(runner));
 
-    let (b1, b2, b3) = (bridge.clone(), bridge.clone(), bridge.clone());
+    let (b1, b2, b3, b4) = (bridge.clone(), bridge.clone(), bridge.clone(), bridge.clone());
     let http = HookServer::start(HookServerOpts {
         port, token: token.clone(), mailbox, wait_ms: 50_000,
         on_event: Box::new(move |e| b1.on_hook(e)),
@@ -108,6 +108,7 @@ fn main() {
         })),
         on_permission: Some(Box::new(move |e, gone| b3.on_permission(e, gone))),
         on_pty: None, on_reply: None,
+        on_command: Some(Box::new(move |_| b4.handle(&json!({ "type": "rescan" })))),
     });
     let http = match http {
         Ok(h) => {

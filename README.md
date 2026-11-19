@@ -54,7 +54,7 @@ Type this once in Claude Code (2.1.287 or later):
 
 The plugin runs inside Claude Code (terminal, the Code tab of the Claude app, VS Code). With it, what you write in the pet arrives in the session as your own message, with no terminal wrapper and no typing into the app's window, and the pet gets your plan limits straight from Claude Code. It only talks to the pet on `127.0.0.1`; `claude plugin validate` lists every call it makes. WSL sessions inside the Claude app do not load plugins, so hooks stay in use there.
 
-In the terminal the plugin also draws a row above the prompt with your 5-hour and weekly limits, reset time and a run-out forecast. `/ccpet limits` turns it off or on.
+In the terminal the plugin also draws a row above the prompt with your 5-hour and weekly limits, reset time and a run-out forecast. `/ccpet find` makes the pet look for running sessions again, `/ccpet limits` turns it off or on.
 
 **First launch warnings.** The builds are not signed with paid certificates yet:
 - **Windows** SmartScreen: "More info" → "Run anyway".

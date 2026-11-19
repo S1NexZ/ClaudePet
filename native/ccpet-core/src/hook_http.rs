@@ -31,6 +31,8 @@ pub struct HookServerOpts {
     pub on_permission: Option<Box<dyn Fn(&HookEvent, &dyn Fn() -> bool) -> Option<Decision> + Send + Sync>>,
     /** an answer for an ordinary event (soft stop: `{"continue": false}`) */
     pub on_reply: Option<Box<dyn Fn(&HookEvent) -> Option<Value> + Send + Sync>>,
+    /** `/cmd/<token>/<name>`: a command from Claude Code's `/ccpet` slash command (only `rescan`: look for sessions again) */
+    pub on_command: Option<Box<dyn Fn(&str) + Send + Sync>>,
     /** how long one mailbox long-poll may last (the hook re-polls) */
     pub wait_ms: u64,
 }
@@ -125,7 +127,14 @@ fn handle(mut c: TcpStream, o: &HookServerOpts) {
     let (path, q) = target.split_once('?').unwrap_or((&target, ""));
     let mut seg = path.split('/').skip(1);
     let (kind, token, rest) = (seg.next().unwrap_or(""), seg.next().unwrap_or(""), seg.next().unwrap_or(""));
-    if !same_token(token, &o.token) || !matches!(kind, "hook" | "mailbox") || rest.is_empty() { return respond(&mut c, 404, None, ""); }
+    if !same_token(token, &o.token) || !matches!(kind, "hook" | "mailbox" | "cmd") || rest.is_empty() { return respond(&mut c, 404, None, ""); }
+
+    if kind == "cmd" {
+        match (rest, o.on_command.as_ref()) {
+            ("rescan", Some(f)) if method == "POST" => { f(rest); return respond(&mut c, 200, None, ""); }
+            _ => return respond(&mut c, 404, None, ""),
+        }
+    }
 
     if kind == "mailbox" && method == "GET" {
         let Some(sid) = decode(rest, false).filter(|s| safe_id(s)) else { return respond(&mut c, 400, None, "") };
@@ -222,6 +231,7 @@ mod tests {
             on_pty: None,
             on_permission: Some(Box::new(|e, _| match e.tool() { "Bash" => Some(Decision::Allow), "Edit" => Some(Decision::Deny), "Ask" => Some(Decision::Updated(json!({ "a": 1 }))), _ => None })),
             on_reply: Some(Box::new(|e| (e.session_id == "stop-me").then(|| json!({ "continue": false })))),
+            on_command: { let g = got.clone(); Some(Box::new(move |c| g.lock().unwrap().push(format!("cmd:{c}")))) },
         }).unwrap();
         (s, mb, got)
     }
@@ -259,6 +269,11 @@ mod tests {
     fn routes_and_events() {
         let (s, _, got) = server(100);
         assert_eq!(req(s.port, "POST", "/hook/wrong/Stop", "{}").0, 404);
+        assert_eq!(req(s.port, "POST", "/cmd/wrong/rescan", "").0, 404);
+        assert_eq!(req(s.port, "GET", "/cmd/abc123/rescan", "").0, 404, "a command is a POST");
+        assert_eq!(req(s.port, "POST", "/cmd/abc123/other", "").0, 404);
+        assert_eq!(req(s.port, "POST", "/cmd/abc123/rescan", "").0, 200);
+        assert!(got.lock().unwrap().iter().any(|x| x == "cmd:rescan"));
         assert_eq!(req(s.port, "GET", "/nothing", "").0, 404);
         assert_eq!(req(s.port, "POST", "/hook/abc123/Stop", "not json").0, 400);
         assert_eq!(req(s.port, "POST", "/hook/abc123/Stop", r#"{"cwd":"/x"}"#).0, 400);
@@ -311,7 +326,7 @@ mod tests {
             port: 0, token: "abc123".into(), mailbox: mb, wait_ms: 50,
             on_event: Box::new(|_| {}), on_waiter: None,
             on_pty: Some(Box::new(move |sid, p| g.lock().unwrap().push(format!("{sid}={p}")))),
-            on_permission: None, on_reply: None,
+            on_permission: None, on_reply: None, on_command: None,
         }).unwrap();
         let get = |q: &str| req(s.port, "GET", &format!("/mailbox/abc123/s1{q}"), "").0;
         assert_eq!(get("?pty=%5C%5C.%5Cpipe%5Cclaude-pet-1234"), 204);

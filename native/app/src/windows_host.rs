@@ -95,7 +95,7 @@ impl WindowsHost {
 
     /** starts the receiver and the tick; Err(text for the user) when the port is taken */
     pub fn start(self: &Arc<Self>) -> Result<(), String> {
-        let (b1, b2, b3, b4, b5) = (self.bridge.clone(), self.bridge.clone(), self.bridge.clone(), self.bridge.clone(), self.bridge.clone());
+        let (b1, b2, b3, b4, b5, b6) = (self.bridge.clone(), self.bridge.clone(), self.bridge.clone(), self.bridge.clone(), self.bridge.clone(), self.bridge.clone());
         let mailbox = self.bridge_mailbox();
         let r = HookServer::start(HookServerOpts {
             port: self.port, token: self.token.clone(), mailbox, wait_ms: 50_000,
@@ -107,6 +107,7 @@ impl WindowsHost {
             on_pty: Some(Box::new(move |sid, pipe| b3.set_pty(sid, pipe))),
             on_permission: Some(Box::new(move |e, gone| b4.on_permission(e, gone))),
             on_reply: Some(Box::new(move |e| b5.hook_reply(e))),
+            on_command: Some(Box::new(move |_| b6.handle(&json!({ "type": "rescan" })))),
         });
         match r {
             Ok(s) => { *self.server.lock().unwrap() = Some(s); }

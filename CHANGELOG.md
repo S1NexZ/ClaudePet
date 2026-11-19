@@ -3,6 +3,10 @@
 Формат: [Keep a Changelog](https://keepachangelog.com/ru/1.1.0/), версии по [SemVer](https://semver.org/lang/ru/).
 
 ## [Не выпущено]
+
+## [0.7.3] — 2026-11-19
+### Добавлено
+- **Команда `/ccpet find` в Claude Code.** Питомец ищет запущенные сессии заново, как по кнопке в доке. Для этого у приёмника хуков появилась команда `/cmd/<токен>/rescan` (только POST). Плагин `ccpet` обновлён до 0.6.12: `/plugin update ccpet`, затем `/reload-plugins`.
 ### Изменено
 - Из репозитория удалён Electron: `main.ts`, `preload.cjs`, конфиг electron-builder и команды `npm run dist`, `dist:linux`, `dist:mac`. Приложение собирается только как Tauri (`npm run dist:tauri`). `scripts/pet.sh` запускает установленный ccPet из `%LOCALAPPDATA%\ccPet`.
 

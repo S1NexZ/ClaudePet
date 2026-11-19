@@ -179,7 +179,7 @@ export function register(on) {
       if (stored.lang === 'ru' || stored.lang === 'en') ru = stored.lang === 'ru'
       if (typeof stored.bandHidden === 'boolean') await update($, bandHidden, () => stored.bandHidden)
     }
-    await $.command.register({ name: 'ccpet', description: 'ccPet: limits (turn the limits row off or on), ru | en (language of the row)' })
+    await $.command.register({ name: 'ccpet', description: 'ccPet: find (look for sessions again), limits (turn the limits row off or on), ru | en (language of the row)' })
     // one poll at a time; a new one starts within a second of the last answer
     $.clock.every(1000, () => poll($))
     // limits as the status line has them (free: no query); session.measure brings each change in between
@@ -207,9 +207,22 @@ export function register(on) {
     const arg = String(e.args || '').trim().toLowerCase()
     const stored = (await $.store.get('prefs')) || {}
     let lang = stored.lang
+    if (arg === 'find' || arg === 'rescan') { // the pet looks for running sessions again (the reload button's job)
+      if (!hub) hub = await readHub($)
+      if (!hub) return { text: ru ? 'ccPet не запущен' : 'ccPet is not running' }
+      try {
+        const r = await $.http.fetch(hub.base + '/cmd/' + hub.token + '/rescan', { method: 'POST' })
+        if (r.status === 200) return { text: ru ? 'ccPet ищет сессии заново' : 'ccPet is looking for sessions again' }
+        hub = null // 404: an older pet without this command, or a stale token
+        return { text: ru ? 'ccPet не принял команду: обновите приложение' : 'ccPet did not accept the command: update the app' }
+      } catch {
+        hub = null
+        return { text: ru ? 'ccPet не запущен' : 'ccPet is not running' }
+      }
+    }
     if (arg === 'limits' || arg === 'band') await update($, bandHidden, (v) => !v)
     else if (arg === 'ru' || arg === 'en') { lang = arg; ru = arg === 'ru'; await update($, limits, (v) => (v ? { ...v } : v)) } // redraw the row in the new language
-    else return { text: 'ccPet: /ccpet limits turns the row above the prompt off or on; /ccpet ru or /ccpet en sets its language.' }
+    else return { text: 'ccPet: /ccpet find makes the pet look for sessions again; /ccpet limits turns the row above the prompt off or on; /ccpet ru or /ccpet en sets its language.' }
     const prefs = { bandHidden: await read($, bandHidden), ...(lang ? { lang } : {}) }
     await $.store.set('prefs', prefs)
     const on2 = (v) => (v ? (ru ? 'вкл' : 'on') : (ru ? 'выкл' : 'off'))
