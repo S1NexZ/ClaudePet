@@ -114,7 +114,10 @@ pub fn load(path: &Path) -> Settings {
 
 pub fn save(path: &Path, s: &Settings) -> std::io::Result<()> {
     let text = serde_json::to_string_pretty(s).map_err(std::io::Error::other)?;
-    std::fs::write(path, text)
+    // a crash mid-write must not leave a broken file (load would silently fall back to defaults): write aside, then rename
+    let tmp = path.with_extension("json.tmp");
+    std::fs::write(&tmp, text)?;
+    std::fs::rename(&tmp, path)
 }
 
 #[cfg(test)]

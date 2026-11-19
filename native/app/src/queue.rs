@@ -149,8 +149,7 @@ mod tests {
         let mut q = MessageQueue::new(Box::new(move |d| *s2.lock().unwrap() = d.clone()), None);
         q.set_clock(Box::new(|| 1.7e12));
         let m = q.add("s1", "a", Some(123.0));
-        assert_eq!(m, json!({ "id": "q", "text": "a", "at": 123 }).as_object().map(|_| m.clone()).unwrap());
-        assert!(m["id"].as_str().unwrap().starts_with('q') && m["id"].as_str().unwrap().ends_with('1'));
+        assert_eq!(m, json!({ "id": "qloyw3v281", "text": "a", "at": 123 })); // q + Date.now() in base 36 + the sequence number
         assert_eq!(m["at"].to_string(), "123");
         let snap = saved.lock().unwrap().clone();
         assert_eq!(snap, json!({ "s1": [m.clone()] }));
