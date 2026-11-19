@@ -9,7 +9,7 @@ mod windows_host;
 mod wsl;
 
 use base64::Engine;
-use ccpet_app::{desktop, diagnostics, merge, placement, queue::MessageQueue, settings::{self, Settings}, terminal, winshell};
+use ccpet_app::{desktop, diagnostics, merge, models, updates, placement, queue::MessageQueue, settings::{self, Settings}, terminal, winshell};
 use std::collections::{HashMap, HashSet};
 use windows_host::WindowsHost;
 use serde::Deserialize;
@@ -54,6 +54,8 @@ struct Ui {
     up: bool,
     /** the default distro's own snapshot, and the merged one the renderer last got */
     wsl_snap: Option<Value>,
+    /** the other followed distros' snapshots, by host id `wsl:<distro>` */
+    other_snaps: HashMap<String, Value>,
     snapshot: Option<Value>,
     last_move: Option<Instant>,
     last_x: Option<f64>,
@@ -73,6 +75,8 @@ struct Ui {
     pending_new_chat: Option<(String, f64, String, Vec<String>)>,
     /** sessions whose SDK-fallback warning the user already accepted */
     warned: HashSet<String>,
+    /** a newer release on GitHub (only told, never installed) */
+    update: Option<updates::Update>,
 }
 
 struct App {
@@ -86,6 +90,8 @@ struct App {
     ui: Mutex<Ui>,
     queue: Mutex<MessageQueue>,
     wsl: Mutex<Option<Arc<wsl::WslHost>>>,
+    /** other running WSL 2 distros: host id `wsl:<name>` -> (its hook port, its bridge) */
+    others: Mutex<Vec<(String, u16, Arc<wsl::WslHost>)>>,
     win: Mutex<Option<Arc<WindowsHost>>>,
     /** the stable copy of pet-helper.exe (mailbox waiter, statusLine, PTY wrapper); None without one */
     helper: Option<String>,
@@ -111,7 +117,16 @@ impl App {
     fn to_bridge(&self, cmd: Value) { if let Some(h) = self.wsl_host() { h.send(&cmd); } }
     fn wsl_host(&self) -> Option<Arc<wsl::WslHost>> { self.wsl.lock().unwrap().clone() }
     fn win_host(&self) -> Option<Arc<WindowsHost>> { self.win.lock().unwrap().clone() }
-    fn to_all_bridges(&self, cmd: Value) { self.to_bridge(cmd.clone()); if let Some(w) = self.win_host() { w.bridge.handle(&cmd); } }
+    fn to_all_bridges(&self, cmd: Value) {
+        self.to_bridge(cmd.clone());
+        for (_, _, h) in self.others.lock().unwrap().iter() { h.send(&cmd); }
+        if let Some(w) = self.win_host() { w.bridge.handle(&cmd); }
+    }
+    /** the WSL bridge of host id `wsl` / `wsl:<distro>` */
+    fn wsl_by_id(&self, id: &str) -> Option<Arc<wsl::WslHost>> {
+        if id == "wsl" { return self.wsl_host(); }
+        self.others.lock().unwrap().iter().find(|(i, _, _)| i == id).map(|(_, _, h)| h.clone())
+    }
     fn desktop_entries(&self) -> HashMap<String, desktop::DesktopEntry> {
         let mut d = self.desktop.lock().unwrap();
         if d.1.map_or(true, |t| t.elapsed() > Duration::from_secs(5)) { d.1 = Some(Instant::now()); d.2 = d.0.by_cli_id(); }
@@ -122,7 +137,13 @@ impl App {
     }
     fn parts(&self) -> Vec<merge::HostPart> {
         let ui = self.ui.lock().unwrap();
-        vec![merge::HostPart { host: "wsl".into(), snap: ui.wsl_snap.clone(), distro: None }, merge::HostPart { host: "windows".into(), snap: ui.win_snap.clone(), distro: None }]
+        let others = self.others.lock().unwrap();
+        // distro names are shown once more than one distro is followed
+        let label = |h: &wsl::WslHost| (!others.is_empty()).then(|| h.distro()).filter(|d| !d.is_empty());
+        let mut v = vec![merge::HostPart { host: "wsl".into(), snap: ui.wsl_snap.clone(), distro: self.wsl.lock().unwrap().as_deref().and_then(label) }];
+        for (id, _, h) in others.iter() { v.push(merge::HostPart { host: id.clone(), snap: ui.other_snaps.get(id).cloned(), distro: label(h).or_else(|| Some(id[4..].to_string())) }); }
+        v.push(merge::HostPart { host: "windows".into(), snap: ui.win_snap.clone(), distro: None });
+        v
     }
 }
 
@@ -284,7 +305,13 @@ fn build_menu(h: &AppHandle) -> tauri::Result<Menu<tauri::Wry>> {
         .map(|v| CheckMenuItem::with_id(h, format!("size:{v}"), format!("{}%", (v * 100.0f64).round()), true, (s.pet_scale - v).abs() < 0.03, None::<&str>))
         .collect::<tauri::Result<_>>()?;
     let size_refs: Vec<&dyn IsMenuItem<tauri::Wry>> = sizes.iter().map(|x| x as &dyn IsMenuItem<tauri::Wry>).collect();
-    let items: Vec<Box<dyn IsMenuItem<tauri::Wry>>> = vec![
+    let update = app.ui.lock().unwrap().update.clone();
+    let mut items: Vec<Box<dyn IsMenuItem<tauri::Wry>>> = vec![];
+    if let Some(u) = &update {
+        items.push(Box::new(MenuItem::with_id(h, "update", l(&format!("Доступна версия {}…", u.version), &format!("Version {} is available…", u.version), &format!("{} 版本可用…", u.version)), true, None::<&str>)?));
+        items.push(Box::new(sep()?));
+    }
+    items.extend::<Vec<Box<dyn IsMenuItem<tauri::Wry>>>>(vec![
         Box::new(MenuItem::with_id(h, "toggle", if visible { l("Скрыть питомца", "Hide the pet", "隐藏宠物") } else { l("Показать питомца", "Show the pet", "显示宠物") }, true, None::<&str>)?),
         Box::new(MenuItem::with_id(h, "hotkey", format!("{}: {}", l("Вызов питомца", "Summon the pet", "唤出宠物"), if s.hotkey.is_empty() { l("выключен", "off", "关") } else { s.hotkey.clone() }), false, None::<&str>)?),
         Box::new(sep()?),
@@ -296,10 +323,11 @@ fn build_menu(h: &AppHandle) -> tauri::Result<Menu<tauri::Wry>> {
         Box::new(CheckMenuItem::with_id(h, "answerKeys", l("Отвечать клавишами Ctrl+Alt+1…9", "Answer with Ctrl+Alt+1…9", "用 Ctrl+Alt+1…9 回答"), true, s.answer_keys, None::<&str>)?),
         Box::new(Submenu::with_id_and_items(h, "size", l("Размер питомца", "Pet size", "宠物大小"), true, &size_refs)?),
         Box::new(CheckMenuItem::with_id(h, "autostart", l("Запускать вместе с Windows", "Start with Windows", "随 Windows 启动"), app.packaged, s.autostart, None::<&str>)?),
+        Box::new(CheckMenuItem::with_id(h, "checkUpdates", l("Проверять обновления (раз в день)", "Check for updates (daily)", "检查更新（每天）"), true, s.check_updates, None::<&str>)?),
         Box::new(sep()?),
         Box::new(MenuItem::with_id(h, "support", l("Поддержать проект ❤", "Support the project ❤", "支持项目 ❤"), true, None::<&str>)?),
         Box::new(MenuItem::with_id(h, "quit", l("Выйти", "Quit", "退出"), true, None::<&str>)?),
-    ];
+    ]);
     let refs: Vec<&dyn IsMenuItem<tauri::Wry>> = items.iter().map(|b| b.as_ref()).collect();
     Menu::with_items(h, &refs)
 }
@@ -323,6 +351,11 @@ fn on_menu(h: &AppHandle, id: &str) {
             if let Some(w) = main_window(h) { let _ = w.emit("pet:answer-keys", app.s().answer_keys); }
         }
         "autostart" => update_settings(h, |s| s.autostart = !s.autostart),
+        "checkUpdates" => {
+            update_settings(h, |s| s.check_updates = !s.check_updates);
+            if app.s().check_updates { let h = h.clone(); std::thread::spawn(move || check_updates(&h)); }
+        }
+        "update" => if let Some(u) = app.ui.lock().unwrap().update.clone() { let _ = h.opener().open_url(u.url, None::<&str>); },
         "support" => { let _ = h.opener().open_url(SUPPORT_URL, None::<&str>); }
         "quit" => h.exit(0),
         x if x.starts_with("size:") => if let Ok(v) = x[5..].parse::<f64>() {
@@ -445,6 +478,42 @@ fn drain_queue(h: &AppHandle) {
 
 fn now_ms() -> f64 { std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0.0, |d| d.as_millis() as f64) }
 
+/** once a day: a newer release only gets told (tray item + notification), never installed */
+fn check_updates(h: &AppHandle) {
+    let app = h.state::<Arc<App>>();
+    if !app.s().check_updates || !app.packaged || app.sandbox { return; }
+    let Some(u) = updates::check_latest(env!("CARGO_PKG_VERSION")) else { return };
+    if app.ui.lock().unwrap().update.as_ref().map(|x| &x.version) == Some(&u.version) { return; }
+    app.log(&format!("update available: {}", u.version));
+    let body = app.l(&format!("Доступна версия {}. Откройте меню в трее, чтобы перейти на страницу релиза.", u.version), &format!("Version {} is available. Open the tray menu to go to the release page.", u.version), &format!("{} 版本已发布。打开托盘菜单进入发布页面。", u.version));
+    app.ui.lock().unwrap().update = Some(u);
+    let _ = h.notification().builder().title("ccPet").body(body).show();
+    refresh_tray(h);
+}
+
+fn follow_distros(h: &AppHandle, bridge: &str) {
+    let mut c = std::process::Command::new("wsl.exe");
+    c.args(["-l", "-v"]);
+    #[cfg(windows)]
+    { use std::os::windows::process::CommandExt; c.creation_flags(0x0800_0000); }
+    let Ok(o) = c.output() else { return };
+    let u16s: Vec<u16> = o.stdout.chunks_exact(2).map(|b| u16::from_le_bytes([b[0], b[1]])).collect();
+    let names = wsl::secondary_distros(&wsl::parse_distro_list(&String::from_utf16_lossy(&u16s)));
+    let app = h.state::<Arc<App>>();
+    for name in names {
+        let id = format!("wsl:{name}");
+        if app.wsl_by_id(&id).is_some() { continue; }
+        // WSL 2 distros share one network namespace: each bridge gets its own hook port, and no limits poller
+        let mut taken: Vec<u16> = vec![47822, windows_host::PORT];
+        taken.extend(app.others.lock().unwrap().iter().map(|(_, p, _)| *p));
+        let port = wsl::port_for_distro(&name, &taken);
+        app.log(&format!("following WSL distro {name}"));
+        let exports = vec![("CLAUDE_PET_HOOK_PORT".into(), port.to_string()), ("CLAUDE_PET_LIVE_USAGE".into(), "0".into())];
+        let host = wsl::WslHost::start(name.clone(), bridge.to_string(), exports, Arc::new(Events { handle: h.clone(), id: id.clone() }));
+        app.others.lock().unwrap().push((id, port, host));
+    }
+}
+
 /** limits come from every host (the WSL bridge, the Windows status line): the ring shows the freshest numbers */
 fn host_usage(h: &AppHandle, host: &str, u: Value) {
     let app = h.state::<Arc<App>>();
@@ -463,18 +532,20 @@ fn windows_message(h: &AppHandle, m: Value) {
 }
 
 /** the WSL bridge's messages, as main.ts handles them */
-struct Events { handle: AppHandle }
+struct Events { handle: AppHandle, id: String }
 impl wsl::HostEvents for Events {
     fn ready(&self, claude: &str) {
         let app = self.handle.state::<Arc<App>>();
         let s = app.s();
-        app.ui.lock().unwrap().hooks_manual = false;
-        app.to_bridge(json!({ "type": "language", "lang": *app.lang.lock().unwrap() }));
-        app.to_bridge(json!({ "type": "permission-mode", "mode": s.permissions }));
-        app.to_bridge(json!({ "type": "hook-permissions", "on": s.answer_permissions }));
-        app.to_bridge(json!({ "type": "sdk-chats", "on": s.sdk_chats }));
-        if !app.sandbox { app.to_bridge(json!({ "type": "hooks", "apply": false })); }
-        if claude.is_empty() {
+        let Some(host) = app.wsl_by_id(&self.id) else { return };
+        let primary = self.id == "wsl";
+        if primary { app.ui.lock().unwrap().hooks_manual = false; }
+        host.send(&json!({ "type": "language", "lang": *app.lang.lock().unwrap() }));
+        host.send(&json!({ "type": "permission-mode", "mode": s.permissions }));
+        host.send(&json!({ "type": "hook-permissions", "on": s.answer_permissions }));
+        host.send(&json!({ "type": "sdk-chats", "on": s.sdk_chats }));
+        if primary && !app.sandbox { host.send(&json!({ "type": "hooks", "apply": false })); }
+        if primary && claude.is_empty() {
             let h = self.handle.clone();
             std::thread::spawn(move || { let app = h.state::<Arc<App>>(); info(&h, &app.l("Claude Code не найден в WSL", "Claude Code not found in WSL", "在 WSL 中未找到 Claude Code"), &app.l("Установи Claude Code в WSL, чтобы питомец мог запускать сессии.", "Install Claude Code in WSL so the pet can start sessions.", "请在 WSL 中安装 Claude Code，宠物才能启动会话。")); });
         }
@@ -482,7 +553,11 @@ impl wsl::HostEvents for Events {
     }
     fn up(&self, up: bool) {
         let app = self.handle.state::<Arc<App>>();
-        let any = { let mut ui = app.ui.lock().unwrap(); ui.up = up; if !up { ui.wsl_snap = None; } ui.up || ui.win_up };
+        let any = {
+            let mut ui = app.ui.lock().unwrap();
+            if self.id == "wsl" { ui.up = up; if !up { ui.wsl_snap = None; } } else if !up { ui.other_snaps.remove(&self.id); }
+            ui.up || ui.win_up
+        };
         let _ = self.handle.emit("pet:bridge", any);
         if !up { push_snapshot(&self.handle); }
         refresh_tray(&self.handle);
@@ -490,9 +565,12 @@ impl wsl::HostEvents for Events {
     fn message(&self, m: Value) {
         let app = self.handle.state::<Arc<App>>();
         match m["type"].as_str() {
-            Some("snapshot") => { app.ui.lock().unwrap().wsl_snap = Some(m); push_snapshot(&self.handle); }
-            Some("usage") => host_usage(&self.handle, "wsl", m["usage"].clone()),
-            Some("hooks") => { let h = self.handle.clone(); std::thread::spawn(move || on_hooks(&h, &m)); }
+            Some("snapshot") => {
+                { let mut ui = app.ui.lock().unwrap(); if self.id == "wsl" { ui.wsl_snap = Some(m); } else { ui.other_snaps.insert(self.id.clone(), m); } }
+                push_snapshot(&self.handle);
+            }
+            Some("usage") => host_usage(&self.handle, &self.id, m["usage"].clone()),
+            Some("hooks") => { if self.id == "wsl" { let h = self.handle.clone(); std::thread::spawn(move || on_hooks(&h, &m)); } }
             Some("statusline") | Some("termMark") => {} // M3: connections panel, terminal focus
             _ => { let _ = self.handle.emit("pet:msg", m); }
         }
@@ -526,6 +604,7 @@ fn route(h: &AppHandle, cmd: Value) {
     let parts = app.parts();
     let host = if cmd["type"] == "permission" { merge::host_of_permission(cmd["id"].as_str().unwrap_or(""), &parts) } else { cmd["sessionId"].as_str().and_then(|id| merge::host_of(id, &parts)) };
     if host.as_deref() == Some("windows") { if let Some(w) = app.win_host() { w.bridge.handle(&cmd); } return; }
+    if let Some(w) = host.as_deref().filter(|h| h.starts_with("wsl:")).and_then(|h| app.wsl_by_id(h)) { w.send(&cmd); return; }
     app.to_bridge(cmd);
 }
 
@@ -707,6 +786,110 @@ async fn pick_folder(h: AppHandle) -> Option<String> {
         .await.ok().flatten()
 }
 
+// ---------- pet models: list, switch, install from a ZIP / an npm pet folder, remove ----------
+
+fn bundled_models(app: &App) -> PathBuf { app.models_dirs[0].clone() }
+fn user_models(app: &App) -> PathBuf { app.models_dirs[1].clone() }
+fn codex_dir() -> PathBuf { std::env::var("USERPROFILE").map(PathBuf::from).unwrap_or_default().join(".codex").join("pets") }
+
+fn models_for_ui(app: &App) -> Value {
+    let all = models::list_models(&bundled_models(app), &user_models(app));
+    let active = models::pick_model(&all, Some(&app.s().model)).map(|m| m.id.clone());
+    Value::Array(all.iter().map(|m| json!({ "id": m.id, "name": m.name, "description": m.description, "source": m.source, "bundled": m.bundled, "active": Some(&m.id) == active.as_ref() })).collect())
+}
+fn find_model(app: &App, id: &str) -> Option<models::ModelInfo> {
+    models::is_model_id(id).then(|| models::list_models(&bundled_models(app), &user_models(app)).into_iter().find(|m| m.id == id)).flatten()
+}
+fn fail_text(app: &App, e: &models::Error) -> String {
+    match e { models::Error::Model(m) => m.0.clone(), models::Error::Other(x) => { app.log(&format!("models: {x}")); app.l("Не удалось выполнить операцию с моделью. Подробности в журнале приложения.", "The model operation failed. See the app log for details.", "模型操作失败。详情见应用日志。") } }
+}
+fn install_with(h: &AppHandle, f: impl FnOnce(&models::InstallOpts) -> Result<models::ModelInfo, models::Error>) -> Value {
+    let app = h.state::<Arc<App>>();
+    let lang = *app.lang.lock().unwrap();
+    let (bd, ud) = (bundled_models(&app), user_models(&app));
+    let progress = |p: models::InstallProgress| { let _ = h.emit("pet:models:progress", p); };
+    let o = models::InstallOpts { user_dir: &ud, bundled_dir: &bd, lang, on_progress: Some(&progress) };
+    match f(&o) { Ok(m) => json!({ "ok": true, "model": { "id": m.id, "name": m.name }, "models": models_for_ui(&app) }), Err(e) => json!({ "ok": false, "error": fail_text(&app, &e) }) }
+}
+
+#[tauri::command]
+fn models_list(app: St) -> Value { models_for_ui(&app) }
+
+#[tauri::command]
+fn models_data(app: St, id: String) -> Value { find_model(&app, &id).and_then(|m| pet_payload(&m.dir).ok()).unwrap_or(Value::Null) }
+
+#[tauri::command]
+fn models_use(h: AppHandle, app: St, id: String) -> Value {
+    let Some(m) = find_model(&app, &id) else { return json!({ "ok": false, "error": app.l("Такой модели нет.", "There is no such model.", "没有这个模型。") }) };
+    match pet_payload(&m.dir) {
+        Ok(pet) => { update_settings(&h, |s| s.model = m.id.clone()); json!({ "ok": true, "pet": pet, "models": models_for_ui(&app) }) }
+        Err(e) => { app.log(&format!("models: {e}")); json!({ "ok": false, "error": app.l("Не удалось выполнить операцию с моделью. Подробности в журнале приложения.", "The model operation failed. See the app log for details.", "模型操作失败。详情见应用日志。") }) }
+    }
+}
+
+#[tauri::command]
+async fn models_install_zip(h: AppHandle, path: Option<String>) -> Value {
+    tauri::async_runtime::spawn_blocking(move || {
+        let app = h.state::<Arc<App>>();
+        let file = match path.filter(|p| !p.is_empty()) {
+            Some(p) => PathBuf::from(p),
+            None => {
+                let picked = h.dialog().file().set_title(app.l("Установить модель питомца", "Install a pet model", "安装宠物模型"))
+                    .add_filter(app.l("Модель питомца (ZIP)", "Pet model (ZIP)", "宠物模型 (ZIP)"), &["zip"]).blocking_pick_file();
+                match picked.and_then(|p| p.into_path().ok()) { Some(p) => p, None => return json!({ "ok": false, "canceled": true }) }
+            }
+        };
+        install_with(&h, |o| models::install_model_from_zip(&file, o))
+    }).await.unwrap_or(Value::Null)
+}
+
+#[tauri::command]
+async fn models_remove(h: AppHandle, id: String) -> Value {
+    tauri::async_runtime::spawn_blocking(move || {
+        let app = h.state::<Arc<App>>();
+        let m = find_model(&app, &id);
+        let Some(m) = m.filter(|m| !m.bundled) else {
+            return json!({ "ok": false, "error": if find_model(&app, &id).is_some() { app.l("Встроенную модель удалить нельзя.", "A built-in model cannot be removed.", "内置模型无法删除。") } else { app.l("Такой модели нет.", "There is no such model.", "没有这个模型。") } });
+        };
+        if !confirm(&h, &app.l(&format!("Удалить модель «{}»?", m.name), &format!("Delete the model “{}”?", m.name), &format!("删除模型“{}”？", m.name)),
+            &app.l("Файлы модели будут удалены с компьютера. Встроенные модели и настройки не затрагиваются.", "The model files will be deleted from this computer. Built-in models and settings are not affected.", "模型文件将从此电脑删除。内置模型和设置不受影响。"),
+            &app.l("Удалить", "Delete", "删除"), &app.l("Отмена", "Cancel", "取消")) { return json!({ "ok": false, "canceled": true }); }
+        let lang = *app.lang.lock().unwrap();
+        if let Err(e) = models::remove_model(&m.id, &user_models(&app), &bundled_models(&app), lang) { return json!({ "ok": false, "error": fail_text(&app, &e) }); }
+        let mut pet = Value::Null;
+        if app.s().model == m.id { // the active one is gone: back to the default
+            update_settings(&h, |s| s.model = settings::DEFAULT_MODEL.into());
+            if let Some(d) = model_dir(&app.models_dirs, settings::DEFAULT_MODEL) { pet = pet_payload(&d).unwrap_or(Value::Null); }
+        }
+        json!({ "ok": true, "models": models_for_ui(&app), "pet": pet })
+    }).await.unwrap_or(Value::Null)
+}
+
+#[tauri::command]
+fn models_codex_scan(app: St) -> Value {
+    let have: HashSet<String> = models::list_models(&bundled_models(&app), &user_models(&app)).into_iter().map(|m| m.id).collect();
+    let dir = codex_dir();
+    let found = models::scan_pet_folder(&dir);
+    json!({ "dir": dir, "exists": !found.is_empty() || dir.exists(), "found": found.iter().map(|f| json!({ "id": f.id, "name": f.name, "installed": have.contains(&f.id) })).collect::<Vec<_>>() })
+}
+
+#[tauri::command]
+async fn models_codex_import(h: AppHandle, id: String) -> Value {
+    tauri::async_runtime::spawn_blocking(move || {
+        let app = h.state::<Arc<App>>();
+        // only folders that the scan itself found
+        let Some(f) = models::scan_pet_folder(&codex_dir()).into_iter().find(|x| x.id == id) else { return json!({ "ok": false, "error": app.l("Папка модели не найдена.", "Model folder not found.", "未找到模型文件夹。") }) };
+        install_with(&h, |o| models::install_model_from_dir(&f.dir, o))
+    }).await.unwrap_or(Value::Null)
+}
+
+#[tauri::command]
+fn models_reveal(h: AppHandle, app: St) {
+    let d = user_models(&app);
+    let _ = std::fs::create_dir_all(&d);
+    let _ = h.opener().open_path(d.to_string_lossy(), None::<&str>);
+}
+
 // ---------- connections: our hooks in each host's settings.json (always with the diff and the user's consent) ----------
 
 fn confirm_hooks(h: &AppHandle, title: &str, items: &[(String, String)], note: Option<String>) -> bool {
@@ -740,18 +923,23 @@ fn last_event_by_host(app: &App) -> std::collections::BTreeMap<String, f64> {
     diagnostics::last_event_by_host(&sessions)
 }
 
-fn wsl_row(app: &App) -> Value {
+fn wsl_row(app: &App, id: &str) -> Value {
     let s = app.s();
     let last = last_event_by_host(app);
-    let Some(w) = app.wsl_host() else { return json!({ "id": "wsl", "up": false }) };
+    let Some(w) = app.wsl_by_id(id) else { return json!({ "id": id, "up": false }) };
+    let primary = id == "wsl";
+    let port = app.others.lock().unwrap().iter().find(|(i, _, _)| i == id).map(|(_, p, _)| *p);
     let hk = w.request(&json!({ "type": "hooks", "apply": false, "permissions": s.answer_permissions }), "hooks").unwrap_or(Value::Null);
-    let sl = w.request(&json!({ "type": "statusline" }), "statusline").unwrap_or(Value::Null);
-    json!({ "id": "wsl", "statusLine": sl["kind"], "statusLineDiff": sl["diff"].as_str().unwrap_or(""), "statusLineError": sl["error"], "up": w.is_up(), "distro": w.distro(),
-        "events": hk["events"] == true, "mailbox": hk["mailbox"] == true, "permissions": hk["permissions"] == true, "diff": hk["diff"].as_str().unwrap_or(""), "error": hk["error"], "lastEventAt": last.get("wsl") })
+    // the limits ring is fed from the default distro's status line
+    let sl = if primary { w.request(&json!({ "type": "statusline" }), "statusline").unwrap_or(Value::Null) } else { Value::Null };
+    json!({ "id": id, "port": port, "statusLine": sl["kind"], "statusLineDiff": sl["diff"].as_str().unwrap_or(""), "statusLineError": sl["error"], "up": w.is_up(), "distro": w.distro(),
+        "events": hk["events"] == true, "mailbox": hk["mailbox"] == true, "permissions": hk["permissions"] == true, "diff": hk["diff"].as_str().unwrap_or(""), "error": hk["error"], "lastEventAt": last.get(id) })
 }
 
 fn connections_state(app: &App) -> Value {
     let s = app.s();
+    let ids: Vec<String> = app.others.lock().unwrap().iter().map(|(i, _, _)| i.clone()).collect();
+    let others: Vec<Value> = ids.iter().map(|i| wsl_row(app, i)).collect();
     let last = last_event_by_host(app);
     let windows = match app.win_host() {
         Some(w) => {
@@ -765,7 +953,7 @@ fn connections_state(app: &App) -> Value {
         None => json!({ "events": false, "mailbox": false, "permissions": false, "port": 0, "up": false, "settingsPath": "", "diff": "", "statusLine": "none", "statusLineDiff": "" }),
     };
     json!({ "native": false, "answerPermissions": s.answer_permissions, "sdkChats": s.sdk_chats, "newChatIn": s.new_chat_in, "desktopSend": s.desktop_send,
-        "helper": app.helper.is_some(), "helperPath": app.helper, "wrapper": wrapper_state(app), "windows": windows, "wsl": wsl_row(app), "others": [] })
+        "helper": app.helper.is_some(), "helperPath": app.helper, "wrapper": wrapper_state(app), "windows": windows, "wsl": wsl_row(app, "wsl"), "others": others })
 }
 
 /** Our Windows entries are there but out of date (the app moved, the helper changed, the token is new): offer to update them once per start. */
@@ -839,8 +1027,8 @@ fn connections_apply_now(h: &AppHandle, host: &str, action: &str) {
         if !diff.is_empty() && confirm_hooks(h, &title, &[(windows_settings_label(), diff)], None) {
             if let Err(e) = if remove { w.remove() } else { w.apply(perm) } { info(h, &cant_write(), &e); }
         }
-    } else if host == "wsl" && !app.sandbox {
-        let Some(w) = app.wsl_host() else { return };
+    } else if host.starts_with("wsl") && !app.sandbox {
+        let Some(w) = app.wsl_by_id(host) else { return };
         let label = format!("WSL{}", if w.distro().is_empty() { String::new() } else { format!(": {}", w.distro()) });
         if action == "statusline" || action == "statusline-off" {
             let off = action == "statusline-off";
@@ -899,14 +1087,22 @@ async fn answer_permissions(h: AppHandle, on: bool) -> Value {
         let ws = app.win_host().map(|w| w.state(on)).unwrap_or(Value::Null);
         let win_diff = ws["diff"].as_str().unwrap_or("").to_string();
         if ws["events"] == true && ws.get("error").is_none() && !win_diff.is_empty() { items.push((windows_settings_label(), win_diff.clone())); }
-        let wsl = if app.sandbox { None } else { app.wsl_host() };
-        let wp = wsl.as_ref().and_then(|w| w.request(&json!({ "type": "hooks", "apply": false, "permissions": on }), "hooks")).unwrap_or(Value::Null);
-        let wsl_diff = wp["diff"].as_str().unwrap_or("").to_string();
-        if wp["events"] == true && wp.get("error").map_or(true, Value::is_null) && !wsl_diff.is_empty() { items.push(("~/.claude/settings.json (WSL)".into(), wsl_diff.clone())); }
+        let mut hosts: Vec<Arc<wsl::WslHost>> = vec![];
+        if !app.sandbox { hosts.extend(app.wsl_host()); hosts.extend(app.others.lock().unwrap().iter().map(|(_, _, h)| h.clone())); }
+        let mut wsl_apply = vec![];
+        for w in hosts {
+            let wp = w.request(&json!({ "type": "hooks", "apply": false, "permissions": on }), "hooks").unwrap_or(Value::Null);
+            let d = wp["diff"].as_str().unwrap_or("").to_string();
+            if wp["events"] == true && wp.get("error").map_or(true, Value::is_null) && !d.is_empty() {
+                let label = if w.distro().is_empty() { "WSL".to_string() } else { format!("WSL: {}", w.distro()) };
+                items.push((format!("~/.claude/settings.json ({label})"), d));
+                wsl_apply.push(w);
+            }
+        }
         let title = if on { app.l("Отвечать на разрешения в питомце?", "Answer permission questions in the pet?", "在宠物中回答权限请求？") } else { app.l("Больше не отвечать на разрешения в питомце?", "Stop answering permission questions in the pet?", "不再在宠物中回答权限请求？") };
         if !items.is_empty() && !confirm_hooks(&h, &title, &items, None) { return connections_state(&app); }
         if !win_diff.is_empty() && ws["events"] == true { if let Some(w) = app.win_host() { if let Err(e) = w.apply(on) { info(&h, &app.l("Не удалось записать настройки", "Could not write the settings", "无法写入设置"), &e); } } }
-        if !wsl_diff.is_empty() { if let Some(w) = &wsl { w.request(&json!({ "type": "hooks", "apply": true, "permissions": on }), "hooks"); } }
+        for w in wsl_apply { w.request(&json!({ "type": "hooks", "apply": true, "permissions": on }), "hooks"); }
         update_settings(&h, |s| s.answer_permissions = on);
         app.to_all_bridges(json!({ "type": "hook-permissions", "on": on }));
         connections_state(&app)
@@ -960,7 +1156,7 @@ fn open_terminal(h: AppHandle, session_id: String) {
             launch(&app, |wt| terminal::windows_terminal_command(&cwd, &session_id, wt));
             return;
         }
-        let Some(w) = app.wsl_host() else { return };
+        let Some(w) = app.wsl_by_id(s["hostId"].as_str().unwrap_or("wsl")).or_else(|| app.wsl_host()) else { return };
         let owned = s["owned"] == true;
         if !owned {
             if w.mark_terminal(&session_id, &mark) { std::thread::sleep(Duration::from_millis(350)); if winshell::focus_by_title(&mark) { return; } }
@@ -1101,7 +1297,7 @@ fn main() {
         settings: Mutex::new(settings),
         helper,
         desktop: Mutex::new((desktop::DesktopRegistry::new(move || desktop::find_registry_roots(&std::env::var("LOCALAPPDATA").unwrap_or_default(), &std::env::var("APPDATA").unwrap_or_default())), None, HashMap::new())),
-        push_lock: Mutex::new(()), keys_lock: Mutex::new(()), ps_policy: Mutex::new(None), win: Mutex::new(None),
+        others: Mutex::new(vec![]), push_lock: Mutex::new(()), keys_lock: Mutex::new(()), ps_policy: Mutex::new(None), win: Mutex::new(None),
         queue: Mutex::new(MessageQueue::new(Box::new(move |d| { let _ = std::fs::write(&qf, d.to_string()); }), loaded)),
         data_dir, ui: Mutex::new(Ui::default()), wsl: Mutex::new(None),
     });
@@ -1116,7 +1312,7 @@ fn main() {
         .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_opener::init())
         .manage(app.clone())
-        .invoke_handler(tauri::generate_handler![config, cmd, rects, hover_rects, resize, focus, start_drag, context_menu, set_scale, set_appearance, set_permissions, set_language, copy_text, open_url, notify, pick_folder, open_terminal, connections, connections_apply, answer_permissions, sdk_chats, new_chat_in, desktop_send, diagnostics_report])
+        .invoke_handler(tauri::generate_handler![config, cmd, rects, hover_rects, resize, focus, start_drag, context_menu, set_scale, set_appearance, set_permissions, set_language, copy_text, open_url, notify, pick_folder, open_terminal, connections, connections_apply, answer_permissions, sdk_chats, new_chat_in, desktop_send, diagnostics_report, models_list, models_data, models_use, models_install_zip, models_remove, models_codex_scan, models_codex_import, models_reveal])
         .setup(move |tapp| {
             let handle = tapp.handle().clone();
             let anchor = start_anchor(&app, &handle);
@@ -1157,7 +1353,7 @@ fn main() {
             let exports = if app.sandbox {
                 vec![("CLAUDE_PET_DIR".into(), "$HOME/.claude-pet-tauri".into()), ("CLAUDE_PET_HOOK_PORT".into(), "47993".into()), ("CLAUDE_PET_LIVE_USAGE".into(), "0".into())]
             } else { vec![] };
-            *app.wsl.lock().unwrap() = Some(wsl::WslHost::start(bridge.to_string_lossy().into_owned(), exports, Arc::new(Events { handle: handle.clone() })));
+            *app.wsl.lock().unwrap() = Some(wsl::WslHost::start(String::new(), bridge.to_string_lossy().into_owned(), exports, Arc::new(Events { handle: handle.clone(), id: "wsl".into() })));
             // the Windows host: Claude Code's HTTP hooks on 127.0.0.1:47821; a sandbox leaves that port to the running pet (CCPET_WIN_PORT
             // gives it its own, with its own token: nothing installed points there, it only adopts sessions from transcripts)
             let win_port = if app.sandbox { std::env::var("CCPET_WIN_PORT").ok().and_then(|p| p.parse::<u16>().ok()) } else { Some(windows_host::PORT) };
@@ -1198,6 +1394,19 @@ fn main() {
                     if let Ok(o) = c.output() { *h6.state::<Arc<App>>().ps_policy.lock().unwrap() = Some(String::from_utf8_lossy(&o.stdout).trim().to_string()); }
                 });
             }
+            // other running WSL 2 distros are followed too (a stopped one is never started); checked every 30 s
+            if !app.sandbox {
+                let (h7, bridge7) = (handle.clone(), bridge.to_string_lossy().into_owned());
+                std::thread::spawn(move || {
+                    std::thread::sleep(Duration::from_secs(4));
+                    loop {
+                        follow_distros(&h7, &bridge7);
+                        std::thread::sleep(Duration::from_secs(30));
+                    }
+                });
+            }
+            let h8 = handle.clone();
+            std::thread::spawn(move || { std::thread::sleep(Duration::from_secs(20)); loop { check_updates(&h8); std::thread::sleep(Duration::from_secs(24 * 3600)); } });
             // timed messages and turns that ended without a fresh snapshot
             let h2 = handle.clone();
             std::thread::spawn(move || loop { std::thread::sleep(Duration::from_secs(2)); drain_queue(&h2); });
@@ -1209,6 +1418,8 @@ fn main() {
         .run(|h, e| if let tauri::RunEvent::Exit = e {
             let app = h.state::<Arc<App>>();
             if let Some(w) = app.wsl.lock().unwrap().take() { w.stop(); }
+            let others: Vec<_> = app.others.lock().unwrap().drain(..).collect();
+            for (_, _, w) in others { w.stop(); }
             let win = app.win.lock().unwrap().take();
             if let Some(w) = win { w.stop(); }
         });

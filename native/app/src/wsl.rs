@@ -66,13 +66,15 @@ fn each_line(r: impl Read, mut f: impl FnMut(&str)) {
 }
 
 impl WslHost {
-    pub fn start(bridge_win_path: String, exports: Vec<(String, String)>, ev: Arc<dyn HostEvents>) -> Arc<WslHost> {
+    /** `distro` '' = the default one */
+    pub fn start(distro: String, bridge_win_path: String, exports: Vec<(String, String)>, ev: Arc<dyn HostEvents>) -> Arc<WslHost> {
         let host = Arc::new(WslHost { stdin: Mutex::new(None), child: Mutex::new(None), stopped: AtomicBool::new(false), up: AtomicBool::new(false), claude: Mutex::new(String::new()), distro: Mutex::new(String::new()), waiters: Mutex::new(HashMap::new()), marks: Mutex::new(HashMap::new()) });
         let h = host.clone();
         std::thread::spawn(move || {
             let mut backoff = 1000u64;
             while !h.stopped.load(Ordering::SeqCst) {
                 let mut cmd = Command::new("wsl.exe");
+                if !distro.is_empty() { cmd.args(["-d", &distro]); }
                 cmd.args(["-e", "bash", "-c", &script(&to_wsl_path(&bridge_win_path), &exports)])
                     .stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped());
                 #[cfg(windows)]
@@ -170,8 +172,52 @@ impl WslHost {
     }
 }
 
+pub struct Distro { pub name: String, pub running: bool, pub is_default: bool, pub version: u32 }
+
+/** `wsl.exe -l -v` output (already decoded from UTF-16) -> distros; the default one is marked with `*` (wslHost.ts parseDistroList) */
+pub fn parse_distro_list(text: &str) -> Vec<Distro> {
+    let text = text.replace('\0', "");
+    text.lines().skip(1).filter_map(|raw| {
+        let l = raw.trim_end();
+        let (is_default, rest) = match l.trim_start().strip_prefix('*') { Some(r) => (true, r.trim_start()), None => (false, l.trim_start()) };
+        let (head, version) = rest.rsplit_once(char::is_whitespace)?;
+        let version: u32 = version.parse().ok().filter(|_| version.len() == 1)?;
+        let (name, state) = head.trim_end().rsplit_once(char::is_whitespace)?;
+        let name = name.trim_end();
+        // the name is separated from the state by at least two spaces
+        if name.is_empty() || !head.trim_end()[name.len()..].starts_with("  ") { return None; }
+        Some(Distro { name: name.into(), running: state.eq_ignore_ascii_case("running"), is_default, version })
+    }).collect()
+}
+
+/** distros worth following besides the default: running WSL 2 ones (a stopped one is never started), not Docker's internal ones */
+pub fn secondary_distros(list: &[Distro]) -> Vec<String> {
+    list.iter().filter(|d| d.running && !d.is_default && d.version == 2 && !d.name.to_lowercase().starts_with("docker-desktop")).map(|d| d.name.clone()).collect()
+}
+
+/** a stable port per distro name in 47900-47999; `taken` ports are skipped (portForDistro) */
+pub fn port_for_distro(name: &str, taken: &[u16]) -> u16 {
+    let mut h: u32 = 0;
+    for ch in name.encode_utf16() { h = h.wrapping_mul(31).wrapping_add(ch as u32); }
+    let mut p = 47900 + (h % 100) as u16;
+    while taken.contains(&p) { p = if p >= 47999 { 47900 } else { p + 1 }; }
+    p
+}
+
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn distro_list() {
+        let t = "  NAME                   STATE           VERSION\r\n* Ubuntu                 Running         2\r\n  Debian                 Stopped         2\r\n  My Distro              Running         2\r\n  docker-desktop         Running         2\r\n  Old                    Running         1\r\n";
+        let l = super::parse_distro_list(t);
+        assert_eq!(l.len(), 5);
+        assert!(l[0].is_default && l[0].running && l[0].name == "Ubuntu");
+        assert_eq!(l[2].name, "My Distro");
+        assert_eq!(super::secondary_distros(&l), vec!["My Distro".to_string()]);
+        let p = super::port_for_distro("Debian", &[]);
+        assert!((47900..=47999).contains(&p));
+        assert_ne!(super::port_for_distro("Debian", &[p]), p);
+    }
     use super::*;
     #[test]
     fn paths_and_script() {

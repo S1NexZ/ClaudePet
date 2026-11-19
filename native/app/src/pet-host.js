@@ -12,6 +12,21 @@
     for (const ev of EVENTS) window.__TAURI__.event.listen(ev, (e) => (handlers[ev] ? handlers[ev](e.payload) : (queued[ev] ??= []).push(e.payload)));
   };
   subscribe();
+  // Files dropped on the window: the webview gets no path for a File, Tauri does. Its drop is re-sent to the element under the cursor
+  // as an ordinary DOM drop (same file names); pathForFile() then answers with the real path.
+  const dropped = new Map();
+  const onDrop = () => {
+    if (!window.__TAURI__?.event) { setTimeout(onDrop, 0); return; }
+    window.__TAURI__.event.listen('tauri://drag-drop', (e) => {
+      const { paths = [], position = { x: 0, y: 0 } } = e.payload || {};
+      const el = document.elementFromPoint(position.x / devicePixelRatio, position.y / devicePixelRatio);
+      if (!el || !paths.length) return;
+      const dt = new DataTransfer();
+      for (const p of paths) { const name = p.split(/[\\/]/).pop(); dropped.set(name, p); dt.items.add(new File([], name)); }
+      el.dispatchEvent(new DragEvent('drop', { dataTransfer: dt, bubbles: true, cancelable: true }));
+    });
+  };
+  onDrop();
   const on = (ev, cb) => { handlers[ev] = cb; for (const p of queued[ev]?.splice(0) ?? []) cb(p); };
   // not there yet in this build (later milestones): a harmless answer instead of an error
   const later = (value = null) => () => Promise.resolve(value);
@@ -45,8 +60,16 @@
     resize: (_w, h) => fire('resize', { h }),
     onMoving: (cb) => on('pet:moving', cb),
     models: {
-      list: later([]), data: later(null), use: later(null), installZip: later(null), remove: later(null),
-      codexScan: later([]), codexImport: later(null), onProgress: (cb) => on('pet:models:progress', cb), reveal: none, pathForFile: () => '',
+      list: () => invoke('models_list'),
+      data: (id) => invoke('models_data', { id: String(id) }),
+      use: (id) => invoke('models_use', { id: String(id) }),
+      installZip: (path) => invoke('models_install_zip', { path: typeof path === 'string' ? path : null }),
+      remove: (id) => invoke('models_remove', { id: String(id) }),
+      codexScan: () => invoke('models_codex_scan'),
+      codexImport: (id) => invoke('models_codex_import', { id: String(id) }),
+      onProgress: (cb) => on('pet:models:progress', cb),
+      reveal: () => fire('models_reveal'),
+      pathForFile: (f) => dropped.get(f?.name) ?? '',
     },
     copyText: (t) => fire('copy_text', { text: String(t) }),
     openUrl: (u) => fire('open_url', { url: String(u) }),
