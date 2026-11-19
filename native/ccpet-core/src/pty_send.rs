@@ -1,7 +1,9 @@
 //! Typing into a `pet-claude.py` PTY socket: prompts, Esc, terminal titles (ptySend.ts).
 
 use crate::i18n::l;
-use std::io::{Read, Write};
+#[cfg(unix)]
+use std::io::Read;
+use std::io::Write;
 use std::time::Duration;
 
 pub const ENTER: &str = "\r";
@@ -44,7 +46,24 @@ pub fn write_pty(sock: &str, chunks: &[&str], gap_ms: u64) -> Result<(), PtyGone
     let _ = c.shutdown(std::net::Shutdown::Both);
     Ok(())
 }
-#[cfg(not(unix))]
+/** The Windows wrapper's pipe (hookHttp.ts PIPE_NAME): `\\.\pipe\claude-pet-<1..10 digits>`. */
+pub fn is_pipe_name(s: &str) -> bool {
+    s.strip_prefix(r"\\.\pipe\claude-pet-").map_or(false, |d| (1..=10).contains(&d.len()) && d.bytes().all(|b| b.is_ascii_digit()))
+}
+
+/** Same as the unix path over a named pipe. shortcut: no output drain (a blocking read on a synchronous handle would stall our writes), fine for a short-lived connection. */
+#[cfg(windows)]
+pub fn write_pty(sock: &str, chunks: &[&str], gap_ms: u64) -> Result<(), PtyGone> {
+    if !is_pipe_name(sock) { return Err(PtyGone); }
+    let mut c = std::fs::OpenOptions::new().read(true).write(true).open(sock).map_err(|_| PtyGone)?;
+    for (i, ch) in chunks.iter().enumerate() {
+        if i > 0 { std::thread::sleep(Duration::from_millis(gap_ms)); }
+        c.write_all(ch.as_bytes()).map_err(|_| PtyGone)?;
+    }
+    std::thread::sleep(Duration::from_millis(40)); // let the helper read the last chunk before the handle closes
+    Ok(())
+}
+#[cfg(not(any(unix, windows)))]
 pub fn write_pty(_sock: &str, _chunks: &[&str], _gap_ms: u64) -> Result<(), PtyGone> { Err(PtyGone) }
 
 pub fn send_prompt(sock: &str, text: &str, gap_ms: u64) -> Result<(), PtyGone> {
@@ -58,6 +77,20 @@ pub fn send_esc(sock: &str) -> Result<(), PtyGone> { write_pty(sock, &[ESC], 300
 pub fn title_chunk(title: &str) -> String {
     let t: String = sanitize(title).replace(['\n', '\t'], " ").chars().take(120).collect();
     format!("\x1b]ccpet-title;{t}\x07")
+}
+
+/** Windows wrapper: titles the terminal window/tab so the pet can raise it (sendTitle). */
+pub fn send_title(sock: &str, title: &str) -> Result<(), PtyGone> { write_pty(sock, &[&title_chunk(title)], 300) }
+
+#[cfg(test)]
+mod name_tests {
+    use super::is_pipe_name;
+    #[test]
+    fn pipe_names() {
+        assert!(is_pipe_name(r"\\.\pipe\claude-pet-1"));
+        assert!(is_pipe_name(r"\\.\pipe\claude-pet-1234567890"));
+        for bad in [r"\\.\pipe\claude-pet-", r"\\.\pipe\claude-pet-12345678901", r"\\.\pipe\claude-pet-1a", r"\\.\pipe\claude-pet-1\x", r"\\.\pipe\other-1", "/tmp/x.sock", ""] { assert!(!is_pipe_name(bad), "{bad}"); }
+    }
 }
 
 #[cfg(all(test, unix))]

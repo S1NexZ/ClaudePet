@@ -8,7 +8,8 @@ use crate::install::*;
 use crate::mailbox::{Mailbox, Sent};
 use crate::map_event::is_test_command;
 use crate::procinfo::{proc_name, tty_path};
-use crate::pty_send::{send_esc, send_prompt, PtyGone};
+use crate::pty_send::{send_esc, send_prompt, send_title, PtyGone};
+use crate::soft_stop::SoftStop;
 use crate::store::Store;
 use crate::summary::summarize;
 use crate::transcript::{interrupted_since, read_entrypoint, read_original_cwd, read_transcript, PET_MARKER};
@@ -65,12 +66,16 @@ pub struct BridgeOpts {
     pub stop_recheck_ms: u64,
     pub permission_timeout_ms: u64,
     pub question_timeout_ms: u64,
+    /** Windows host: every session without a PTY is reached through its mailbox (the waiter may be between polls) */
+    pub mailbox_only: bool,
+    /** Windows host: Stop for sessions without a PTY answers their next tool hook with `continue: false` (soft_stop.rs) */
+    pub soft_stop: bool,
 }
 
 impl BridgeOpts {
     pub fn new(out: Box<dyn Fn(Value) + Send + Sync>, settings_path: PathBuf, hook_path: &str) -> Self {
         BridgeOpts { out, mailbox: Arc::new(Mailbox::new()), usage: None, settings_path, hook_path: hook_path.into(), host_hooks: None,
-            permission_id_prefix: "hl-".into(), stop_recheck_ms: 700, permission_timeout_ms: 30_000, question_timeout_ms: 590_000 }
+            permission_id_prefix: "hl-".into(), stop_recheck_ms: 700, permission_timeout_ms: 30_000, question_timeout_ms: 590_000, mailbox_only: false, soft_stop: false }
     }
 }
 
@@ -93,6 +98,11 @@ struct State {
     last_snap: String,
     usage_version: Option<String>,
     checking: HashSet<String>,
+    soft: SoftStop,
+    /** sessions that sent a hook event other than SessionStart (soft stop needs their tool hooks) */
+    hooked: HashSet<String>,
+    /** a PTY pipe reported (by a waiter) before its session was known */
+    pending_ptys: HashMap<String, String>,
 }
 
 struct Inner { o: BridgeOpts, st: Mutex<State>, usage: Mutex<Option<UsageSource>>, runner: OnceLock<Arc<dyn Runner>> }
@@ -164,6 +174,7 @@ impl Bridge {
             let is_mod = mb.is_mod(&x.id);
             x.mailbox = Some(mb.has_waiter(&x.id) || is_mod);
             if is_mod { x.is_mod = Some(true); }
+            if self.0.o.soft_stop && g.hooked.contains(&x.id) && !x.owned && x.pty.is_none() { x.soft_stop = Some(true); }
         }
         let m = json!({ "type": "snapshot", "sessions": sessions, "attention": g.store.attention() });
         let key = m.to_string();
@@ -260,6 +271,9 @@ impl Bridge {
                 let sess = self.lock().store.get(&id).cloned();
                 if let Some(pty) = sess.as_ref().filter(|x| !x.owned).and_then(|x| x.pty.clone()) {
                     match send_esc(&pty) { Ok(()) => { self.lock().store.mark_interrupted(&id, now_ms()); self.reread_later(&id); } Err(PtyGone) => self.lock().store.clear_pty(&id) }
+                } else if self.0.o.soft_stop && sess.as_ref().map_or(false, |x| !x.owned) && self.lock().hooked.contains(&id) {
+                    self.lock().soft.request(&id, now_ms());
+                    self.out(json!({ "type": "chat", "sessionId": id, "event": { "kind": "note", "text": l("Остановлю после текущего шага…", "Stopping after the current step…", "将在当前步骤后停止…") } }));
                 } else { self.runner().interrupt(&id)?; }
             }
             "language" => { if let Some(l) = cmd.get("lang").and_then(Value::as_str) { set_lang(l); } return Ok(true); }
@@ -318,6 +332,12 @@ impl Bridge {
             "term-mark" => { // the pet is about to look for this session's terminal window: give its tab a recognisable title
                 let id = s(cmd, "sessionId");
                 let text = s(cmd, "text");
+                // a Windows session in `pet-helper pty`: the title goes through its pipe (the helper sets the console title)
+                if let Some(pipe) = self.lock().store.get(&id).and_then(|x| x.pty.clone()).filter(|p| p.starts_with(r"\\.\pipe\")) {
+                    let ok = send_title(&pipe, &text).is_ok();
+                    self.out(json!({ "type": "termMark", "sessionId": id, "ok": ok }));
+                    return Ok(false);
+                }
                 let pid = self.lock().pids.get(&id).copied();
                 let ok = pid.map_or(false, |p| proc_name(p).as_deref() == Some("claude") && set_tty_title(p, &text));
                 if let (true, Some(p)) = (ok, pid) { // Claude Code rewrites the title all the time (spinner): keep the marker up while the pet looks for the window
@@ -349,7 +369,7 @@ impl Bridge {
         }
         let sess = self.lock().store.get(id).cloned();
         // no PTY: wake the session through its mailbox waiter (the text goes out as a hook-feedback reminder)
-        if let Some(x) = sess.as_ref().filter(|x| !x.owned && (o.mailbox.has_waiter(id) || o.mailbox.is_mod(id))) {
+        if let Some(x) = sess.as_ref().filter(|x| !x.owned && (o.mailbox_only || o.mailbox.has_waiter(id) || o.mailbox.is_mod(id))) {
             let msg = format!("{}\n{PET_MARKER} {text}", l("Пользователь написал это через ccPet. Считай это его сообщением и ответь на него.", "The user wrote this through ccPet. Treat it as their message and answer it.", "用户通过 ccPet 写了这条消息。请把它当作用户的消息并回答。"));
             let r = o.mailbox.send(id, &msg);
             self.out(json!({ "type": "chat", "sessionId": id, "event": { "kind": "user", "text": text } }));
@@ -395,10 +415,31 @@ impl Bridge {
         self.on_hook(e);
     }
 
+    /** The answer a host-hook (HTTP) gets back: a pending soft stop turns the session's next tool hook into "stop". */
+    pub fn hook_reply(&self, e: &HookEvent) -> Option<Value> {
+        if !self.0.o.soft_stop { return None; }
+        let r = self.lock().soft.reply(e, now_ms());
+        if r.is_some() {
+            let mut g = self.lock();
+            g.store.mark_interrupted(&e.session_id, now_ms());
+            self.snap(&mut g, true);
+            drop(g);
+            self.reread_later(&e.session_id);
+        }
+        r
+    }
+
+    /** A Windows session's PTY pipe (`pet-helper pty`), reported by its mailbox waiter; kept until the session is known. */
+    pub fn set_pty(&self, id: &str, pipe: &str) {
+        let mut g = self.lock();
+        if g.store.get(id).is_some() { if g.store.set_pty(id, pipe) { self.snap(&mut g, true); } } else { g.pending_ptys.insert(id.into(), pipe.into()); }
+    }
+
     pub fn on_hook(&self, e: HookEvent) {
         let sid = e.session_id.clone();
         let name = e.hook_event_name.as_str();
         let mut g = self.lock();
+        if name != "SessionStart" { g.hooked.insert(sid.clone()); }
         // the question was answered somewhere else (in the terminal or the app): drop the pet's Allow / Deny at once instead of showing it until the timeout
         if SETTLES_ASK.contains(&name) {
             let post = name == "PostToolUse" || name == "PostToolUseFailure";
@@ -473,6 +514,8 @@ impl Bridge {
     pub fn tick(&self, now: i64) {
         let mut g = self.lock();
         g.store.tick(now);
+        let ready: Vec<(String, String)> = g.pending_ptys.iter().filter(|(id, _)| g.store.get(id).is_some()).map(|(a, b)| (a.clone(), b.clone())).collect();
+        for (id, pipe) in ready { g.pending_ptys.remove(&id); g.store.set_pty(&id, &pipe); }
         self.snap(&mut g, true);
         let working: Vec<(String, String, i64)> = g.store.list().into_iter()
             .filter(|x| !x.owned && x.state.working() && !g.checking.contains(&x.id))
@@ -553,6 +596,35 @@ mod tests {
         t.tool_input = Some(json!({ "command": "npm test" }));
         b.on_hook(t);
         assert_eq!(of(&log, "react")[0]["reaction"], "happy");
+    }
+
+    #[test]
+    fn windows_host_mailbox_soft_stop_and_pipes() {
+        let dir = std::env::temp_dir().join(format!("ccpet-br-{}-win", std::process::id()));
+        let _ = std::fs::create_dir_all(&dir);
+        let log: Log = Arc::new(Mutex::new(vec![]));
+        let l = log.clone();
+        let mut o = BridgeOpts::new(Box::new(move |v| l.lock().unwrap().push(v)), dir.join("settings.json"), "");
+        o.mailbox_only = true;
+        o.soft_stop = true;
+        o.stop_recheck_ms = 10;
+        let b = Bridge::new(o);
+        // a pipe reported before the session exists waits for it
+        b.set_pty("w1", r"\\.\pipe\claude-pet-42");
+        b.on_hook(ev("UserPromptSubmit", "w1"));
+        b.tick(now_ms());
+        assert_eq!(b.lock().store.get("w1").unwrap().pty.as_deref(), Some(r"\\.\pipe\claude-pet-42"));
+        b.lock().store.clear_pty("w1");
+        // no waiter right now: still queued for the mailbox, never "SDK is off"
+        b.handle(&json!({ "type": "send", "sessionId": "w1", "text": "hi" }));
+        assert!(of(&log, "error").is_empty());
+        assert_eq!(of(&log, "chat")[0]["event"]["text"], "hi");
+        // Stop without a PTY: the next tool hook is answered "stop", and the session shows the flag
+        assert_eq!(sessions(&log)[0]["softStop"], true);
+        b.handle(&json!({ "type": "interrupt", "sessionId": "w1" }));
+        assert!(b.hook_reply(&ev("Notification", "w1")).is_none());
+        assert_eq!(b.hook_reply(&ev("PreToolUse", "w1")).unwrap()["continue"], false);
+        assert!(!b.lock().store.get("w1").unwrap().state.working());
     }
 
     fn sessions(log: &Log) -> Vec<Value> { of(log, "snapshot").pop().map_or(vec![], |s| s["sessions"].as_array().unwrap().clone()) }

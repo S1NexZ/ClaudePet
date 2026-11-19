@@ -107,7 +107,7 @@ fn main() {
             if let Some(src) = src { b2.set_source(sid, src); }
         })),
         on_permission: Some(Box::new(move |e, gone| b3.on_permission(e, gone))),
-        on_reply: None,
+        on_pty: None, on_reply: None,
     });
     let http = match http {
         Ok(h) => {

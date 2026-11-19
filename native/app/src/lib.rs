@@ -3,3 +3,5 @@ pub mod merge;
 pub mod placement;
 pub mod queue;
 pub mod settings;
+pub mod desktop;
+pub mod terminal;

@@ -25,6 +25,8 @@ pub struct HookServerOpts {
     pub mailbox: Arc<Mailbox>,
     /** a waiter told the session's folder (`?cwd=`) and front end (`?src=`) */
     pub on_waiter: Option<Box<dyn Fn(&str, &str, Option<&str>) + Send + Sync>>,
+    /** a waiter said which pseudoterminal pipe its claude runs on (`?pty=`); only well-formed `\\.\pipe\claude-pet-<pid>` names are passed on */
+    pub on_pty: Option<Box<dyn Fn(&str, &str) + Send + Sync>>,
     /** answers a PermissionRequest; None = no opinion (Claude Code shows its normal dialog). The closure tells whether Claude Code dropped the request. */
     pub on_permission: Option<Box<dyn Fn(&HookEvent, &dyn Fn() -> bool) -> Option<Decision> + Send + Sync>>,
     /** an answer for an ordinary event (soft stop: `{"continue": false}`) */
@@ -60,6 +62,11 @@ fn query<'a>(q: &'a str, key: &str) -> Option<String> {
 }
 
 fn safe_id(s: &str) -> bool { (1..=100).contains(&s.len()) && s.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-') }
+
+/** `\\.\pipe\claude-pet-<1..10 digits>` */
+fn pipe_name_ok(s: &str) -> bool {
+    s.strip_prefix(r"\\.\pipe\claude-pet-").is_some_and(|d| (1..=10).contains(&d.len()) && d.bytes().all(|b| b.is_ascii_digit()))
+}
 
 fn respond(c: &mut TcpStream, status: u16, ctype: Option<&str>, body: &str) {
     let reason = match status { 200 => "OK", 204 => "No Content", 400 => "Bad Request", 404 => "Not Found", 409 => "Conflict", 411 => "Length Required", _ => "Error" };
@@ -126,6 +133,7 @@ fn handle(mut c: TcpStream, o: &HookServerOpts) {
         if let (Some(cwd), Some(f)) = (cwd.as_deref().filter(|c| !c.is_empty() && c.len() <= 1024 && !c.chars().any(|ch| (ch as u32) < 0x20)), o.on_waiter.as_ref()) {
             f(&sid, cwd, src.as_deref().filter(|s| (1..=32).contains(&s.len()) && s.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-')));
         }
+        if let (Some(pty), Some(f)) = (query(q, "pty").filter(|p| pipe_name_ok(p)), o.on_pty.as_ref()) { f(&sid, &pty); }
         // the ccPet plugin submits messages as the user's own words: it wins over the older asyncRewake waiter (whose delivery shows as hook feedback)
         let is_mod = query(q, "via").as_deref() == Some("mod");
         let mb = &o.mailbox;
@@ -211,6 +219,7 @@ mod tests {
             port: 0, token: "abc123".into(), mailbox: mb.clone(), wait_ms,
             on_event: Box::new(move |e| g.lock().unwrap().push(format!("{}:{}", e.hook_event_name, e.session_id))),
             on_waiter: None,
+            on_pty: None,
             on_permission: Some(Box::new(|e, _| match e.tool() { "Bash" => Some(Decision::Allow), "Edit" => Some(Decision::Deny), "Ask" => Some(Decision::Updated(json!({ "a": 1 }))), _ => None })),
             on_reply: Some(Box::new(|e| (e.session_id == "stop-me").then(|| json!({ "continue": false })))),
         }).unwrap();
@@ -290,6 +299,25 @@ mod tests {
         // the plugin wins: once it polled, the older waiter style is refused
         assert_eq!(req(s.port, "GET", "/mailbox/abc123/s3?via=mod&wait=1", "").0, 204);
         assert_eq!(req(s.port, "GET", "/mailbox/abc123/s3", "").0, 409);
+        s.close();
+    }
+
+    #[test]
+    fn pty_param() {
+        let mb = Arc::new(Mailbox::new());
+        let got = Arc::new(Mutex::new(vec![]));
+        let g = got.clone();
+        let s = HookServer::start(HookServerOpts {
+            port: 0, token: "abc123".into(), mailbox: mb, wait_ms: 50,
+            on_event: Box::new(|_| {}), on_waiter: None,
+            on_pty: Some(Box::new(move |sid, p| g.lock().unwrap().push(format!("{sid}={p}")))),
+            on_permission: None, on_reply: None,
+        }).unwrap();
+        let get = |q: &str| req(s.port, "GET", &format!("/mailbox/abc123/s1{q}"), "").0;
+        assert_eq!(get("?pty=%5C%5C.%5Cpipe%5Cclaude-pet-1234"), 204);
+        for bad in [r"%5C%5C.%5Cpipe%5Cother", "%5C%5C.%5Cpipe%5Cclaude-pet-12345678901", "%5C%5C.%5Cpipe%5Cclaude-pet-", "x"] { get(&format!("?pty={bad}")); }
+        get("");
+        assert_eq!(*got.lock().unwrap(), vec![r"s1=\\.\pipe\claude-pet-1234".to_string()]);
         s.close();
     }
 }

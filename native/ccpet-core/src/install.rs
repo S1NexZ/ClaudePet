@@ -133,6 +133,40 @@ pub fn plan_host_hooks(current: &Value, o: &HostHooks) -> (Value, String) {
     (next, diff)
 }
 
+/** Windows host: HTTP event hooks for every event, the mailbox waiter (when `helper` is known) and the permission / question answers. Idempotent; an older token's entries are replaced. */
+pub fn plan_windows_hooks(current: &Value, origin: &str, token: &str, helper: Option<&str>, permissions: bool) -> (Value, String) {
+    let mut next = object(current);
+    if !prep_hooks(&mut next) { return (current.clone(), String::new()); }
+    strip(&mut next, is_ours);
+    for ev in HOOK_EVENTS {
+        let matcher = matches!(ev, "PreToolUse" | "PostToolUse" | "PostToolUseFailure").then_some("*");
+        add(&mut next, ev, json!({ "type": "http", "url": format!("{origin}/hook/{token}/{ev}"), "timeout": 5 }), matcher);
+    }
+    if let Some(h) = helper.filter(|h| !h.is_empty()) {
+        let waiter = json!({ "type": "command", "command": h, "args": ["wait", format!("{origin}/mailbox/{token}")], "asyncRewake": true });
+        for ev in ["SessionStart", "Stop"] { add(&mut next, ev, waiter.clone(), None); }
+    }
+    let url = format!("{origin}/hook/{token}/PermissionRequest");
+    if permissions { add(&mut next, "PermissionRequest", json!({ "type": "http", "url": url, "timeout": 35 }), None); }
+    add(&mut next, "PermissionRequest", json!({ "type": "http", "url": url, "timeout": 600 }), Some("AskUserQuestion"));
+    let diff = hooks_diff(current, &next);
+    (next, diff)
+}
+
+/** Windows host removal: only our HTTP and waiter entries go. */
+pub fn remove_windows_hooks(current: &Value) -> (Value, String) {
+    let mut next = object(current);
+    strip(&mut next, is_ours);
+    let diff = hooks_diff(current, &next);
+    (next, diff)
+}
+
+/** Status for the Windows host: `events` means our HTTP hook on every event. */
+pub fn windows_hooks_status(current: &Value) -> HooksStatus {
+    let events = HOOK_EVENTS.iter().all(|ev| handlers(current, ev).iter().any(|h| is_our_http(h)));
+    HooksStatus { events, ..hooks_status(current) }
+}
+
 /** Settings without any of our hook entries (events, waiter, HTTP); the user's own stay. */
 pub fn remove_hooks(current: &Value) -> (Value, String) {
     let mut next = object(current);
@@ -224,13 +258,22 @@ pub enum Chain { None, Ours, Chained }
 
 /** Points `statusLine` at `<hook> statusline`. Someone else's statusLine is wrapped (kept base64 so removal restores it exactly). */
 pub fn plan_status_line(current: &Value, hook_path: &str) -> (Value, String, Chain) {
+    plan_sl(current, &format!("\"{hook_path}\" statusline"), " 2>/dev/null || true")
+}
+
+/** Windows form: `<helper path with forward slashes> statusline`, no quotes and no shell tail (Git Bash and PowerShell both run it). A path with spaces is refused (pass the short 8.3 form). Removal is `remove_status_line`. */
+pub fn plan_windows_status_line(current: &Value, helper: &str) -> Result<(Value, String, Chain), String> {
+    if helper.chars().any(char::is_whitespace) { return Err("statusLine helper path must not contain spaces (use the short 8.3 path)".into()); }
+    Ok(plan_sl(current, &format!("{} statusline", helper.replace('\\', "/")), ""))
+}
+
+fn plan_sl(current: &Value, base: &str, tail: &str) -> (Value, String, Chain) {
     let existing = current.get("statusLine").filter(|v| !v.is_null());
-    let base = format!("\"{hook_path}\" statusline");
     let orig = match existing { Some(e) if sl_ours(Some(e)) => chained_original(e), other => other.cloned() };
     let mut next = object(current);
     let sl = match &orig {
-        Some(o) => { let mut m = o.as_object().cloned().unwrap_or_default(); m.insert("type".into(), json!("command")); m.insert("command".into(), json!(format!("{base}{CHAIN}{} 2>/dev/null || true", enc(o)))); Value::Object(m) }
-        None => json!({ "type": "command", "command": format!("{base} 2>/dev/null || true"), "padding": 0 }),
+        Some(o) => { let mut m = o.as_object().cloned().unwrap_or_default(); m.insert("type".into(), json!("command")); m.insert("command".into(), json!(format!("{base}{CHAIN}{}{tail}", enc(o)))); Value::Object(m) }
+        None => json!({ "type": "command", "command": format!("{base}{tail}"), "padding": 0 }),
     };
     next.as_object_mut().unwrap().insert("statusLine".into(), sl.clone());
     let kind = if orig.is_some() { Chain::Chained } else { Chain::Ours };
@@ -400,5 +443,72 @@ mod tests {
         let mut sl2 = Map::new();
         for (k, v) in [("a", json!(1)), ("statusLine", sl["statusLine"].clone()), ("b", json!(2)), ("c", json!(3))] { sl2.insert(k.into(), v); }
         assert_eq!(keys(&remove_status_line(&Value::Object(sl2)).0), ["a", "b", "c"]);
+    }
+
+    const WORIGIN: &str = "http://127.0.0.1:47821";
+    const HELPER: &str = "C:\\pet\\pet-helper.exe";
+    fn mine() -> Value { json!({ "hooks": { "PreToolUse": [{ "matcher": "Bash", "hooks": [{ "type": "command", "command": "rtk-rewrite" }] }] }, "theme": "dark" }) }
+
+    #[test]
+    fn windows_hooks_install_replace_and_remove() {
+        let (n, d) = plan_windows_hooks(&mine(), WORIGIN, "ab12cd", Some(HELPER), false);
+        assert!(!d.is_empty());
+        let pre = &n["hooks"]["PreToolUse"];
+        assert_eq!(pre[0], mine()["hooks"]["PreToolUse"][0]);
+        assert_eq!(pre[1]["matcher"], "*");
+        assert_eq!(pre[1]["hooks"][0], json!({ "type": "http", "url": "http://127.0.0.1:47821/hook/ab12cd/PreToolUse", "timeout": 5 }));
+        assert!(n["hooks"]["UserPromptSubmit"][0].get("matcher").is_none());
+        assert_eq!(n["hooks"]["Stop"][1]["hooks"][0], json!({ "type": "command", "command": HELPER, "args": ["wait", "http://127.0.0.1:47821/mailbox/ab12cd"], "asyncRewake": true }));
+        assert_eq!(n["theme"], "dark");
+        assert_eq!(windows_hooks_status(&n), HooksStatus { events: true, mailbox: true, permissions: false });
+        // key order of the entry matches the TS literal
+        assert_eq!(n["hooks"]["Stop"][1]["hooks"][0].as_object().unwrap().keys().collect::<Vec<_>>(), ["type", "command", "args", "asyncRewake"]);
+        // idempotent, a new token replaces the old entries
+        assert_eq!(plan_windows_hooks(&n, WORIGIN, "ab12cd", Some(HELPER), false).1, "");
+        let again = plan_windows_hooks(&n, WORIGIN, "ff00ee", Some(HELPER), false).0;
+        assert!(!again.to_string().contains("ab12cd"));
+        assert_eq!(again["hooks"]["Stop"].as_array().unwrap().iter().filter(|g| g["hooks"][0]["type"] == "http").count(), 1);
+        // no helper: no waiter
+        assert!(!windows_hooks_status(&plan_windows_hooks(&json!({}), WORIGIN, "ab12cd", None, false).0).mailbox);
+        // removal
+        let (inst, _) = plan_windows_hooks(&mine(), WORIGIN, "ab12cd", Some(HELPER), true);
+        assert_eq!(remove_windows_hooks(&inst).0, mine());
+        assert_eq!(remove_windows_hooks(&mine()).1, "");
+        assert_eq!(windows_hooks_status(&remove_windows_hooks(&inst).0), HooksStatus { events: false, mailbox: false, permissions: false });
+    }
+
+    #[test]
+    fn windows_permission_hooks() {
+        let off = plan_windows_hooks(&json!({}), WORIGIN, "ab12cd", None, false).0;
+        let url = "http://127.0.0.1:47821/hook/ab12cd/PermissionRequest";
+        assert_eq!(off["hooks"]["PermissionRequest"], json!([{ "matcher": "AskUserQuestion", "hooks": [{ "type": "http", "url": url, "timeout": 600 }] }]));
+        assert!(!windows_hooks_status(&off).permissions);
+        let on = plan_windows_hooks(&json!({}), WORIGIN, "ab12cd", None, true).0;
+        assert_eq!(on["hooks"]["PermissionRequest"][0], json!({ "matcher": "*", "hooks": [{ "type": "http", "url": url, "timeout": 35 }] }));
+        assert!(windows_hooks_status(&on).permissions);
+    }
+
+    #[test]
+    fn windows_status_line() {
+        let exe = "C:\\Users\\u\\AppData\\Local\\Programs\\claude-pet\\resources\\helper\\pet-helper.exe";
+        let cmd = "C:/Users/u/AppData/Local/Programs/claude-pet/resources/helper/pet-helper.exe statusline";
+        let (n, _, k) = plan_windows_status_line(&json!({}), exe).unwrap();
+        assert_eq!(k, Chain::Ours);
+        assert_eq!(n["statusLine"], json!({ "type": "command", "command": cmd, "padding": 0 }));
+        assert_eq!(status_line_state(&n), Chain::Ours);
+        let mine = json!({ "type": "command", "command": "powershell -c \"Get-Date\"" });
+        let (w, _, k) = plan_windows_status_line(&json!({ "statusLine": mine }), exe).unwrap();
+        assert_eq!((k, status_line_state(&w)), (Chain::Chained, Chain::Chained));
+        assert_eq!(remove_status_line(&w).0["statusLine"], mine);
+        let (moved, _, _) = plan_windows_status_line(&w, "D:\\pet\\pet-helper.exe").unwrap();
+        assert!(moved["statusLine"]["command"].as_str().unwrap().contains("D:/pet/pet-helper.exe statusline"));
+        assert_eq!(remove_status_line(&moved).0["statusLine"], mine);
+        // the old quoted form is ours and gets replaced
+        let old = json!({ "statusLine": { "type": "command", "command": format!("\"{exe}\" statusline"), "padding": 0 } });
+        assert_eq!(status_line_state(&old), Chain::Ours);
+        let (r, d, _) = plan_windows_status_line(&old, exe).unwrap();
+        assert!(!d.is_empty());
+        assert_eq!(r["statusLine"]["command"], cmd);
+        assert!(plan_windows_status_line(&json!({}), "C:\\Program Files\\pet\\pet-helper.exe").is_err());
     }
 }
