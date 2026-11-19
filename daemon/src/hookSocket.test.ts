@@ -32,6 +32,8 @@ describe('hook socket', () => {
     const srv = await listenHooks(path, (e) => got.push(e)); closers.push(srv.close);
     const r = await runHook(path, EVENT);
     expect(r).toMatchObject({ code: 0, stdout: '' });
+    // the hook may exit before the server has read the event (seen on macOS runners): wait for it a little
+    for (let i = 0; i < 40 && !got.length; i++) await new Promise((res) => setTimeout(res, 50));
     expect(got).toEqual([{ ...JSON.parse(EVENT), pet_parents: expect.any(Array) }]);
   });
   it('app not running (no socket): hook exits 0 fast and silently', async () => {
