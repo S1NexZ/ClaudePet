@@ -128,7 +128,8 @@ impl WindowsHost {
                 if force || now - last > 15_000 {
                     last = now;
                     if force { adopted.clear(); }
-                    for r in adopt::find_running(&projects, now, if force { adopt::RESCAN_MS } else { 10 * 60_000 }) {
+                    let live = adopt::live_ids(&me.claude_home.join("sessions"), &process_alive);
+                    for r in adopt::find_running(&projects, now, if force { adopt::RESCAN_MS } else { 10 * 60_000 }, live.as_ref()) {
                         if adopted.contains(&r.id) || me.bridge.has_session(&r.id) { continue; }
                         adopted.insert(r.id.clone());
                         let mut e = HookEvent::new("SessionStart", &r.id, &r.cwd);
@@ -192,4 +193,22 @@ impl WindowsHost {
         r.unwrap_or_else(|e| json!({ "diff": "", "applied": false, "kind": "none", "error": e }))
     }
 
+}
+
+
+/** Windows: is the process with this id still running? (a session file of Claude Code outlives its process) */
+fn process_alive(pid: u32) -> bool {
+    #[cfg(windows)]
+    unsafe {
+        use windows_sys::Win32::Foundation::{CloseHandle, STILL_ACTIVE};
+        use windows_sys::Win32::System::Threading::{GetExitCodeProcess, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION};
+        let h = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid);
+        if h.is_null() { return false; }
+        let mut code = 0u32;
+        let ok = GetExitCodeProcess(h, &mut code) != 0 && code == STILL_ACTIVE as u32;
+        CloseHandle(h);
+        ok
+    }
+    #[cfg(not(windows))]
+    { ccpet_core::procinfo::proc_name(pid).is_some() }
 }

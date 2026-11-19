@@ -143,7 +143,8 @@ fn main() {
             if force || now - last_adopt > 15_000 {
                 last_adopt = now;
                 if force { adopted.clear(); }
-                for r in adopt::find_running(&projects, now, if force { adopt::RESCAN_MS } else { 10 * 60_000 }) {
+                let live = adopt::live_ids(&home().join(".claude").join("sessions"), &|pid| ccpet_core::procinfo::proc_name(pid).is_some());
+                for r in adopt::find_running(&projects, now, if force { adopt::RESCAN_MS } else { 10 * 60_000 }, live.as_ref()) {
                     if adopted.contains(&r.id) || b.has_session(&r.id) { continue; }
                     adopted.insert(r.id.clone());
                     let mut e = HookEvent::new("SessionStart", &r.id, &r.cwd);
