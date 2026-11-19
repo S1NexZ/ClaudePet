@@ -34,10 +34,12 @@ Works with Claude Code in **Windows terminals, WSL, the Claude desktop app, macO
 1. **Download** the installer for your system from [Releases](https://github.com/S1NexZ/ccPet/releases/latest):
    | System | File |
    |---|---|
-   | Windows 10/11 | `ccPet-Setup-<version>.exe` |
-   | macOS (Apple silicon / Intel) | `ccPet-<version>-mac-arm64.dmg` / `-mac-x64.dmg` |
-   | Linux (Ubuntu, Debian) | `ccPet-<version>-linux-amd64.deb` |
-   | Linux (other) | `ccPet-<version>-linux-x86_64.AppImage` |
+   | Windows 10/11 | `ccPet_<version>_x64-setup.exe` |
+   | macOS (Apple silicon and Intel) | `ccPet_<version>_universal.dmg` |
+   | Linux (Ubuntu, Debian) | `ccPet_<version>_amd64.deb` |
+   | Linux (other) | `ccPet_<version>_amd64.AppImage` |
+
+   **Upgrading from 0.6 on Windows:** 0.7 installs to `%LOCALAPPDATA%\ccPet`. Quit the old ccPet and uninstall it in "Installed apps": both cannot run at once (one port, one hotkey). Settings, pets and connected hooks stay.
 2. **Connect Claude Code hooks:** Settings (⚙) → Connections. The pet shows the exact change to `~/.claude/settings.json`, keeps a `.bak` copy and applies it only after you agree. Without hooks the pet cannot see your sessions.
 3. **Optional: connect the terminal** (tray → "Connect the terminal"). Then the pet can type into your terminal session directly and stop it with Esc.
 4. Run `claude` as usual. The pet picks up the session; `Ctrl+Alt+P` opens the chat.
@@ -90,7 +92,7 @@ More: [docs/troubleshooting.md](docs/troubleshooting.md). App log: `%APPDATA%\Cl
 npm install && (cd ui && npm install)
 npm run build      # bridge (build/bridge) and UI (ui/dist)
 npm test           # Vitest
-npm run dist       # Windows installer: ui/release/ccPet-Setup-<version>.exe
+npm run dist:tauri # Windows installer (Tauri, from WSL): ui/release/ccPet-<version>_x64-setup.exe
 ```
 
 How it works inside: [docs/design.md](docs/design.md). Changes: [CHANGELOG.md](CHANGELOG.md) (in Russian).
