@@ -99,8 +99,9 @@ jobs:
           TAG: ${{ github.ref_name }}
         run: |
           for i in $(seq 1 40); do gh release view "$TAG" -R "$GITHUB_REPOSITORY" >/dev/null 2>&1 && break; sleep 30; done
-          shopt -s nullglob globstar
-          files=(native/app/target/**/bundle/nsis/*.exe native/app/target/**/bundle/deb/*.deb native/app/target/**/bundle/appimage/*.AppImage native/app/target/**/bundle/dmg/*.dmg)
+          # find, not globstar: macOS ships bash 3.2
+          files=()
+          while IFS= read -r f; do files+=("$f"); done < <(find native/app/target -path '*/bundle/*' \( -name '*-setup.exe' -o -name '*.deb' -o -name '*.AppImage' -o -name '*.dmg' \) -type f)
           gh release upload "$TAG" "${files[@]}" -R "$GITHUB_REPOSITORY" --clobber
 
   smoke-linux:
