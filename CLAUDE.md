@@ -1,6 +1,6 @@
 # ccPet — developer notes (also read by Claude Code sessions working on this repo)
 
-ccPet is a Windows (Electron) desktop pet for Claude Code sessions running in WSL: it shows what the sessions do, has a chat, shares one live
+ccPet is a desktop pet (Tauri; Windows first, Linux and macOS builds from CI) for Claude Code sessions running in WSL: it shows what the sessions do, has a chat, shares one live
 session with the terminal through a PTY wrapper, and shows subscription usage limits. User-facing docs are in `README.md` (Russian); this file is for developers.
 Chat language with the project owner: Russian (code and comments may be English). The source of truth is the code, not these notes.
 
@@ -15,19 +15,18 @@ Chat language with the project owner: Russian (code and comments may be English)
 - Commits end with a `Co-Authored-By: Claude <model> <noreply@anthropic.com>` line naming the model that wrote them. Do not push or publish without the owner's approval.
 
 ## Environment
-- Develop in WSL; Node: `export PATH=$HOME/.local/node/bin:$PATH` (per command). Root is an npm workspace (`shared`, `daemon`, `hook`); `ui/` is a separate package.
-  Install `ui/` dependencies from a **Windows** terminal (`cd ui && npm install`) when you need to build the installer, so electron-builder gets Windows shims.
+- Develop in WSL; Node: `export PATH=$HOME/.local/node/bin:$PATH` (per command). Root is an npm workspace (`shared`, `daemon`, `hook`); `ui/` holds the renderer and the TS library modules (no dependencies of its own).
 - No gcc/make in WSL (native modules cannot be built).
 - Inside a Claude Code session the env has `CLAUDECODE`/`CLAUDE_CODE_*`: the `claude` shell function then bypasses the wrapper and a child `claude` does not save transcripts;
   simulate a user terminal with `env -u CLAUDECODE -u CLAUDE_CODE_CHILD_SESSION …`.
 
 ## Architecture
-Windows Electron (`ui/`) starts the bridge in WSL through `wsl.exe` (JSON lines on stdio). Bridge: `daemon/src/bridgeMain.ts` → `build/bridge/bridge.cjs`. Claude Code hooks (`hook/pet-hook.mjs`) send events to the unix socket `~/.claude-pet/hook.sock`.
+The Tauri app (`native/app`) starts the bridge in WSL through `wsl.exe` (JSON lines on stdio). Bridge: `daemon/src/bridgeMain.ts` → `build/bridge/bridge.cjs`. Claude Code hooks (`hook/pet-hook.mjs`) send events to the unix socket `~/.claude-pet/hook.sock`.
 Closing the pet never kills Claude Code (the bridge exits on stdin EOF).
 - `daemon/src/`: `bridge.ts` (commands, sending, interrupt), `sessionStore.ts`, `mapEvent.ts`, `hookSocket.ts`, `ptySend.ts`, `runner.ts` (SDK fallback), `transcript.ts`, `usage.ts`, `usageLive.ts`, `installHooks.ts`, `installStatusLine.ts`, `cli.ts`.
 - `shared/src/types.ts`: bridge command/message types.
-- `ui/src/`: `main.ts` (window, tray, hotkey, IPC, dialogs), `settings.ts`, `appearance.ts`, `dialogs.ts`, `models/` (registry, zip, install, images), `sprite/` (loader, animator, cell cleanup, `fringe.ts`), `renderer/` (`app.ts`, `settingsPanel.ts`, `modelsTab.ts`, `usage.ts`, `compose.ts`, `chatStore.ts`, …).
-- `scripts/`: `pet-claude.py` (PTY wrapper), `install-shell-integration.sh` (guided `~/.bashrc` block), `start.sh`, `pet.sh`, `anim-test.sh`, tests `test-pet-claude.py`, `test-shell-integration.py`.
+- `ui/src/`: `settings.ts` (TS ports of what `native/app/src/main.rs` does now), `appearance.ts`, `dialogs.ts`, `models/` (registry, zip, install, images), `sprite/` (loader, animator, cell cleanup, `fringe.ts`), `renderer/` (`app.ts`, `settingsPanel.ts`, `modelsTab.ts`, `usage.ts`, `compose.ts`, `chatStore.ts`, …).
+- `scripts/`: `pet-claude.py` (PTY wrapper), `install-shell-integration.sh` (guided `~/.bashrc` block), `pet.sh`, `anim-test.sh`, tests `test-pet-claude.py`, `test-shell-integration.py`.
 - `models/claude-maiden/`: the bundled default pet (third-party asset, see `THIRD_PARTY_NOTICES.md`). Clawd was removed in 0.5.0 (Anthropic's mascot); a saved `clawd` choice falls back to the default. User models live in `%APPDATA%\ccPet\models`.
 
 ### Claude Code integration
@@ -39,9 +38,9 @@ Closing the pet never kills Claude Code (the bridge exits on stdin EOF).
 - **Confirmation dialogs** (`ui/src/dialogs.ts`): safe button first and default, `noLink: true` (measured: with command links and `defaultId === cancelId`, Enter picked the action).
 
 ### Universal integration (Windows host, mailbox)
-Windows terminals and the Claude desktop app are served by a **Windows host** inside Electron main (`ui/src/hub/windowsHost.ts`: the same transport-free `createBridge` with `mailboxOnly`, fed by Claude Code `http` hooks on `127.0.0.1:47821`; the WSL bridge has its own receiver on `47822`, port/token in `~/.claude-pet/hub.json`). `ui/src/hub/merge.ts` merges the host snapshots (sessions carry `host`, `source`, `mailbox`) and routes commands by session id. Hook entries live next to the user's own ones in `settings.json` and are recognised by URL / command, never by extra keys (`daemon/src/hookConfig.ts`); install/remove always shows the diff and keeps a `.bak` (Settings → Connections).
+Windows terminals and the Claude desktop app are served by a **Windows host** inside the app (`native/app/src/windows_host.rs`; the TS original is `ui/src/hub/windowsHost.ts`: the same transport-free `createBridge` with `mailboxOnly`, fed by Claude Code `http` hooks on `127.0.0.1:47821`; the WSL bridge has its own receiver on `47822`, port/token in `~/.claude-pet/hub.json`). `ui/src/hub/merge.ts` merges the host snapshots (sessions carry `host`, `source`, `mailbox`) and routes commands by session id. Hook entries live next to the user's own ones in `settings.json` and are recognised by URL / command, never by extra keys (`daemon/src/hookConfig.ts`); install/remove always shows the diff and keeps a `.bak` (Settings → Connections).
 **Mailbox** (`daemon/src/mailbox.ts`, `hookHttp.ts`): a background `asyncRewake` command hook (`pet-helper.exe wait` on Windows, `pet-hook.mjs wait` in WSL) long-polls `/mailbox/<token>/<session>`; a message makes it exit 2 and Claude Code wakes even an idle session with the stderr text (marker `[ccPet message]`, shown as the user's message by `transcript.ts`). One-shot: re-armed on `Stop`; a second waiter gets 409. `PermissionRequest` answers (opt-in) go through the same receiver.
-`pet-helper.exe` is built from `helper/PetHelper.cs` by `scripts/build-helper.mjs` (.NET Framework `csc.exe`, run by `npm run dist`).
+`pet-helper.exe` is built from `helper/PetHelper.cs` by `scripts/build-helper.mjs` (.NET Framework `csc.exe`, run by `npm run dist:tauri`).
 
 **Several WSL distros** (`ui/src/hub/wslHost.ts`): one bridge process per followed distro (`createWslHost`), host ids `wsl` (default distro, owns usage/models/new chats) and `wsl:<name>`; WSL 2 distros share one network namespace, so a secondary bridge gets its own `CLAUDE_PET_HOOK_PORT` (47900-47999, `portForDistro`) and no usage poller. Discovery: `wsl.exe -l -v` every 30 s, only *running* distros (we never start one).
 **Windows PTY wrapper**: `pet-helper.exe pty <cmd>` runs the command on a ConPTY and serves `\\.\pipe\claude-pet-<pid>` (duplex, ACL = current user; exported as `PET_PTY_SOCK`). Its mailbox waiter adds `?pty=<pipe>` to the long-poll; `hookHttp` validates the name (`PIPE_NAME`) and `windowsHost` sets `session.pty`, after which the bridge's existing PTY path (`ptySend.ts`: typed text, Esc) works over the pipe.
@@ -56,7 +55,7 @@ Display logic: `ui/src/renderer/usage.ts` (stale after a failed request or 15 mi
 Models are Codex-format packs (`pet.json` + 1536×1872 sheet, 8×9 cells of 192×208). `ui/src/models/zip.ts` reads ZIPs in memory with strict checks; `install.ts` validates, installs atomically and never overwrites. Settings (`ui/src/settings.ts`): autostart, notify, hotkey, active model, appearance colors (`#rrggbb`).
 The renderer can switch models without a restart (`loadSprite` in `app.ts`).
 
-## Tauri app (0.7, replaces Electron; installed on the owner's PC since 2026-11-19)
+## Tauri app (0.7+; replaced Electron, which was removed from the repo and the owner's PC on 2026-11-19)
 `native/app` is its own cargo workspace and uses `native/ccpet-core` by path.
 - **`main.rs`** replaces `ui/src/main.ts`: window, tray, hotkeys, hosts, commands, dialogs.
 - **Hosts:** `windows_host.rs` is the in-process Windows host; `wsl.rs` runs one bridge per distro.
@@ -79,15 +78,15 @@ The renderer can switch models without a restart (`loadSprite` in `app.ts`).
 ## Build and test (verified)
 ```
 export PATH=$HOME/.local/node/bin:$PATH
-npm install && (cd ui && npm install)
+npm install
 npm run build          # bridge + UI bundles
 npm test               # Vitest
 npm run test:py        # PTY wrapper + shell integration checks
 npx tsc --noEmit -p .  # 2 known errors in ui/src/sprite/loadPet.test.ts (import.meta in a test), harmless
-npm run dist           # build + installer: ui/release/ccPet-Setup-<version>.exe (run from WSL; uses cmd.exe)
+npm run dist:tauri     # build + installer: ui/release/ccPet-<version>_x64-setup.exe (run from WSL; uses cmd.exe)
 ```
-Run the installer normally (one-click NSIS, per-user, installs to `%LOCALAPPDATA%\Programs\claude-pet` and starts the app); `/S` hung in earlier tests.
-To test the real UI: start `ccPet.exe --remote-debugging-port=9333` (listens on Windows localhost only; drive it with Windows `node.exe`); `--user-data-dir=<dir>` gives a clean profile.
+Install with `/S` and start through PowerShell `Start-Process` (see the Tauri section).
+To test the real UI use the sandbox and `WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS=--remote-debugging-port=9334` (Tauri section).
 
 ## Decisions (do not revisit without a reason)
 - The Agent SDK cannot attach to a running `claude`; tmux/reptyr do not work (ptrace_scope=1); `messagingSocketPath` in `~/.claude/sessions` is undocumented and not a user-input channel.

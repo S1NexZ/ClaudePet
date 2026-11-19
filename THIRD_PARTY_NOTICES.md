@@ -17,11 +17,8 @@ The app displays this pack under the name **cPet** (Anthropic's trademark guidel
 ## GSAP
 - GSAP 3 (GreenSock) — bundled into the renderer for the hover and state animations. It is **not** MIT-licensed: it is used under the GreenSock Standard "no charge" license (https://gsap.com/standard-license), which allows free use, including commercial. Only the core engine is used (no premium plugins).
 
-## Electron and Chromium
-- Electron 33 — MIT. Chromium and its dependencies — see `LICENSES.chromium.html` and `LICENSE.electron.txt`, installed next to the application.
-
 ## Build and test tooling (not shipped inside the application)
-electron-builder, esbuild, TypeScript, tsx, Vitest and their dependencies, each under its own license (see their packages).
+esbuild, TypeScript, tsx, Vitest and their dependencies, each under its own license (see their packages).
 
 ## Third-party pet models you install yourself
 Models installed through the model manager (ZIP or an npm pet installer) are not part of ccPet. Each belongs to its author; check its license before sharing it.

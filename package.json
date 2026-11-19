@@ -10,14 +10,10 @@
   ],
   "scripts": {
     "test": "vitest run",
-    "start": "bash scripts/start.sh",
     "install-hooks": "tsx daemon/src/cli.ts install-hooks",
     "build": "node daemon/build.mjs && node scripts/build-native.mjs && node ui/build.mjs",
-    "dist": "node scripts/build-helper.mjs && npm run build && cd ui && cmd.exe /c \"npx electron-builder --win\"",
     "test:py": "python3 scripts/test-pet-claude.py && python3 scripts/test-shell-integration.py",
-    "dist:tauri": "node scripts/dist-tauri.mjs",
-    "dist:linux": "node daemon/build.mjs && node scripts/build-native.mjs && node ui/build.mjs && cd ui && npx electron-builder --linux AppImage deb",
-    "dist:mac": "node daemon/build.mjs && node scripts/build-native.mjs && node ui/build.mjs && cd ui && npx electron-builder --mac dmg zip --x64 --arm64"
+    "dist:tauri": "node scripts/dist-tauri.mjs"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",

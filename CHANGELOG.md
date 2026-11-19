@@ -3,6 +3,8 @@
 Формат: [Keep a Changelog](https://keepachangelog.com/ru/1.1.0/), версии по [SemVer](https://semver.org/lang/ru/).
 
 ## [Не выпущено]
+### Изменено
+- Из репозитория удалён Electron: `main.ts`, `preload.cjs`, конфиг electron-builder и команды `npm run dist`, `dist:linux`, `dist:mac`. Приложение собирается только как Tauri (`npm run dist:tauri`). `scripts/pet.sh` запускает установленный ccPet из `%LOCALAPPDATA%\ccPet`.
 
 ## [0.7.2] — 2026-11-19
 ### Исправлено
