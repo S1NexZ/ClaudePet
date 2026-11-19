@@ -8,6 +8,8 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 pub trait HostEvents: Send + Sync + 'static {
+    /** the bridge said hello (`claude` = the CLI it found, '' = none) */
+    fn ready(&self, claude: &str);
     fn up(&self, up: bool);
     fn message(&self, m: Value);
     fn log(&self, line: &str);
@@ -68,6 +70,7 @@ impl WslHost {
                                 backoff = 1000;
                                 ev.log(&format!("bridge wsl ready (claude={}, distro={})", m["claude"], m["distro"]));
                                 ev.up(true);
+                                ev.ready(m["claude"].as_str().unwrap_or(""));
                                 continue;
                             }
                             ev.message(m);

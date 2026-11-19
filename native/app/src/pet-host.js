@@ -26,6 +26,8 @@
     }
     return false;
   };
+  // right-click on the pet: the app's menu, as under Electron (never the webview's own)
+  window.addEventListener('contextmenu', (e) => { e.preventDefault(); if (dragRegion(e.target)) fire('context_menu'); }, true);
   window.addEventListener('mousedown', (e) => { if (e.button === 0 && dragRegion(e.target)) { e.preventDefault(); fire('start_drag'); } }, true);
 
   window.petHost = {
@@ -37,7 +39,7 @@
     onAnswerKey: (cb) => on('pet:answer-key', cb),
     onAnswerKeys: (cb) => on('pet:answer-keys', cb),
     openTerminal: none,
-    pickFolder: later(null),
+    pickFolder: () => invoke('pick_folder'),
     focus: () => fire('focus'),
     rects: (r) => fire('rects', { rects: r }),
     resize: (_w, h) => fire('resize', { h }),
@@ -46,20 +48,20 @@
       list: later([]), data: later(null), use: later(null), installZip: later(null), remove: later(null),
       codexScan: later([]), codexImport: later(null), onProgress: (cb) => on('pet:models:progress', cb), reveal: none, pathForFile: () => '',
     },
-    copyText: none,
-    openUrl: none,
+    copyText: (t) => fire('copy_text', { text: String(t) }),
+    openUrl: (u) => fire('open_url', { url: String(u) }),
     onScale: (cb) => on('pet:scale', cb),
-    setPetScale: none,
+    setPetScale: (v) => fire('set_scale', { v }),
     hoverRects: (r) => fire('hover_rects', { rects: r }),
     onHover: (cb) => on('pet:hover', (h) => cb(!!h)),
-    setLanguage: none,
-    setPermissions: none,
+    setLanguage: (l) => fire('set_language', { pref: String(l) }),
+    setPermissions: (m) => fire('set_permissions', { mode: String(m) }),
     connections: {
       get: later(null), apply: later(null), answerPermissions: later(null), sdkChats: later(null),
       newChatIn: later(null), desktopSend: later(null), diagnostics: later(''),
     },
-    setAppearance: none,
+    setAppearance: (a) => fire('set_appearance', { a }),
     onOpenSettings: (cb) => on('pet:open-settings', cb),
-    notify: none,
+    notify: (title, body) => fire('notify', { title: String(title), body: String(body) }),
   };
 })();
