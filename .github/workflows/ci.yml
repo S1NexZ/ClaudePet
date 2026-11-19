@@ -10,6 +10,10 @@ on:
 permissions:
   contents: read
 
+# Linux libraries the Tauri app (WebKitGTK webview, tray) builds against
+env:
+  TAURI_LINUX_DEPS: libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev libxdo-dev libssl-dev patchelf
+
 jobs:
   test:
     name: Tests (${{ matrix.os }})
@@ -30,6 +34,20 @@ jobs:
       - name: Python wrapper tests
         run: python3 scripts/test-pet-claude.py
 
+  rust:
+    name: Rust tests (core, hook, bridge, app)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - run: sudo apt-get update -qq && sudo apt-get install -y -qq $TAURI_LINUX_DEPS
+      - name: core, hook, bridge
+        working-directory: native
+        run: cargo test
+      - name: app logic (lib)
+        working-directory: native/app
+        run: cargo test --lib
+
   package:
     name: Package (${{ matrix.name }})
     runs-on: ${{ matrix.os }}
@@ -39,25 +57,34 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { name: linux, os: ubuntu-latest, script: 'dist:linux' }
-          - { name: macos, os: macos-latest, script: 'dist:mac' }
+          - { name: windows, os: windows-latest, targets: 'x86_64-unknown-linux-musl', bundles: 'nsis', args: '' }
+          - { name: linux, os: ubuntu-latest, targets: 'x86_64-unknown-linux-musl', bundles: 'deb,appimage', args: '' }
+          - { name: macos, os: macos-latest, targets: 'aarch64-apple-darwin,x86_64-apple-darwin', bundles: 'dmg', args: '--target universal-apple-darwin' }
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with: { node-version: 22 }
+      - uses: dtolnay/rust-toolchain@stable
+        with: { targets: '${{ matrix.targets }}' }
+      - if: matrix.name == 'linux'
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq $TAURI_LINUX_DEPS
       - run: npm ci
-      - run: cd ui && npm ci
-      - run: npm run ${{ matrix.script }}
-        env:
-          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+      # pet-helper.exe (Windows only), the bridge and hook the app ships, the renderer
+      - run: node scripts/build-helper.mjs
+        if: matrix.name == 'windows'
+      - run: node scripts/build-native.mjs
+      - run: node ui/build.mjs
+      - name: Tauri bundle
+        working-directory: native/app
+        run: npx -y @tauri-apps/cli@2 build --bundles ${{ matrix.bundles }} ${{ matrix.args }}
       - uses: actions/upload-artifact@v4
         with:
           name: ccPet-${{ matrix.name }}
           path: |
-            ui/release/*.AppImage
-            ui/release/*.deb
-            ui/release/*.dmg
-            ui/release/*.zip
+            native/app/target/**/bundle/nsis/*.exe
+            native/app/target/**/bundle/deb/*.deb
+            native/app/target/**/bundle/appimage/*.AppImage
+            native/app/target/**/bundle/dmg/*.dmg
           if-no-files-found: error
       - name: Attach to the release (tags only; waits for the release page created with the tag)
         if: startsWith(github.ref, 'refs/tags/v')
@@ -67,8 +94,8 @@ jobs:
           TAG: ${{ github.ref_name }}
         run: |
           for i in $(seq 1 40); do gh release view "$TAG" -R "$GITHUB_REPOSITORY" >/dev/null 2>&1 && break; sleep 30; done
-          shopt -s nullglob
-          files=(ui/release/*.AppImage ui/release/*.deb ui/release/*.dmg ui/release/*.zip)
+          shopt -s nullglob globstar
+          files=(native/app/target/**/bundle/nsis/*.exe native/app/target/**/bundle/deb/*.deb native/app/target/**/bundle/appimage/*.AppImage native/app/target/**/bundle/dmg/*.dmg)
           gh release upload "$TAG" "${files[@]}" -R "$GITHUB_REPOSITORY" --clobber
 
   smoke-linux:
@@ -76,25 +103,17 @@ jobs:
     needs: package
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
         with: { name: ccPet-linux, path: dl }
-      - name: Install a fake claude and run the app under Xvfb
+      - name: Install the .deb and run the app under Xvfb with a fake claude
         run: |
-          sudo apt-get update -qq && sudo apt-get install -y -qq xvfb libfuse2t64 || sudo apt-get install -y -qq xvfb libfuse2
-          chmod +x dl/*.AppImage
+          sudo apt-get update -qq && sudo apt-get install -y -qq xvfb
+          sudo apt-get install -y -qq $(find dl -name '*.deb')
           mkdir -p "$HOME/.local/bin" && printf '#!/bin/sh\necho claude\n' > "$HOME/.local/bin/claude" && chmod +x "$HOME/.local/bin/claude"
-          sysctl kernel.apparmor_restrict_unprivileged_userns || true
           LOG="$HOME/.config/Claude Pet/pet.log"
-          # as a user starts it: no --no-sandbox (the launcher inside picks the sandbox mode)
-          xvfb-run -a dl/*.AppImage --appimage-extract-and-run --screenshot=/tmp/shot.png --shot-delay=9000 || true
-          test -s /tmp/shot.png
+          BIN=$(dpkg -L $(dpkg-deb -f $(find dl -name '*.deb') Package) | grep '/usr/bin/' | head -1)
+          echo "binary: $BIN"
+          timeout 20 xvfb-run -a "$BIN" || true
           cat "$LOG"
-          grep -q "bridge wsl ready" "$LOG"
-          # the .deb: installed, started from PATH as the desktop entry does
-          rm -f "$LOG" /tmp/shot.png
-          sudo apt-get install -y -qq ./dl/*.deb
-          ls -l /opt/ccPet/chrome-sandbox /opt/ccPet/claude-pet* || true
-          xvfb-run -a claude-pet --screenshot=/tmp/shot.png --shot-delay=9000 || true
-          test -s /tmp/shot.png
+          grep -q "\[tauri\] started" "$LOG"
           grep -q "bridge wsl ready" "$LOG"

@@ -9,7 +9,7 @@ mod windows_host;
 mod wsl;
 
 use base64::Engine;
-use ccpet_app::{desktop, diagnostics, merge, models, updates, placement, queue::MessageQueue, settings::{self, Settings}, terminal, winshell};
+use ccpet_app::{desktop, diagnostics, merge, models, native_terminal, updates, placement, queue::MessageQueue, settings::{self, Settings}, terminal, winshell};
 use std::collections::{HashMap, HashSet};
 use windows_host::WindowsHost;
 use serde::Deserialize;
@@ -39,6 +39,25 @@ const SUPPORT_URL: &str = "https://boosty.to/cpet";
 const OPEN_URLS: [&str; 2] = ["https://www.npmjs.com/package/codex-pets", "https://www.npmjs.com/package/@codex-pets/cli"];
 const PLUGIN_INSTALL: &str = "/plugin install ccpet --marketplace S1NexZ/ccPet";
 const ANSWER_KEYS: usize = 9;
+/** Linux and macOS: one local bridge, no WSL, no Windows host, no desktop-app or PowerShell automation */
+const NATIVE: bool = cfg!(not(windows));
+
+/** the user's home folder (USERPROFILE on Windows) */
+fn home_dir() -> PathBuf { std::env::var(if NATIVE { "HOME" } else { "USERPROFILE" }).map(PathBuf::from).unwrap_or_default() }
+
+/** where the Electron app kept its data ("Claude Pet" in the platform's app-data folder): settings, models and the log stay there */
+fn app_data_root() -> PathBuf {
+    if cfg!(windows) { return std::env::var("APPDATA").map(PathBuf::from).unwrap_or_else(|_| PathBuf::from(".")); }
+    if cfg!(target_os = "macos") { return home_dir().join("Library").join("Application Support"); }
+    std::env::var("XDG_CONFIG_HOME").map(PathBuf::from).unwrap_or_else(|_| home_dir().join(".config"))
+}
+
+/** the installed app's resource folder: next to the exe (Windows), Contents/Resources (macOS), ../lib/ccPet (Linux deb / AppImage) */
+fn resource_root(exe_dir: &Path) -> PathBuf {
+    if cfg!(windows) { exe_dir.to_path_buf() }
+    else if cfg!(target_os = "macos") { exe_dir.join("..").join("Resources") }
+    else { exe_dir.join("..").join("lib").join("ccPet") }
+}
 
 #[derive(Clone, Copy, Deserialize)]
 struct Rect { x: f64, y: f64, w: f64, h: f64 }
@@ -332,7 +351,7 @@ fn build_menu(h: &AppHandle) -> tauri::Result<Menu<tauri::Wry>> {
         Box::new(CheckMenuItem::with_id(h, "notify", l("Уведомлять, когда нужно разрешение", "Notify when permission is needed", "需要权限时通知"), true, s.notify, None::<&str>)?),
         Box::new(CheckMenuItem::with_id(h, "answerKeys", l("Отвечать клавишами Ctrl+Alt+1…9", "Answer with Ctrl+Alt+1…9", "用 Ctrl+Alt+1…9 回答"), true, s.answer_keys, None::<&str>)?),
         Box::new(Submenu::with_id_and_items(h, "size", l("Размер питомца", "Pet size", "宠物大小"), true, &size_refs)?),
-        Box::new(CheckMenuItem::with_id(h, "autostart", l("Запускать вместе с Windows", "Start with Windows", "随 Windows 启动"), app.packaged, s.autostart, None::<&str>)?),
+        Box::new(CheckMenuItem::with_id(h, "autostart", if NATIVE { l("Запускать при входе в систему", "Start at login", "登录时启动") } else { l("Запускать вместе с Windows", "Start with Windows", "随 Windows 启动") }, app.packaged, s.autostart, None::<&str>)?),
         Box::new(CheckMenuItem::with_id(h, "checkUpdates", l("Проверять обновления (раз в день)", "Check for updates (daily)", "检查更新（每天）"), true, s.check_updates, None::<&str>)?),
         Box::new(sep()?),
         Box::new(MenuItem::with_id(h, "support", l("Поддержать проект ❤", "Support the project ❤", "支持项目 ❤"), true, None::<&str>)?),
@@ -666,6 +685,20 @@ fn launch(app: &App, make: impl Fn(bool) -> Result<terminal::Launch, String>) {
     }
 }
 
+fn on_path(bin: &str) -> bool { std::env::var("PATH").unwrap_or_default().split(':').any(|d| !d.is_empty() && Path::new(d).join(bin).exists()) }
+const PLATFORM: &str = if cfg!(target_os = "macos") { "darwin" } else { "linux" };
+
+/** Linux / macOS: a terminal emulator running claude (resume or a new chat); false + a dialog when there is none */
+fn open_native_terminal(h: &AppHandle, cwd: &str, claude: &str, session_id: Option<&str>, prompt: Option<&str>) -> bool {
+    let app = h.state::<Arc<App>>();
+    let claude = Some(claude).filter(|c| !c.is_empty());
+    let Some(c) = native_terminal::native_terminal_command(PLATFORM, cwd, claude, session_id, prompt, &on_path) else {
+        info(h, &app.l("Не найден терминал", "No terminal found", "未找到终端"), &app.l("Установите эмулятор терминала (gnome-terminal, konsole, xterm…), чтобы питомец мог открывать сессии.", "Install a terminal emulator (gnome-terminal, konsole, xterm…) so the pet can open sessions.", "请安装终端模拟器（gnome-terminal、konsole、xterm…），宠物才能打开会话。"));
+        return false;
+    };
+    spawn_launch(&app, &terminal::Launch { file: c.file, args: c.args, cwd: None })
+}
+
 /** the pet's command handler (main.ts onCmd) */
 fn on_cmd(h: &AppHandle, cmd: Value) {
     let app = h.state::<Arc<App>>().inner().clone();
@@ -683,7 +716,7 @@ fn on_cmd(h: &AppHandle, cmd: Value) {
     if t == "start" && !s.sdk_chats {
         let cwd = cmd["cwd"].as_str().unwrap_or("").to_string();
         let prompt = cmd["prompt"].as_str().unwrap_or("").trim().to_string();
-        if s.new_chat_in == "desktop" && !app.sandbox {
+        if s.new_chat_in == "desktop" && !app.sandbox && !NATIVE {
             // a new chat inside the Claude desktop app (needs a Windows folder; the app fills the prompt, the pet presses Send)
             if let Some(link) = (!prompt.is_empty()).then(|| desktop::new_chat_link(&cwd, &prompt)).flatten() {
                 let r = winshell::send_to_desktop(&prompt, None, None, Some(&link));
@@ -702,6 +735,11 @@ fn on_cmd(h: &AppHandle, cmd: Value) {
                 return;
             }
             app.log("new chat in the desktop app needs a Windows folder; starting it in a terminal instead");
+        }
+        if NATIVE {
+            let claude = app.wsl_host().map(|w| w.claude()).unwrap_or_default();
+            open_native_terminal(h, &cwd, &claude, None, Some(&prompt).filter(|p| !p.is_empty()).map(|p| p.as_str()));
+            return;
         }
         let wsl_up = app.wsl_host().map_or(false, |w| w.is_up());
         if s.new_chat_in == "windows" || !wsl_up {
@@ -726,7 +764,7 @@ fn on_cmd(h: &AppHandle, cmd: Value) {
             let has_images = cmd["images"].as_array().map_or(false, |a| !a.is_empty());
             // a queued message never drives the Claude app's window (it would take the focus, e.g. from a fullscreen game): it goes through the hook
             if let (Some(did), false) = (x["desktopId"].as_str(), x["mod"] == true) {
-                if s.desktop_send == "real" && !app.sandbox && cmd["queued"] != true && !text.trim().is_empty() && !has_images {
+                if s.desktop_send == "real" && !app.sandbox && !NATIVE && cmd["queued"] != true && !text.trim().is_empty() && !has_images {
                     let r = winshell::send_to_desktop(text, x["project"].as_str(), Some(did), None);
                     if r == "ok" { return; }
                     app.log(&format!("desktop send: {r}; delivering through the hook instead"));
@@ -833,7 +871,7 @@ async fn pick_folder(h: AppHandle) -> Option<String> {
 
 fn bundled_models(app: &App) -> PathBuf { app.models_dirs[0].clone() }
 fn user_models(app: &App) -> PathBuf { app.models_dirs[1].clone() }
-fn codex_dir() -> PathBuf { std::env::var("USERPROFILE").map(PathBuf::from).unwrap_or_default().join(".codex").join("pets") }
+fn codex_dir() -> PathBuf { home_dir().join(".codex").join("pets") }
 
 fn models_for_ui(app: &App) -> Value {
     let all = models::list_models(&bundled_models(app), &user_models(app));
@@ -1190,7 +1228,7 @@ fn open_terminal(h: AppHandle, session_id: String) {
         let Some(s) = app.session(&session_id) else { return };
         let (cwd, project) = (s["cwd"].as_str().unwrap_or("").to_string(), s["project"].as_str().unwrap_or("").to_string());
         if let Some(did) = s["desktopId"].as_str() { // a desktop app session: open that very chat in the app (its own deep link), never a second claude
-            if let Some(link) = desktop::chat_link(did) { let _ = h.opener().open_url(link, None::<&str>); if !app.sandbox { winshell::focus_desktop_app(); } }
+            if let Some(link) = desktop::chat_link(did) { let _ = h.opener().open_url(link, None::<&str>); if !app.sandbox && !NATIVE { winshell::focus_desktop_app(); } }
             return;
         }
         let mark = format!("{project} - Claude {}", session_id.chars().take(4).collect::<String>());
@@ -1203,13 +1241,18 @@ fn open_terminal(h: AppHandle, session_id: String) {
         }
         let Some(w) = app.wsl_by_id(s["hostId"].as_str().unwrap_or("wsl")).or_else(|| app.wsl_host()) else { return };
         let owned = s["owned"] == true;
+        // the session's own terminal: title its tab, then raise the window with that title
+        let focus = |title: &str| if NATIVE {
+            native_terminal::native_focus_command(PLATFORM, title, &on_path).map_or(false, |c| std::process::Command::new(&c.file).args(&c.args).output().map_or(false, |o| o.status.success() && !String::from_utf8_lossy(&o.stdout).contains("none")))
+        } else { winshell::focus_by_title(title) };
         if !owned {
-            if w.mark_terminal(&session_id, &mark) { std::thread::sleep(Duration::from_millis(350)); if winshell::focus_by_title(&mark) { return; } }
+            if w.mark_terminal(&session_id, &mark) { std::thread::sleep(Duration::from_millis(350)); if focus(&mark) { return; } }
         } else {
             w.send(&json!({ "type": "release", "sessionId": session_id }));
             std::thread::sleep(Duration::from_millis(500));
         }
         let (distro, claude) = (w.distro(), w.claude());
+        if NATIVE { open_native_terminal(&h, &cwd, &claude, Some(&session_id), None); return; }
         launch(&app, |wt| terminal::terminal_command(&distro, &cwd, &claude, &session_id, wt));
     });
 }
@@ -1311,7 +1354,7 @@ fn keep_visible(h: AppHandle, win: WebviewWindow) {
 }
 
 fn main() {
-    let appdata = std::env::var("APPDATA").map(PathBuf::from).unwrap_or_else(|_| PathBuf::from("."));
+    let appdata = app_data_root();
     // the app was called "Claude Pet": settings, models and the log stay in that folder (same as the Electron app)
     let sandbox = std::env::var("CCPET_SANDBOX").is_ok();
     // a sandbox (dev, beside the running pet) keeps its own settings, queue and log
@@ -1320,13 +1363,14 @@ fn main() {
     let exe_dir = std::env::current_exe().ok().and_then(|p| p.parent().map(Path::to_path_buf)).unwrap_or_default();
     let repo = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("..").join("..");
     // packaged: next to the exe under resources/; dev: the repo's build/, models/ and scripts/
-    let res = |packaged: &str, dev: PathBuf| { let p = exe_dir.join("resources").join(packaged); if p.exists() { p } else { dev } };
+    let rroot = resource_root(&exe_dir);
+    let res = |packaged: &str, dev: PathBuf| { let p = rroot.join("resources").join(packaged); if p.exists() { p } else { dev } };
     let bridge = std::env::var("CCPET_BRIDGE").map(PathBuf::from).unwrap_or_else(|_| res("hook/ccpet-bridge", repo.join("build").join("hook").join("ccpet-bridge")));
     let settings = settings::load(&data_dir.join("settings.json"));
     // hooks, the status line and the PowerShell wrapper use a stable copy of pet-helper.exe (it is busy for as long as sessions live; the install
     // folder must stay replaceable by the next installer); a sandbox uses the installed one as it is
     let installed_helper = res("helper/pet-helper.exe", repo.join("ui").join("helper").join("pet-helper.exe"));
-    let helper = if !installed_helper.is_file() { None } else if sandbox { Some(installed_helper.to_string_lossy().into_owned()) } else {
+    let helper = if NATIVE || !installed_helper.is_file() { None } else if sandbox { Some(installed_helper.to_string_lossy().into_owned()) } else {
         let dir = std::env::var("LOCALAPPDATA").map(PathBuf::from).unwrap_or_else(|_| data_dir.clone()).join("ccPet").join("bin");
         winshell::sync_helper(&installed_helper, &dir).path
     };
@@ -1338,7 +1382,7 @@ fn main() {
         scripts_dir: res("scripts", repo.join("scripts")),
         sandbox,
         // installed by the setup (autostart, update check): a build run from the repo or the cargo target folder is not
-        packaged: !cfg!(debug_assertions) && exe_dir.join("uninstall.exe").is_file(),
+        packaged: !cfg!(debug_assertions) && (if cfg!(windows) { exe_dir.join("uninstall.exe").is_file() } else { rroot.join("resources").join("hook").exists() }),
         lang: Mutex::new(resolve_lang(&settings.language)),
         settings: Mutex::new(settings),
         helper,
@@ -1361,6 +1405,8 @@ fn main() {
         .manage(app.clone())
         .invoke_handler(tauri::generate_handler![config, cmd, rects, hover_rects, resize, focus, start_drag, context_menu, set_scale, set_appearance, set_permissions, set_language, copy_text, open_url, notify, pick_folder, open_terminal, connections, connections_apply, answer_permissions, sdk_chats, new_chat_in, desktop_send, diagnostics_report, models_list, models_data, models_use, models_install_zip, models_remove, models_codex_scan, models_codex_import, models_reveal])
         .setup(move |tapp| {
+            #[cfg(target_os = "macos")]
+            tapp.set_activation_policy(tauri::ActivationPolicy::Accessory); // a menu-bar style app: no Dock icon
             let handle = tapp.handle().clone();
             let anchor = start_anchor(&app, &handle);
             app.ui.lock().unwrap().anchor = Some(anchor);
@@ -1404,9 +1450,9 @@ fn main() {
             *app.wsl.lock().unwrap() = Some(wsl::WslHost::start(String::new(), bridge.to_string_lossy().into_owned(), exports, Arc::new(Events { handle: handle.clone(), id: "wsl".into() })));
             // the Windows host: Claude Code's HTTP hooks on 127.0.0.1:47821; a sandbox leaves that port to the running pet (CCPET_WIN_PORT
             // gives it its own, with its own token: nothing installed points there, it only adopts sessions from transcripts)
-            let win_port = if app.sandbox { std::env::var("CCPET_WIN_PORT").ok().and_then(|p| p.parse::<u16>().ok()) } else { Some(windows_host::PORT) };
+            let win_port = if NATIVE { None } else if app.sandbox { std::env::var("CCPET_WIN_PORT").ok().and_then(|p| p.parse::<u16>().ok()) } else { Some(windows_host::PORT) };
             if let Some(port) = win_port {
-                let home = std::env::var("USERPROFILE").map(PathBuf::from).unwrap_or_default();
+                let home = home_dir();
                 let h3 = handle.clone();
                 let w = WindowsHost::new(&app.data_dir, home.join(".claude"), port, app.helper.clone(), Box::new(move |m| windows_message(&h3, m)));
                 w.bridge.handle(&json!({ "type": "language", "lang": *app.lang.lock().unwrap() }));
@@ -1443,7 +1489,7 @@ fn main() {
                 });
             }
             // other running WSL 2 distros are followed too (a stopped one is never started); checked every 30 s
-            if !app.sandbox {
+            if !app.sandbox && !NATIVE {
                 let (h7, bridge7) = (handle.clone(), bridge.to_string_lossy().into_owned());
                 std::thread::spawn(move || {
                     std::thread::sleep(Duration::from_secs(4));

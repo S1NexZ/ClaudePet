@@ -73,10 +73,23 @@ impl WslHost {
         std::thread::spawn(move || {
             let mut backoff = 1000u64;
             while !h.stopped.load(Ordering::SeqCst) {
-                let mut cmd = Command::new("wsl.exe");
-                if !distro.is_empty() { cmd.args(["-d", &distro]); }
-                cmd.args(["-e", "bash", "-c", &script(&to_wsl_path(&bridge_win_path), &exports)])
-                    .stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped());
+                #[cfg(windows)]
+                let mut cmd = {
+                    let mut c = Command::new("wsl.exe");
+                    if !distro.is_empty() { c.args(["-d", &distro]); }
+                    c.args(["-e", "bash", "-c", &script(&to_wsl_path(&bridge_win_path), &exports)]);
+                    c
+                };
+                // Linux / macOS: the bridge runs on this machine (no WSL); `$HOME` in our own constants is expanded here
+                #[cfg(not(windows))]
+                let mut cmd = {
+                    let _ = &distro;
+                    let home = std::env::var("HOME").unwrap_or_default();
+                    let mut c = Command::new(&bridge_win_path);
+                    for (k, v) in &exports { c.env(k, v.replace("$HOME", &home)); }
+                    c
+                };
+                cmd.stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped());
                 #[cfg(windows)]
                 { use std::os::windows::process::CommandExt; cmd.creation_flags(0x0800_0000); } // CREATE_NO_WINDOW
                 match cmd.spawn() {

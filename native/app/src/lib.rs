@@ -9,3 +9,4 @@ pub mod winshell;
 pub mod diagnostics;
 pub mod models;
 pub mod updates;
+pub mod native_terminal;
