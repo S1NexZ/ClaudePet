@@ -345,7 +345,7 @@ fn build_menu(h: &AppHandle) -> tauri::Result<Menu<tauri::Wry>> {
         Box::new(MenuItem::with_id(h, "hotkey", format!("{}: {}", l("Вызов питомца", "Summon the pet", "唤出宠物"), if s.hotkey.is_empty() { l("выключен", "off", "关") } else { s.hotkey.clone() }), false, None::<&str>)?),
         Box::new(sep()?),
         Box::new(MenuItem::with_id(h, "settings", l("Настройки…", "Settings…", "设置…"), true, None::<&str>)?),
-        Box::new(MenuItem::with_id(h, "terminal", l("Подключить терминал (WSL)…", "Connect the terminal (WSL)…", "连接终端（WSL）…"), true, None::<&str>)?),
+        Box::new(MenuItem::with_id(h, "terminal", if NATIVE { l("Подключить терминал…", "Connect the terminal…", "连接终端…") } else { l("Подключить терминал (WSL)…", "Connect the terminal (WSL)…", "连接终端（WSL）…") }, true, None::<&str>)?),
         Box::new(MenuItem::with_id(h, "hooks", l("Подключить хуки Claude Code…", "Connect Claude Code hooks…", "连接 Claude Code 钩子…"), up && !app.sandbox, None::<&str>)?),
         Box::new(MenuItem::with_id(h, "plugin", l("Плагин ccPet для Claude Code…", "ccPet plugin for Claude Code…", "Claude Code 的 ccPet 插件…"), true, None::<&str>)?),
         Box::new(CheckMenuItem::with_id(h, "notify", l("Уведомлять, когда нужно разрешение", "Notify when permission is needed", "需要权限时通知"), true, s.notify, None::<&str>)?),
@@ -433,11 +433,13 @@ fn info(h: &AppHandle, title: &str, detail: &str) {
 /** Guided terminal setup: the one command to run in WSL (it asks before changing ~/.bashrc, backs it up, can be undone). */
 fn terminal_setup(h: &AppHandle) {
     let app = h.state::<Arc<App>>();
-    let script = wsl::to_wsl_path(&app.scripts_dir.join("install-shell-integration.sh").to_string_lossy());
+    let script = app.scripts_dir.join("install-shell-integration.sh").to_string_lossy().into_owned();
+    let script = if NATIVE { script } else { wsl::to_wsl_path(&script) };
     let cmd = format!("bash '{}'", script.replace('\'', "'\\''"));
     let detail = app.l("Чтобы обычная команда `claude` запускалась через ccPet (общая сессия с питомцем), выполните в окне WSL-терминала:", "To make the plain `claude` command run through ccPet (one shared session with the pet), run this in a WSL terminal:", "要让普通的 `claude` 命令通过 ccPet 运行（与宠物共用一个会话），请在 WSL 终端中运行：")
         + "\n\n" + &cmd + &app.l("\n\nСкрипт покажет изменение, спросит подтверждение, сохранит копию ~/.bashrc и его можно отменить: добавьте --uninstall. Без этого питомец тоже работает, но писать в терминальную сессию сможет только через запасной путь.", "\n\nThe script shows the change, asks for confirmation, keeps a copy of ~/.bashrc and can be undone with --uninstall. The pet works without it too, but can write into a terminal session only through a fallback path.", "\n\n脚本会显示改动并请求确认，保留 ~/.bashrc 的备份，可用 --uninstall 撤销。没有它宠物也能工作，但只能通过备用途径向终端会话写入。");
-    if confirm(h, &app.l("Подключить терминал (WSL)", "Connect the terminal (WSL)", "连接终端（WSL）"), &detail, &app.l("Копировать команду", "Copy command", "复制命令"), &app.l("Закрыть", "Close", "关闭")) {
+    let detail = if NATIVE { detail.replace("WSL-терминала", "терминала").replace("a WSL terminal", "a terminal").replace("WSL 终端", "终端") } else { detail };
+    if confirm(h, &if NATIVE { app.l("Подключить терминал", "Connect the terminal", "连接终端") } else { app.l("Подключить терминал (WSL)", "Connect the terminal (WSL)", "连接终端（WSL）") }, &detail, &app.l("Копировать команду", "Copy command", "复制命令"), &app.l("Закрыть", "Close", "关闭")) {
         let _ = h.clipboard().write_text(cmd);
     }
 }
@@ -1033,7 +1035,7 @@ fn connections_state(app: &App) -> Value {
         }
         None => json!({ "events": false, "mailbox": false, "permissions": false, "port": 0, "up": false, "settingsPath": "", "diff": "", "statusLine": "none", "statusLineDiff": "" }),
     };
-    json!({ "native": false, "answerPermissions": s.answer_permissions, "sdkChats": s.sdk_chats, "newChatIn": s.new_chat_in, "desktopSend": s.desktop_send,
+    json!({ "native": NATIVE, "answerPermissions": s.answer_permissions, "sdkChats": s.sdk_chats, "newChatIn": s.new_chat_in, "desktopSend": s.desktop_send,
         "helper": app.helper.is_some(), "helperPath": app.helper, "wrapper": wrapper_state(app), "windows": windows, "wsl": wsl_row(app, "wsl"), "others": others })
 }
 
@@ -1207,11 +1209,12 @@ async fn diagnostics_report(h: AppHandle) -> String {
                 status_line: x["statusLine"].as_str().map(String::from), last_event_at: x["lastEventAt"].as_f64(), sessions: of.len(), sources, error: x["error"].as_str().map(String::from) }
         };
         let s = app.s();
-        let user = std::env::var("USERNAME").unwrap_or_default();
+        // the user name is masked out of the report: take it from the home folder (USERNAME exists only on Windows)
+        let user = home_dir().file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
         let desktop_chats = app.desktop_entries().values().map(|e| e.desktop_id.clone()).collect::<HashSet<_>>().len();
         let text = diagnostics::format_diagnostics(&diagnostics::DiagData {
-            version: env!("CARGO_PKG_VERSION").into(), os: "win32".into(), now: now_ms(), user,
-            hosts: vec![row("windows", &c["windows"]), row("wsl", &c["wsl"])],
+            version: env!("CARGO_PKG_VERSION").into(), os: std::env::consts::OS.into(), now: now_ms(), user,
+            hosts: if NATIVE { vec![row("wsl", &c["wsl"])] } else { vec![row("windows", &c["windows"]), row("wsl", &c["wsl"])] },
             helper: app.helper.is_some(), wrapper: c["wrapper"]["state"].as_str().map(String::from), policy: c["wrapper"]["policy"].as_str().map(String::from),
             desktop_chats, new_chat_in: s.new_chat_in.clone(), sdk_chats: s.sdk_chats,
         });
@@ -1353,7 +1356,19 @@ fn keep_visible(h: AppHandle, win: WebviewWindow) {
     });
 }
 
+/** An AppImage runs from a temporary mount that changes every start: the shell integration needs scripts that stay, so they are
+ * copied to ~/.claude-pet/scripts (refreshed on each start). Elsewhere the installed folder is stable. */
+fn stable_scripts(dir: PathBuf) -> PathBuf {
+    if std::env::var_os("APPIMAGE").is_none() { return dir; }
+    let dst = home_dir().join(".claude-pet").join("scripts");
+    let ok = std::fs::create_dir_all(&dst).is_ok() && ["pet-claude.py", "install-shell-integration.sh"].iter().all(|f| std::fs::copy(dir.join(f), dst.join(f)).is_ok());
+    if ok { dst } else { dir }
+}
+
 fn main() {
+    // Linux under Wayland: a global cursor position, window placement and always-on-top need X11 (XWayland)
+    #[cfg(target_os = "linux")]
+    if std::env::var_os("WAYLAND_DISPLAY").is_some() && std::env::var_os("GDK_BACKEND").is_none() { std::env::set_var("GDK_BACKEND", "x11"); }
     let appdata = app_data_root();
     // the app was called "Claude Pet": settings, models and the log stay in that folder (same as the Electron app)
     let sandbox = std::env::var("CCPET_SANDBOX").is_ok();
@@ -1379,14 +1394,14 @@ fn main() {
     let qf = queue_file.clone();
     let app = Arc::new(App {
         models_dirs: vec![res("models", repo.join("models")), data_dir.join("models")],
-        scripts_dir: res("scripts", repo.join("scripts")),
+        scripts_dir: stable_scripts(res("scripts", repo.join("scripts"))),
         sandbox,
         // installed by the setup (autostart, update check): a build run from the repo or the cargo target folder is not
         packaged: !cfg!(debug_assertions) && (if cfg!(windows) { exe_dir.join("uninstall.exe").is_file() } else { rroot.join("resources").join("hook").exists() }),
         lang: Mutex::new(resolve_lang(&settings.language)),
         settings: Mutex::new(settings),
         helper,
-        desktop: Mutex::new((desktop::DesktopRegistry::new(move || desktop::find_registry_roots(&std::env::var("LOCALAPPDATA").unwrap_or_default(), &std::env::var("APPDATA").unwrap_or_default())), None, HashMap::new())),
+        desktop: Mutex::new((desktop::DesktopRegistry::new(move || if NATIVE { vec![] } else { desktop::find_registry_roots(&std::env::var("LOCALAPPDATA").unwrap_or_default(), &std::env::var("APPDATA").unwrap_or_default()) }), None, HashMap::new())),
         others: Mutex::new(vec![]), push_lock: Mutex::new(()), keys_tx: Mutex::new(None), ps_policy: Mutex::new(None), win: Mutex::new(None),
         queue: Mutex::new(MessageQueue::new(Box::new(move |d| { let _ = std::fs::write(&qf, d.to_string()); }), loaded)),
         data_dir, ui: Mutex::new(Ui::default()), wsl: Mutex::new(None),

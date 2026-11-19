@@ -55,6 +55,7 @@ fn token(data_dir: &Path, port: u16) -> String {
 /** The status line command must not contain spaces (it runs unquoted): a path with spaces becomes its short 8.3 form. */
 fn shell_safe_path(p: &str) -> String {
     if !p.contains(char::is_whitespace) { return p.into(); }
+    #[allow(unused_mut)]
     let mut c = std::process::Command::new("cmd.exe");
     #[cfg(windows)]
     { use std::os::windows::process::CommandExt; c.creation_flags(0x0800_0000).raw_arg(format!("/d /s /c \"for %I in (\"{p}\") do @echo %~sI\"")); }

@@ -46,7 +46,10 @@ jobs:
         run: cargo test
       - name: app logic (lib)
         working-directory: native/app
-        run: cargo test --lib
+        # tauri-build copies the bundle resources: the shipped binaries only need to exist here
+        run: |
+          mkdir -p ../../build/hook && touch ../../build/hook/ccpet-bridge ../../build/hook/ccpet-hook
+          cargo test --lib
 
   package:
     name: Package (${{ matrix.name }})
@@ -69,6 +72,8 @@ jobs:
       - if: matrix.name == 'linux'
         run: sudo apt-get update -qq && sudo apt-get install -y -qq $TAURI_LINUX_DEPS
       - run: npm ci
+      - run: cd ui && npm ci
+        env: { ELECTRON_SKIP_BINARY_DOWNLOAD: '1' }
       # pet-helper.exe (Windows only), the bridge and hook the app ships, the renderer
       - run: node scripts/build-helper.mjs
         if: matrix.name == 'windows'

@@ -1,0 +1,7 @@
+{
+  "bundle": {
+    "resources": {
+      "../../ui/helper/pet-helper.exe": "resources/helper/pet-helper.exe"
+    }
+  }
+}
