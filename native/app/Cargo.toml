@@ -30,6 +30,9 @@ ccpet-core = { path = "../ccpet-core" }
 ureq = { version = "2", default-features = false, features = ["tls", "json"] }
 miniz_oxide = "0.8"
 
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_UI_Controls", "Win32_UI_WindowsAndMessaging"] }
+
 [profile.release]
 opt-level = "s"
 lto = true

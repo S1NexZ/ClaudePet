@@ -3,11 +3,40 @@
   "productName": "ccPet",
   "version": "0.7.0",
   "identifier": "local.claudepet.app",
-  "build": { "frontendDist": "../../ui/dist" },
+  "build": {
+    "frontendDist": "../../ui/dist"
+  },
   "app": {
     "withGlobalTauri": true,
     "windows": [],
-    "security": { "csp": null }
+    "security": {
+      "csp": null
+    }
   },
-  "bundle": { "active": false, "icon": ["icons/icon.ico"] }
+  "bundle": {
+    "active": true,
+    "targets": [
+      "nsis"
+    ],
+    "icon": [
+      "icons/icon.ico"
+    ],
+    "publisher": "S1NexZ",
+    "shortDescription": "A desktop pet for Claude Code sessions",
+    "resources": {
+      "../../build/hook/ccpet-bridge": "resources/hook/ccpet-bridge",
+      "../../build/hook/ccpet-hook": "resources/hook/ccpet-hook",
+      "../../models/": "resources/models/",
+      "../../scripts/pet-claude.py": "resources/scripts/pet-claude.py",
+      "../../scripts/install-shell-integration.sh": "resources/scripts/install-shell-integration.sh",
+      "../../ui/helper/pet-helper.exe": "resources/helper/pet-helper.exe",
+      "../../LICENSE": "resources/LICENSE",
+      "../../THIRD_PARTY_NOTICES.md": "resources/THIRD_PARTY_NOTICES.md"
+    },
+    "windows": {
+      "nsis": {
+        "installMode": "currentUser"
+      }
+    }
+  }
 }
