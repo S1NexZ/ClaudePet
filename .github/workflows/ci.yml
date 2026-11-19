@@ -27,6 +27,7 @@ jobs:
       - uses: actions/setup-node@v4
         with: { node-version: 22, cache: npm }
       - run: npm ci
+      - run: cd ui && npm ci
       - run: npm test
       - run: npm run build
       - name: Python wrapper tests
@@ -70,6 +71,7 @@ jobs:
       - if: matrix.name == 'linux'
         run: sudo apt-get update -qq && sudo apt-get install -y -qq $TAURI_LINUX_DEPS
       - run: npm ci
+      - run: cd ui && npm ci
       # pet-helper.exe (Windows only), the bridge and hook the app ships, the renderer
       - run: node scripts/build-helper.mjs
         if: matrix.name == 'windows'
