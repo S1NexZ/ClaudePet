@@ -122,10 +122,10 @@ impl WslHost {
                                 if let Some(w) = h.marks.lock().unwrap().remove(m["sessionId"].as_str().unwrap_or("")) { let _ = w.send(m["ok"] == true); }
                                 return;
                             }
-                            if t == "hooks" || t == "statusline" {
+                            if t == "hooks" || t == "statusline" || t == "hooks-probe" {
                                 let w = { let mut ws = h.waiters.lock().unwrap(); let q = ws.entry(t.clone()).or_default(); let w = q.pop_front(); if q.is_empty() { ws.remove(&t); } w };
                                 if let Some(w) = w { let _ = w.send(m); return; } // a dropped receiver (timed out): the late answer goes nowhere
-                                if t == "statusline" { return; }
+                                if t != "hooks" { return; }
                             }
                             ev.message(m);
                         });
@@ -154,7 +154,7 @@ impl WslHost {
     pub fn claude(&self) -> String { self.claude.lock().unwrap().clone() }
     pub fn distro(&self) -> String { self.distro.lock().unwrap().clone() }
 
-    /** a command and its answer of `reply` type ('hooks' / 'statusline'); None: no answer in 4 s or the bridge is down */
+    /** a command and its answer of `reply` type ('hooks' / 'statusline' / 'hooks-probe'); None: no answer in 4 s or the bridge is down */
     pub fn request(&self, cmd: &Value, reply: &str) -> Option<Value> {
         if !self.is_up() { return None; }
         let (tx, rx) = channel();

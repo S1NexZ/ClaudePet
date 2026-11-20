@@ -105,12 +105,17 @@ struct State {
     pending_ptys: HashMap<String, String>,
     /** the user asked to look for sessions again (reload button): the adoption loop scans at once, further back */
     rescan: bool,
+    /** connection tests that reached the bridge (their session ids) */
+    probes: HashSet<String>,
 }
 
 struct Inner { o: BridgeOpts, st: Mutex<State>, usage: Mutex<Option<UsageSource>>, runner: OnceLock<Arc<dyn Runner>> }
 
 #[derive(Clone)]
 pub struct Bridge(Arc<Inner>);
+
+/** session id prefix of a connection test event: never a session */
+pub const PROBE_PREFIX: &str = "ccpet-probe-";
 
 /** hook events that can only come after a pending permission question was settled */
 const SETTLES_ASK: [&str; 6] = ["PostToolUse", "PostToolUseFailure", "Stop", "StopFailure", "UserPromptSubmit", "SessionEnd"];
@@ -356,6 +361,7 @@ impl Bridge {
                 g.store.remove(&id); g.pids.remove(&id); g.ended.insert(id);
             }
             "hooks" => { self.hooks(cmd); return Ok(false); }
+            "hooks-probe" => { self.in_background(|b| { b.out(b.probe()); Ok(()) }); return Ok(false); }
             _ => return Err(l("Неизвестная команда", "Unknown command", "未知命令")),
         }
         Ok(true)
@@ -403,6 +409,29 @@ impl Bridge {
         self.out(json!({ "type": "statusline", "diff": if apply { "" } else { diff.as_str() }, "applied": apply && !diff.is_empty(), "kind": kind(shown) }));
     }
 
+    /** Connection test: one Notification sent through the installed events hook (the command or the http URL in settings.json), as Claude Code
+     *  would send it; ok = it reached this bridge within 2 s. Blocks up to ~3 s. */
+    pub fn probe(&self) -> Value {
+        let fail = |e: String| json!({ "type": "hooks-probe", "ok": false, "error": e });
+        let current = match read_settings(&self.0.o.settings_path) { Ok((c, _)) => c, Err(e) => return fail(e) };
+        let Some(target) = probe_target(&current) else { return fail(l("Хуки питомца не найдены в settings.json", "The pet's hooks are not in settings.json", "settings.json 中没有宠物的钩子")) };
+        let id = format!("{PROBE_PREFIX}{}-{}", std::process::id(), now_ms());
+        let deadline = std::time::Instant::now() + Duration::from_millis(3000); // within the app's 4 s wait for the answer
+        self.lock().probes.clear(); // late or foreign test ids never pile up
+        let body = json!({ "session_id": id, "hook_event_name": "Notification", "cwd": "", "message": "ccPet connection test" }).to_string();
+        let sent = match &target { ProbeTarget::Command(c) => run_hook_command(c, &body), ProbeTarget::Url(u) => post_hook(u, &body) };
+        if let Err(e) = sent { return fail(e); }
+        loop {
+            if self.lock().probes.remove(&id) { return json!({ "type": "hooks-probe", "ok": true }); }
+            if std::time::Instant::now() >= deadline { break; }
+            std::thread::sleep(Duration::from_millis(100));
+        }
+        fail(match target {
+            ProbeTarget::Command(c) => l(&format!("Тестовое событие не дошло до питомца. Команда хука: {c}"), &format!("The test event did not reach the pet. Hook command: {c}"), &format!("测试事件未到达宠物。钩子命令：{c}")),
+            ProbeTarget::Url(u) => l(&format!("Тестовое событие не дошло до питомца. Адрес хука: {}", redact_token(&u)), &format!("The test event did not reach the pet. Hook address: {}", redact_token(&u)), &format!("测试事件未到达宠物。钩子地址：{}", redact_token(&u))),
+        })
+    }
+
     pub fn push_usage(&self) {
         let mut u = self.0.usage.lock().unwrap();
         let Some(u) = u.as_mut() else { return };
@@ -440,6 +469,7 @@ impl Bridge {
     }
 
     pub fn on_hook(&self, e: HookEvent) {
+        if e.session_id.starts_with(PROBE_PREFIX) { self.lock().probes.insert(e.session_id); return; }
         let sid = e.session_id.clone();
         let name = e.hook_event_name.as_str();
         let mut g = self.lock();
@@ -563,6 +593,46 @@ impl crate::runner::RunnerHost for Bridge {
     fn changed(&self) { self.snapshot(true); }
 }
 
+/** The events hook command as Claude Code runs it (`sh -c`, the event JSON on stdin); 2 s at most. */
+#[cfg(unix)]
+fn run_hook_command(command: &str, body: &str) -> Result<(), String> {
+    use std::io::Write;
+    use std::process::{Command, Stdio};
+    // the socket this bridge listens on (a sandbox bridge has its own): a test must never reach another pet
+    let mut child = Command::new("sh").arg("-c").arg(command).env("CLAUDE_PET_SOCK", crate::hook_socket::default_socket_path()).stdin(Stdio::piped()).stdout(Stdio::null()).stderr(Stdio::null()).spawn().map_err(|e| e.to_string())?;
+    if let Some(mut i) = child.stdin.take() { let _ = i.write_all(body.as_bytes()); }
+    for _ in 0..40 {
+        if child.try_wait().map_err(|e| e.to_string())?.is_some() { return Ok(()); }
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    let _ = child.kill(); let _ = child.wait();
+    Err(l("Команда хука не завершилась за 2 с", "The hook command did not finish in 2 s", "钩子命令未在 2 秒内结束"))
+}
+#[cfg(not(unix))]
+fn run_hook_command(_: &str, _: &str) -> Result<(), String> { Err(l("Командные хуки здесь не проверяются", "Command hooks are not tested here", "此处不测试命令钩子")) }
+
+/** POST the event to the http hook's URL (always `http://127.0.0.1:<port>/…`, checked by probe_target); Ok = 200. */
+fn post_hook(url: &str, body: &str) -> Result<(), String> {
+    use std::io::{Read, Write};
+    let bad = || l(&format!("Неверный адрес хука: {}", redact_token(url)), &format!("Bad hook address: {}", redact_token(url)), &format!("钩子地址无效：{}", redact_token(url)));
+    let rest = url.strip_prefix("http://").ok_or_else(bad)?;
+    let (addr, path) = rest.split_once('/').ok_or_else(bad)?;
+    let sock: std::net::SocketAddr = addr.parse().map_err(|_| bad())?;
+    let mut c = std::net::TcpStream::connect_timeout(&sock, Duration::from_secs(2))
+        .map_err(|e| l(&format!("Приёмник {addr} недоступен: {e}"), &format!("The receiver {addr} is unreachable: {e}"), &format!("接收器 {addr} 不可达：{e}")))?;
+    let _ = c.set_read_timeout(Some(Duration::from_secs(2)));
+    write!(c, "POST /{path} HTTP/1.1\r\nHost: {addr}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len()).map_err(|e| e.to_string())?;
+    let mut head = Vec::new();
+    let _ = c.take(64).read_to_end(&mut head); // the status line; the server closes after its answer
+    let status = String::from_utf8_lossy(&head).split_whitespace().nth(1).unwrap_or("").to_string();
+    if status == "200" { Ok(()) } else { Err(l(&format!("Приёмник ответил {status} (токен устарел?)"), &format!("The receiver answered {status} (outdated token?)"), &format!("接收器返回 {status}（令牌过期？）"))) }
+}
+
+/** the hook URL without its token, for messages the user may paste somewhere */
+fn redact_token(url: &str) -> String {
+    match url.split_once("/hook/") { Some((a, b)) => format!("{a}/hook/…/{}", b.rsplit('/').next().unwrap_or("")), None => url.to_string() }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -583,6 +653,34 @@ mod tests {
     }
     fn of(log: &Log, t: &str) -> Vec<Value> { log.lock().unwrap().iter().filter(|m| m["type"] == t).cloned().collect() }
     fn ev(name: &str, sid: &str) -> HookEvent { HookEvent::new(name, sid, "/w/proj") }
+
+    #[test]
+    fn probe_goes_through_the_installed_hook_and_never_becomes_a_session() {
+        use crate::hook_http::{HookServer, HookServerOpts};
+        let (b, log, settings) = make("probe");
+        assert_eq!(b.probe()["ok"], false, "no settings.json, no hooks");
+        let b1 = b.clone();
+        let s = HookServer::start(HookServerOpts {
+            port: 0, token: "abc123".into(), mailbox: Arc::new(Mailbox::new()), wait_ms: 50,
+            on_event: Box::new(move |e| b1.on_hook(e)), on_waiter: None, on_pty: None, on_permission: None, on_reply: None, on_command: None,
+        }).unwrap();
+        let origin = format!("http://127.0.0.1:{}", s.port);
+        std::fs::write(&settings, plan_windows_hooks(&json!({}), &origin, "abc123", None, false).0.to_string()).unwrap();
+        assert_eq!(b.probe(), json!({ "type": "hooks-probe", "ok": true }));
+        assert!(of(&log, "snapshot").iter().all(|m| m["sessions"].as_array().map_or(true, |a| a.is_empty())), "a test event is not a session");
+        // an old token (the app's was renewed): Claude Code's events would be refused too
+        std::fs::write(&settings, plan_windows_hooks(&json!({}), &origin, "ffff00", None, false).0.to_string()).unwrap();
+        let r = b.probe();
+        assert_eq!(r["ok"], false);
+        assert!(r["error"].as_str().unwrap().contains("404") && !r["error"].as_str().unwrap().contains("ffff00"), "{r}");
+        // a command hook that delivers nothing (the binary is gone): reported, and it does not hang
+        #[cfg(unix)] {
+            std::fs::write(&settings, json!({ "hooks": { "Notification": [{ "hooks": [{ "type": "command", "command": "\"/gone/ccpet-hook\" 2>/dev/null || true" }] }] } }).to_string()).unwrap();
+            let r = b.probe();
+            assert_eq!(r["ok"], false);
+            assert!(r["error"].as_str().unwrap().contains("/gone/ccpet-hook"), "{r}");
+        }
+    }
 
     #[test]
     fn hooks_drive_the_snapshot() {

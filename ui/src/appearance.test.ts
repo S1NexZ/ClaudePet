@@ -41,7 +41,8 @@ describe('pet tint', () => {
 
 describe('accent', () => {
   it('default accent keeps the built-in look; a light accent gets dark ink, a dark one light ink', () => {
-    expect(accentVars(null)).toEqual({ accent: DEFAULT_ACCENT, ink: '#0e2a28' });
+    expect(accentVars(null)).toEqual({ accent: DEFAULT_ACCENT, ink: '#2a1307' });
+    expect(accentVars('#e8794a').ink).toBe('#10151a'); // a mid-tone orange reads better with dark ink than with white
     expect(accentVars('#ffe066').ink).toBe('#10151a');
     expect(accentVars('#1b2a6b').ink).toBe('#ffffff');
     expect(accentVars('#4f8cff').accent).toBe('#4f8cff');

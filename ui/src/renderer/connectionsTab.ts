@@ -15,6 +15,8 @@ export interface HostState {
   statusLineError?: string;
   /** newest hook activity from this host (ms), null = none since the pet started */
   lastEventAt?: number | null;
+  /** the last connection test: a test event sent through the installed hook */
+  probe?: { ok: boolean; error?: string; at: number } | null;
 }
 import { wrapperLine } from '../psLine.js';
 
@@ -23,7 +25,7 @@ export interface ConnectionsState { /** Linux / macOS: one local host, none of t
 export interface ConnectionsHost {
   copy?(text: string): void;
   get(): Promise<ConnectionsState>;
-  apply(host: string, action: 'connect' | 'disconnect' | 'statusline' | 'statusline-off' | 'wrapper' | 'wrapper-off'): Promise<ConnectionsState>;
+  apply(host: string, action: 'connect' | 'disconnect' | 'probe' | 'statusline' | 'statusline-off' | 'wrapper' | 'wrapper-off'): Promise<ConnectionsState>;
   answerPermissions(on: boolean): Promise<ConnectionsState>;
   sdkChats(on: boolean): Promise<ConnectionsState>;
   newChatIn?(where: 'wsl' | 'windows' | 'desktop'): Promise<ConnectionsState>;
@@ -65,6 +67,11 @@ export function createConnectionsTab(host: ConnectionsHost) {
         ? L(`Последнее событие от Claude Code: ${mins < 1 ? 'только что' : `${mins} мин назад`}`, `Last event from Claude Code: ${mins < 1 ? 'just now' : `${mins} min ago`}`, `Claude Code 最近事件：${mins < 1 ? '刚刚' : `${mins} 分钟前`}`)
         : L('Событий от Claude Code пока не было: запустите или перезапустите сессию здесь.', 'No events from Claude Code yet: start or restart a session here.', '尚未收到 Claude Code 事件：请在此启动或重启会话。')));
     }
+    if (connected && h.probe) {
+      row.append(h.probe.ok
+        ? el('div', 's-hint', L('Проверка связи: тестовое событие дошло до питомца.', 'Connection test: the test event reached the pet.', '连接测试：测试事件已到达宠物。'))
+        : el('div', 's-hint c-err', `${L('Проверка связи не прошла', 'Connection test failed', '连接测试失败')}: ${h.probe.error ?? ''}`));
+    }
     if (h.error) row.append(el('div', 's-hint c-err', h.error));
     const line = el('div', 's-swatches');
     const needsUpdate = connected && !!h.diff;
@@ -76,6 +83,11 @@ export function createConnectionsTab(host: ConnectionsHost) {
       const off = el('button', 's-btn', L('Отключить', 'Disconnect', '断开')); off.type = 'button'; off.disabled = busy;
       off.addEventListener('click', () => void run(host.apply(id, 'disconnect')));
       line.append(off);
+    }
+    if (connected) {
+      const test = el('button', 's-btn', L('Проверить связь', 'Test connection', '测试连接')); test.type = 'button'; test.disabled = busy;
+      test.addEventListener('click', () => void run(host.apply(id, 'probe')));
+      line.append(test);
     }
     row.append(line);
     if (h.statusLine !== undefined && !h.statusLineError) {

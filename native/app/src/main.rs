@@ -96,6 +96,12 @@ struct Ui {
     warned: HashSet<String>,
     /** a newer release on GitHub (only told, never installed) */
     update: Option<updates::Update>,
+    /** the last connection test of each host (`{ok, error?, at}`), shown in Connections */
+    probes: HashMap<String, Value>,
+    /** hosts (`<id>`) and status lines (`<id>/statusline`) seen working in this run: losing one later is reported */
+    seen_ok: HashSet<String>,
+    /** the problems the health check last told about ("" = none) */
+    health_told: String,
 }
 
 struct App {
@@ -226,11 +232,16 @@ fn pet_payload(dir: &Path) -> Result<Value, String> {
     let frames: &[u32] = if image_size(&bytes).map(|s| s.1) == Some(2288) { &ROW_FRAMES_V2 } else { &ROW_FRAMES };
     let tweaks: Value = std::fs::read_to_string(dir.join("tweaks.json")).ok().and_then(|t| serde_json::from_str(&t).ok()).unwrap_or(json!({}));
     let id = meta["id"].as_str().unwrap_or("pet");
+    let layout = models::parse_layout(&meta)?;
     let kind = if sheet_name.to_lowercase().ends_with(".png") { "png" } else { "webp" };
+    let (cell, rows) = match &layout {
+        Some(l) => (json!({ "w": l.cell_w, "h": l.cell_h }), l.rows.iter().map(|r| json!({ "frames": r.frames, "id": r.id, "loopMs": r.loop_ms })).collect::<Vec<_>>()),
+        None => (json!({ "w": 192, "h": 208 }), frames.iter().map(|f| json!({ "frames": f })).collect::<Vec<_>>()),
+    };
     Ok(json!({
         "id": id, "name": meta["displayName"].as_str().unwrap_or(id),
         "imageUrl": format!("data:image/{kind};base64,{}", base64::engine::general_purpose::STANDARD.encode(&bytes)),
-        "cell": { "w": 192, "h": 208 }, "rows": frames.iter().map(|f| json!({ "frames": f })).collect::<Vec<_>>(), "tweaks": tweaks,
+        "cell": cell, "rows": rows, "tweaks": tweaks,
     }))
 }
 
@@ -1043,7 +1054,8 @@ fn wsl_row(app: &App, id: &str) -> Value {
     // the limits ring is fed from the default distro's status line
     let sl = if primary { w.request(&json!({ "type": "statusline" }), "statusline").unwrap_or(Value::Null) } else { Value::Null };
     json!({ "id": id, "port": port, "statusLine": sl["kind"], "statusLineDiff": sl["diff"].as_str().unwrap_or(""), "statusLineError": sl["error"], "up": w.is_up(), "distro": w.distro(),
-        "events": hk["events"] == true, "mailbox": hk["mailbox"] == true, "permissions": hk["permissions"] == true, "diff": hk["diff"].as_str().unwrap_or(""), "error": hk["error"], "lastEventAt": last.get(id) })
+        "events": hk["events"] == true, "mailbox": hk["mailbox"] == true, "permissions": hk["permissions"] == true, "diff": hk["diff"].as_str().unwrap_or(""), "error": hk["error"], "lastEventAt": last.get(id),
+        "probe": app.ui.lock().unwrap().probes.get(id) })
 }
 
 fn connections_state(app: &App) -> Value {
@@ -1058,12 +1070,72 @@ fn connections_state(app: &App) -> Value {
             st["port"] = json!(w.port()); st["up"] = json!(app.ui.lock().unwrap().win_up);
             st["statusLine"] = sl["kind"].clone(); st["statusLineDiff"] = sl["diff"].clone(); st["statusLineError"] = sl["error"].clone();
             st["lastEventAt"] = json!(last.get("windows"));
+            st["probe"] = json!(app.ui.lock().unwrap().probes.get("windows"));
             st
         }
         None => json!({ "events": false, "mailbox": false, "permissions": false, "port": 0, "up": false, "settingsPath": "", "diff": "", "statusLine": "none", "statusLineDiff": "" }),
     };
     json!({ "native": NATIVE, "answerPermissions": s.answer_permissions, "sdkChats": s.sdk_chats, "newChatIn": s.new_chat_in, "desktopSend": s.desktop_send,
         "helper": app.helper.is_some(), "helperPath": app.helper, "wrapper": wrapper_state(app), "windows": windows, "wsl": wsl_row(app, "wsl"), "others": others })
+}
+
+// ---------- connection test and health check: hooks that stopped working are reported, never repaired without the user ----------
+
+/** One test event through the host's installed hook (see Bridge::probe); remembered for the Connections tab. None: the bridge did not
+ *  answer (down or restarting), which says nothing about the hooks. One test at a time: WSL answers are matched by type, in order. */
+fn probe_host(app: &App, id: &str) -> Option<Value> {
+    static ONE: Mutex<()> = Mutex::new(());
+    let _one = ONE.lock().unwrap_or_else(|e| e.into_inner());
+    let r = if id == "windows" { app.win_host().map(|w| w.bridge.probe()) } else { app.wsl_by_id(id).and_then(|w| w.request(&json!({ "type": "hooks-probe" }), "hooks-probe")) };
+    let mut r = r?;
+    r["at"] = json!(now_ms());
+    let mut ui = app.ui.lock().unwrap();
+    if r["ok"] == true { ui.seen_ok.insert(id.into()); }
+    ui.probes.insert(id.into(), r.clone());
+    Some(r)
+}
+
+/** Every 10 minutes (never in a sandbox): hooks that were installed and stopped delivering, hooks or a status line seen working earlier in this
+ *  run and gone now. Told once per new set of problems, with a way to Connections (where every change shows its diff first). */
+fn health_check(h: &AppHandle) {
+    let app = h.state::<Arc<App>>();
+    let perm = app.s().answer_permissions;
+    // (host id, label, hooks status, status line)
+    let mut hosts: Vec<(String, String, Value, Value)> = vec![];
+    if let Some(w) = app.win_host().filter(|_| app.ui.lock().unwrap().win_up) { hosts.push(("windows".into(), "Windows".into(), w.state(perm), w.status_line(false, false))); }
+    let mut ids = vec!["wsl".to_string()];
+    ids.extend(app.others.lock().unwrap().iter().map(|(i, _, _)| i.clone()));
+    for id in ids {
+        let Some(w) = app.wsl_by_id(&id).filter(|w| w.is_up()) else { continue };
+        let Some(hk) = w.request(&json!({ "type": "hooks", "apply": false, "permissions": perm }), "hooks") else { continue };
+        let sl = if id == "wsl" { w.request(&json!({ "type": "statusline" }), "statusline").unwrap_or(Value::Null) } else { Value::Null };
+        let label = if NATIVE { app.l("Этот компьютер", "This computer", "本机") } else { format!("WSL ({})", w.distro()) };
+        hosts.push((id, label, hk, sl));
+    }
+    let mut problems = vec![];
+    for (id, label, hk, sl) in hosts {
+        if !hk["error"].is_null() { continue; } // an unreadable settings.json is shown in Connections, not a lost connection
+        let seen = |k: &str| app.ui.lock().unwrap().seen_ok.contains(k);
+        if hk["events"] == true {
+            if let Some(r) = probe_host(&app, &id).filter(|r| r["ok"] != true) { problems.push(format!("• {label}: {}", r["error"].as_str().unwrap_or(""))); }
+        } else if seen(&id) {
+            problems.push(format!("• {label}: {}", app.l("хуки питомца пропали из settings.json", "the pet's hooks are gone from settings.json", "宠物的钩子已从 settings.json 中消失")));
+        }
+        let key = format!("{id}/statusline");
+        match sl["kind"].as_str() {
+            Some("ours") | Some("chained") => { app.ui.lock().unwrap().seen_ok.insert(key); }
+            Some("none") if seen(&key) => problems.push(format!("• {label}: {}", app.l("статус-строка питомца отключена, кольцо лимитов не обновляется", "the pet's status line is gone, the limits ring is not updated", "宠物的状态栏已断开，额度环不再更新"))),
+            _ => {}
+        }
+    }
+    let told = problems.join("\n");
+    { let mut ui = app.ui.lock().unwrap(); if ui.health_told == told { return; } ui.health_told = told.clone(); }
+    if problems.is_empty() { return; }
+    app.log(&format!("health: {}", told.replace('\n', " ")));
+    let detail = format!("{told}\n\n{}", app.l("Сессии Claude Code могут перестать появляться в питомце. В «Подключениях» видно, что именно изменится, перед любой правкой. Сам питомец ничего не меняет.", "Claude Code sessions may stop showing up in the pet. Connections shows exactly what would change before any edit. The pet changes nothing by itself.", "Claude Code 会话可能不再显示在宠物中。在“连接”中，任何修改前都会显示具体改动。宠物不会自行修改任何内容。"));
+    if confirm(h, &app.l("Связь питомца с Claude Code нарушена", "The pet lost its connection to Claude Code", "宠物与 Claude Code 的连接中断"), &detail, &app.l("Открыть подключения", "Open Connections", "打开连接"), &app.l("Не сейчас", "Not now", "暂不")) {
+        if let Some(w) = main_window(h) { let _ = w.show(); let _ = w.set_always_on_top(true); let _ = w.emit("pet:open-settings", "connections"); }
+    }
 }
 
 /** Our Windows entries are there but out of date (the app moved, the helper changed, the token is new): offer to update them once per start. */
@@ -1091,10 +1163,26 @@ async fn connections(h: AppHandle) -> Value {
 
 #[tauri::command]
 async fn connections_apply(h: AppHandle, host: String, action: String) -> Value {
-    tauri::async_runtime::spawn_blocking(move || { connections_apply_now(&h, &host, &action); connections_state(&h.state::<Arc<App>>()) }).await.unwrap_or(Value::Null)
+    tauri::async_runtime::spawn_blocking(move || {
+        connections_apply_now(&h, &host, &action);
+        let app = h.state::<Arc<App>>();
+        match action.as_str() {
+            // a sandbox's Windows host is not the one the real settings point at: its test would feed the installed pet
+            "connect" | "probe" if !(app.sandbox && host == "windows") => {
+                if probe_host(&app, &host).is_none() { app.ui.lock().unwrap().probes.insert(host.clone(), json!({ "ok": false, "at": now_ms(), "error": app.l("Мост не ответил: попробуйте ещё раз через несколько секунд", "The bridge did not answer: try again in a few seconds", "桥接未响应：请几秒后重试") })); }
+            }
+            "probe" => { app.ui.lock().unwrap().probes.insert(host.clone(), json!({ "ok": false, "at": now_ms(), "error": app.l("В песочнице Windows-хуки не проверяются: они ведут в установленного питомца", "Windows hooks are not tested in a sandbox: they lead to the installed pet", "沙盒中不测试 Windows 钩子：它们指向已安装的宠物") })); }
+            // the user's own choice: the health check must not report it as lost
+            "disconnect" => { let mut ui = app.ui.lock().unwrap(); ui.probes.remove(&host); ui.seen_ok.remove(&host); }
+            "statusline-off" => { app.ui.lock().unwrap().seen_ok.remove(&format!("{host}/statusline")); }
+            _ => {}
+        }
+        connections_state(&app)
+    }).await.unwrap_or(Value::Null)
 }
 
 fn connections_apply_now(h: &AppHandle, host: &str, action: &str) {
+    if action == "probe" { return; } // connections_apply runs it
     let app = h.state::<Arc<App>>();
     let perm = app.s().answer_permissions;
     let remove = action == "disconnect";
@@ -1546,6 +1634,11 @@ fn main() {
             }
             let h8 = handle.clone();
             std::thread::spawn(move || { std::thread::sleep(Duration::from_secs(20)); loop { check_updates(&h8); std::thread::sleep(Duration::from_secs(24 * 3600)); } });
+            // hooks or the status line that stopped working (removed by hand, a moved app, a renewed token): told, never repaired silently
+            if !app.sandbox {
+                let h9 = handle.clone();
+                std::thread::spawn(move || { std::thread::sleep(Duration::from_secs(180)); loop { health_check(&h9); std::thread::sleep(Duration::from_secs(600)); } });
+            }
             // timed messages and turns that ended without a fresh snapshot
             let h2 = handle.clone();
             std::thread::spawn(move || loop { std::thread::sleep(Duration::from_secs(2)); drain_queue(&h2); });

@@ -1,11 +1,11 @@
 /** User-chosen colors: `primary` tints the pet itself, `accent` is the interface accent (null = the built-in look). */
 export interface Appearance { primary: string | null; accent: string | null }
 export const DEFAULT_APPEARANCE: Appearance = { primary: null, accent: null };
-export const DEFAULT_ACCENT = '#39c5bb';
-/** text on top of the accent (send button, "Allow"): the built-in dark teal ink */
-const DEFAULT_INK = '#0e2a28';
+export const DEFAULT_ACCENT = '#e8794a';
+/** text on top of the accent (send button, "Allow"): the built-in dark ember ink */
+const DEFAULT_INK = '#2a1307';
 
-export const ACCENT_PRESETS = ['#39c5bb', '#4f8cff', '#9b6bff', '#ff6b9d', '#ff9f43', '#7bd88f'] as const;
+export const ACCENT_PRESETS = ['#e8794a', '#39c5bb', '#4f8cff', '#9b6bff', '#ff6b9d', '#7bd88f'] as const;
 export const PRIMARY_PRESETS = ['#d97757', '#4f8cff', '#9b6bff', '#ff6b9d', '#7bd88f', '#e6c84a'] as const;
 
 const HEX = /^#[0-9a-f]{6}$/i;
@@ -69,7 +69,9 @@ const luminance = ([r, g, b]: [number, number, number]) => {
 /** CSS custom properties for the interface: the accent and a readable ink for text drawn on it. */
 export function accentVars(accent: string | null): { accent: string; ink: string } {
   if (!accent) return { accent: DEFAULT_ACCENT, ink: DEFAULT_INK };
-  return { accent, ink: luminance(hexToRgb(accent)) > 0.35 ? '#10151a' : '#ffffff' };
+  // contrast ratio against dark ink (luminance ~0.008) vs white: the higher one wins (mid tones such as orange read better dark)
+  const y = luminance(hexToRgb(accent));
+  return { accent, ink: (y + 0.05) / 0.058 >= 1.05 / (y + 0.05) ? '#10151a' : '#ffffff' };
 }
 
 export const spriteFilter = (a: Appearance, baseHue: number | null): string => {

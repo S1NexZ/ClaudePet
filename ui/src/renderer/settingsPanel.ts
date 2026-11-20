@@ -112,7 +112,8 @@ export function createSettingsPanel(root: HTMLElement, deps: SettingsDeps, initi
     renderLegend(box);
   };
 
-  const LEGEND: Array<[string, string]> = [['idle', '#34d399'], ['thinking', '#4f8cff'], ['reading', '#22d3ee'], ['writing', '#a78bfa'], ['running', '#fb923c'], ['testing', '#facc15'], ['waiting', '#ef4444'], ['subagent', '#f472b6'], ['done', '#a3e635'], ['sleeping', '#8b93a7']];
+  // the same colors as #chip[data-state] in styles.css
+  const LEGEND: Array<[string, string]> = [['idle', '#4ade80'], ['thinking', '#6e9bff'], ['reading', '#4fd1e0'], ['writing', '#b39bff'], ['running', '#f59e54'], ['testing', '#f2c94c'], ['waiting', '#ff6b6b'], ['subagent', '#f472b6'], ['done', '#a3e36a'], ['sleeping', '#8b90a0']];
   const renderLegend = (box: HTMLElement) => {
     const row = el('div', 's-section');
     row.append(el('div', 's-title', L('Цвета статуса', 'Status colors', '状态颜色')));
@@ -125,7 +126,7 @@ export function createSettingsPanel(root: HTMLElement, deps: SettingsDeps, initi
     row.append(grid); box.append(row);
   };
 
-  /** a live copy of the status control: the dot (status) inside the arc (limit, in the accent colour) with the one-word status */
+  /** a live copy of the status capsule: the status dot inside the limit ring (accent colour), then the word */
   const chipPreview = () => {
     const wrap = el('div', 's-section');
     const prev = el('div', 's-prev');
@@ -133,7 +134,7 @@ export function createSettingsPanel(root: HTMLElement, deps: SettingsDeps, initi
     ring.innerHTML = '<svg viewBox="0 0 36 36" aria-hidden="true"><circle class="track" cx="18" cy="18" r="15.9155"/><circle class="arc" cx="18" cy="18" r="15.9155" stroke-dasharray="42 100"/></svg>';
     ring.append(el('i', 's-prev-dot'));
     prev.append(ring, el('span', 's-prev-word', STATE_LABEL.idle));
-    wrap.append(prev, el('div', 's-hint', L('Так выглядит значок статуса: точка внутри дуги. Точка показывает, что делает Claude, дуга показывает лимит и берёт акцентный цвет.', 'This is the status control: a dot inside an arc. The dot shows what Claude is doing, the arc shows the limit and takes the accent colour.', '这是状态图标：圆点位于圆弧内。圆点表示 Claude 正在做什么，圆弧表示额度并使用强调色。')));
+    wrap.append(prev, el('div', 's-hint', L('Так выглядит плашка статуса: точка внутри кольца. Точка показывает, что делает Claude, кольцо показывает 5-часовой лимит и берёт акцентный цвет.', 'This is the status capsule: a dot inside a ring. The dot shows what Claude is doing, the ring shows the 5-hour limit and takes the accent colour.', '这是状态胶囊：圆点位于圆环内。圆点表示 Claude 正在做什么，圆环显示 5 小时额度并使用强调色。')));
     return wrap;
   };
 

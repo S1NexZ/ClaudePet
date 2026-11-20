@@ -19,13 +19,13 @@ Works with Claude Code in **Windows terminals, WSL, the Claude desktop app, macO
 ## What it does
 
 - **Shows what Claude is doing.** Thinking, reading, writing, running commands, testing, waiting for you, done or asleep: the pet animates each state, driven by Claude Code hooks.
-- **Answers Claude's questions.** When Claude asks you something with options, the pet shows them as buttons. Pick one, type your own answer, or leave it to the terminal. `Ctrl+Alt+1…9` presses a button from any window.
+- **Answers Claude's questions.** When Claude asks you something with options, the pet shows them as buttons. Pick one, type your own answer, or leave it to the terminal. `Ctrl+Alt+1…9` presses a button from any window (the number shows on the button; for a permission request `1` is Deny, `2` is Allow).
 - **Approves actions** (optional). Allow or deny tool permissions right from the pet.
 - **Shares one live session with your terminal.** Type from the pet or the terminal: it is the same Claude Code process and the same transcript, no second copy.
 - **Queues messages.** Write while Claude is still working: the message goes in when the turn ends. `/at 23:30 run the tests` sends it at a set time, `/at reset continue` right after your 5-hour limit resets.
 - **Summarizes each turn.** After a turn that changed files you get a card: files, +/− lines, time and tokens.
 - **Reacts.** Tests pass or a commit lands: the pet jumps and waves. Tests fail: it looks sad.
-- **Shows your plan limits.** A ring next to the pet tracks the 5-hour and weekly Claude limits.
+- **Shows your plan limits.** A ring in the status island tracks the 5-hour window; the limits button in the pet's button rail opens both windows with their reset times.
 - **Chat commands.** `/model`, `/btw`, `/stop`, `/at`, `/compact`, `/clear` and more, with a menu as you type `/`.
 - **Custom pets.** Install any pet in the Codex pet format (`pet.json` + sprite sheet) from a ZIP. Recolor the pet and the interface to taste.
 
@@ -40,7 +40,7 @@ Works with Claude Code in **Windows terminals, WSL, the Claude desktop app, macO
    | Linux (other) | `ccPet_<version>_amd64.AppImage` |
 
    **Upgrading from 0.6 on Windows:** 0.7 installs to `%LOCALAPPDATA%\ccPet`. Quit the old ccPet and uninstall it in "Installed apps": both cannot run at once (one port, one hotkey). Settings, pets and connected hooks stay.
-2. **Connect Claude Code hooks:** Settings (⚙) → Connections. The pet shows the exact change to `~/.claude/settings.json`, keeps a `.bak` copy and applies it only after you agree. Without hooks the pet cannot see your sessions.
+2. **Connect Claude Code hooks:** Settings (⚙) → Connections. The pet shows the exact change to `~/.claude/settings.json`, keeps a `.bak` copy and applies it only after you agree. Without hooks the pet cannot see your sessions. "Test connection" sends one test event through the installed hook and shows whether it arrived; every 10 minutes the pet also checks this by itself and tells you (once) if hooks or the status line stopped working. It never repairs anything without you.
 3. **Optional: connect the terminal** (tray → "Connect the terminal"). Then the pet can type into your terminal session directly and stop it with Esc.
 4. Run `claude` as usual. The pet picks up the session; `Ctrl+Alt+P` opens the chat.
 

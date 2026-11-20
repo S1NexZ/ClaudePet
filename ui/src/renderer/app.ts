@@ -1,4 +1,4 @@
-import { statusView, sessionLabel, formatElapsed, hostTag, chipLabel } from './labels.js';
+import { statusView, sessionLabel, formatElapsed, hostTag, sessionsCount } from './labels.js';
 import { createConnectionsTab, type ConnectionsHost } from './connectionsTab.js';
 import { pinSnapshot, focusSnapshot } from './view.js';
 import { sessionRows, nextChatId, isQuiet } from './switcher.js';
@@ -36,7 +36,7 @@ interface PetConfig {
   petScale?: number;
   answerKeys?: boolean;
   language?: LangPref;
-  pet: { imageUrl: string; cell: { w: number; h: number }; rows: { frames: number }[]; tweaks?: { trimHalfWidth?: Record<string, number>; lightFringe?: 'remove' | 'dark'; fringeCream?: boolean; stabilize?: boolean; spill?: boolean } };
+  pet: { imageUrl: string; cell: { w: number; h: number }; rows: { frames: number; id?: string; loopMs?: number | null }[]; tweaks?: { trimHalfWidth?: Record<string, number>; lightFringe?: 'remove' | 'dark'; fringeCream?: boolean; stabilize?: boolean; spill?: boolean } };
 }
 declare global {
   interface Window {
@@ -66,7 +66,7 @@ declare global {
       models: ModelsHost['models'];
       copyText: ModelsHost['copyText'];
       openUrl: ModelsHost['openUrl'];
-      onOpenSettings(cb: () => void): void;
+      onOpenSettings(cb: (tab?: string | null) => void): void;
     };
   }
 }
@@ -179,7 +179,7 @@ async function main() {
   // ---- subscription limits (real Claude plan limits fed by Claude Code's statusLine; never invented) ----
   let lastText = '', lastNotified = '';
   let usage: UsageInfo | null = null, usageOpen = false;
-  const usageRing = $('usage-ring'), usagePanel = $('usage');
+  const usageRing = $('usage-ring'), usagePanel = $('usage'), usageBtn = $('btn-usage');
   const barLevel = (p: number) => (p >= 90 ? 'high' : p >= 75 ? 'warn' : '');
   const renderUsage = () => {
     const now = Date.now();
@@ -211,14 +211,15 @@ async function main() {
   const setUsageOpen = (open: boolean) => {
     usageOpen = open;
     usagePanel.hidden = !open;
-    usageRing.setAttribute('aria-expanded', String(open));
+    usageBtn.setAttribute('aria-expanded', String(open));
     if (open) host.send({ type: 'usage-refresh' }); // the user looks: one live query (at most one a minute) on top of the status-line file
     renderUsage();
   };
-  usageRing.addEventListener('click', () => setUsageOpen(!usageOpen));
+  // the limits open from their own button in the rail: the status island changes width, the rail stays put
+  usageBtn.addEventListener('click', () => setUsageOpen(!usageOpen));
   document.addEventListener('mousedown', (e) => {
     const t = e.target as Node;
-    if (usageOpen && !usagePanel.contains(t) && !usageRing.contains(t)) setUsageOpen(false);
+    if (usageOpen && !usagePanel.contains(t) && !usageBtn.contains(t)) setUsageOpen(false);
   });
   document.addEventListener('keydown', (e) => {
     if (usageOpen && e.key === 'Escape') { e.stopPropagation(); setUsageOpen(false); }
@@ -249,8 +250,8 @@ async function main() {
 
   // ---- sprite: shown at once from the raw sheet, cleaned cell by cell in the background ----
   const sprite = $('sprite') as HTMLCanvasElement;
-  const cw = pet.cell.w, ch = pet.cell.h;
-  const w = cw * SCALE, h = ch * SCALE;
+  let cw = pet.cell.w, ch = pet.cell.h; // a layout pack has its own (bigger) cells
+  let w = cw * SCALE, h = ch * SCALE;
   const dpr = window.devicePixelRatio || 1;
   // pet size: the box follows the --ps CSS variable, the canvas keeps its backing store matched so it stays crisp
   let petScale = clampScale(cfg.petScale ?? 1), sizeVersion = 0;
@@ -287,7 +288,9 @@ async function main() {
     const ax = a.getContext('2d', { willReadFrequently: true })!;
     ax.drawImage(img, 0, 0);
     atlas = a; petWin.__petAtlas = a; petWin.__petAtlasReady = false;
-    anim.setRowFrames(data.rows.map((r) => r.frames));
+    cw = data.cell.w; ch = data.cell.h; w = cw * SCALE; h = ch * SCALE; applyPetScale(petScale);
+    if (data.rows.some((r) => r.id)) anim.setLayout(data.rows.map((r) => ({ frames: r.frames, id: r.id, loopMs: r.loopMs ?? undefined })));
+    else { anim.setLayout(null); anim.setRowFrames(data.rows.map((r) => r.frames)); }
     baseHue = dominantHue(ax.getImageData(0, 0, a.width, a.height).data);
     atlasVersion++;
     onSpriteLoaded();
@@ -333,7 +336,7 @@ async function main() {
   connectionsTab.attach(() => settingsPanel.rerender());
   onSpriteLoaded = () => settingsPanel.repaint(); // a model has its own body hue: the tint is recomputed
   $('btn-settings').addEventListener('click', () => settingsPanel.toggle());
-  host.onOpenSettings(() => settingsPanel.open());
+  host.onOpenSettings((tab) => settingsPanel.open(tab ?? undefined));
 
 
   // ---- window behaviour: report interactive boxes (main decides click-through) and content size ----
@@ -348,7 +351,9 @@ async function main() {
   // the window's height follows the content (the width is constant); it hangs from the pet's top, so growing never moves the pet
   let sizeSent = 0;
   const fitWindow = () => {
-    const h = Math.ceil($('stage').offsetHeight) + 8;
+    // the rail hangs beside the pet and may reach below the island: the window keeps room for all of it (offsets ignore its slide-in transform)
+    const dock = $('dock'), pill = $('dock-pill'), rail = dock.offsetTop + pill.offsetTop + pill.offsetHeight;
+    const h = Math.ceil(Math.max($('stage').offsetHeight, rail)) + 8;
     if (h !== sizeSent) { sizeSent = h; host.resize(424, h); }
   };
   // the pet runs the way the window is being dragged (the OS moves it; main reports each step)
@@ -467,7 +472,7 @@ async function main() {
       else if (name === 'end') { if (target) host.send({ type: 'end', sessionId: target.id }); else notify(L('Чат не открыт', 'No chat is open', '没有打开的聊天')); }
       else if (name === 'sessions') { input.value = ''; (document.getElementById('chat-switch') as HTMLElement).click(); return; }
       else if (name === 'terminal') { if (target) host.openTerminal(target.id); else notify(L('Чат не открыт', 'No chat is open', '没有打开的聊天')); }
-      else if (name === 'usage') { input.value = ''; (document.getElementById('usage-ring') as HTMLElement).click(); return; }
+      else if (name === 'usage') { input.value = ''; setUsageOpen(true); return; }
       else if (name === 'settings') { input.value = ''; settingsPanel.toggle(); return; }
       else if (name === 'help') {
         const box = $('models');
@@ -655,7 +660,12 @@ async function main() {
   const panel = $('sessions');
   if (cfg.panel) panel.hidden = false;
   $('btn-activity').addEventListener('click', () => { panel.hidden = !panel.hidden; });
-  $('btn-reload').addEventListener('click', () => host.send({ type: 'rescan' })); // sessions the pet lost: every host looks for them again
+  // the panel's own footer: look for lost sessions again (every host rescans); kept after the rows
+  const panelFoot = document.createElement('div'); panelFoot.className = 'p-foot';
+  const reload = document.createElement('button'); reload.type = 'button'; reload.className = 'p-btn';
+  reload.textContent = L('Найти сессии заново', 'Find sessions again', '重新查找会话');
+  reload.addEventListener('click', () => host.send({ type: 'rescan' }));
+  panelFoot.append(reload);
   let panelEmpty: HTMLElement | null = null;
   const renderPanel = (snap: Snapshot | null) => {
     if (panel.hidden) return;
@@ -663,7 +673,7 @@ async function main() {
     const list = [...(raw?.sessions ?? [])].sort((a, b) => b.lastEventAt - a.lastEventAt);
     if (list.length === 0) {
       if (!panelEmpty) { panelEmpty = document.createElement('div'); panelEmpty.className = 'empty'; panelEmpty.textContent = L('Сессий пока нет', 'No sessions yet', '还没有会话'); }
-      panel.replaceChildren(panelEmpty); return;
+      panel.replaceChildren(panelEmpty, panelFoot); return;
     }
     if (panelEmpty?.parentElement === panel) panelEmpty.remove();
     const data = foldRows(list.map((x) => ({
@@ -671,7 +681,8 @@ async function main() {
       tone: x.state === 'waiting' || x.state === 'error' ? 'alert' : x.state === 'idle' || x.state === 'sleeping' ? 'quiet' : '',
       name: x.project, meta: `${hostTag(x) ? `${hostTag(x)} · ` : ''}${sessionLabel(x)} · ${formatElapsed(now - x.since)}`, tip: x.cwd, dismissable: !x.owned, quiet: isQuiet(x, snap?.attention ?? null, now),
     })));
-    syncRows(panel, data, { toggle: toggleQuiet, open: (id) => openChat(id), dismiss: (id) => host.send({ type: 'dismiss', sessionId: id }), dismissLabel });
+    if (panelFoot.parentElement !== panel) panel.append(panelFoot);
+    syncRows(panel, data, { toggle: toggleQuiet, open: (id) => openChat(id), dismiss: (id) => host.send({ type: 'dismiss', sessionId: id }), dismissLabel }, panelFoot);
   };
 
   // ---- hover dock: the buttons rest as a shadow under the pet and grow out of it while the cursor is over the pet ----
@@ -698,18 +709,8 @@ async function main() {
   const reduceMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false;
   animatePanels(['notice', 'perm', 'sessions', 'settings', 'usage', 'chat', 'chat-menu', 'models', 'cmds'].map((id) => document.getElementById(id)), reduceMotion);
   const motion = createMotion({ sprite, dockPill, chip: $('chip') }, reduceMotion);
-  // a click on the chip (outside the ring, which opens the limits) shows or hides the session name
-  $('chip').addEventListener('click', (e) => { if ((e.target as HTMLElement).closest('#usage-ring')) return; detailOpen = !detailOpen; wake(); });
-  // the island's left edge is placed so that the calm word ("Ready") is centred under the pet; the ring stays there whatever the word is
-  const fitAnchor = () => {
-    const w = $('label'), cs = getComputedStyle(w);
-    const ctx = document.createElement('canvas').getContext('2d');
-    if (!ctx) return;
-    ctx.font = `${cs.fontWeight} ${cs.fontSize} ${cs.fontFamily}`;
-    $('chip').style.setProperty('--ref', `${Math.ceil(7 + 26 + 8 + ctx.measureText(chipLabel('idle')).width + 15)}px`); // border + ring + gap + word + padding
-  };
-  fitAnchor();
-  void document.fonts?.ready.then(fitAnchor);
+  // a click on the chip shows or hides the session name (the limits have their own button in the rail)
+  $('chip').addEventListener('click', () => { detailOpen = !detailOpen; wake(); });
   const FRAME_FADE_MS = 100, STATE_FADE_MS = 190;
   let curRow = -1, curCol = -1, prevRow = -1, prevCol = -1, fadeStart = 0, fadeMs = 0, fading = false, lastAtlasV = -1, lastSizeV = -1, drawnFade = 1;
   const smooth = (p: number) => p * p * (3 - 2 * p);
@@ -718,10 +719,18 @@ async function main() {
     ctx.drawImage(atlas, c * cw, r * ch, cw, ch, 0, 0, sprite.width, sprite.height);
     ctx.globalAlpha = 1;
   };
+  /** cross-fade of two frames: A*(1-m) + B*m on premultiplied pixels ('lighter'), so overlapping opaque parts stay opaque */
+  const blend = (ra: number, ca: number, rb: number, cb: number, m: number) => {
+    ctx.globalAlpha = 1 - m; ctx.drawImage(atlas, ca * cw, ra * ch, cw, ch, 0, 0, sprite.width, sprite.height);
+    ctx.globalCompositeOperation = 'lighter'; ctx.globalAlpha = m;
+    ctx.drawImage(atlas, cb * cw, rb * ch, cw, ch, 0, 0, sprite.width, sprite.height);
+    ctx.globalCompositeOperation = 'source-over'; ctx.globalAlpha = 1;
+  };
   let lastTick = 0;
   const tick = (t: number) => {
     own = true;
-    if (t - lastTick < 15) { schedule(t); return; } // high-refresh displays (144 Hz+): ~60 updates a second are plenty
+    // layout packs are blended every display frame (144 Hz+ shows it); classic sheets keep the ~60 updates a second
+    if (t - lastTick < (anim.smooth() ? 4 : 15)) { schedule(t); return; }
     lastTick = t;
     const snap = eff();
     const s = snap?.sessions.find((x) => x.id === snap.attention) ?? null;
@@ -734,8 +743,20 @@ async function main() {
     motion.setAwake(awake || expanded);
     if (!awake) detailOpen = false;
     motion.setDetail(detailOpen);
-    const { row, col } = anim.frame(t);
-    if (row !== curRow || col !== curCol) {
+    const { row, col, next, mix } = anim.frame(t);
+    if (anim.smooth() && !reduceMotion) {
+      if (row !== curRow) {
+        const changed = curRow >= 0;
+        prevRow = curRow; prevCol = curCol; curRow = row; curCol = col; fadeStart = t; fadeMs = STATE_FADE_MS; fading = changed && !movedAt;
+        if (changed && !movedAt) motion.pop();
+      }
+      curCol = col;
+      const p = fading ? Math.min(1, (t - fadeStart) / fadeMs) : 1;
+      if (p >= 1) fading = false;
+      ctx.clearRect(0, 0, sprite.width, sprite.height);
+      if (fading) blend(prevRow, prevCol, row, col, smooth(p)); else blend(row, col, row, next ?? col, mix ?? 0);
+      lastAtlasV = atlasVersion; lastSizeV = sizeVersion; drawnFade = p;
+    } else if (row !== curRow || col !== curCol) {
       const rowChanged = curRow >= 0 && row !== curRow;
       prevRow = curRow; prevCol = curCol; curRow = row; curCol = col;
       fading = prevRow >= 0 && !reduceMotion && !(movedAt && rowChanged); // dragging flips rows constantly: no fade there
@@ -744,7 +765,7 @@ async function main() {
     }
     const p = fading ? Math.min(1, (t - fadeStart) / fadeMs) : 1;
     if (p >= 1) fading = false;
-    if (p !== drawnFade || atlasVersion !== lastAtlasV || sizeVersion !== lastSizeV || fading) {
+    if (anim.smooth() && !reduceMotion) { /* drawn above */ } else if (p !== drawnFade || atlasVersion !== lastAtlasV || sizeVersion !== lastSizeV || fading) {
       drawnFade = p; lastAtlasV = atlasVersion; lastSizeV = sizeVersion;
       ctx.clearRect(0, 0, sprite.width, sprite.height);
       if (p < 1 && prevRow >= 0) { draw(prevRow, prevCol, 1); draw(curRow, curCol, smooth(p)); } else draw(curRow, curCol, 1);
@@ -764,6 +785,11 @@ async function main() {
     if (!dirty && t - lastHeavy < 1000) { schedule(t); return; }
     dirty = false;
     lastHeavy = t;
+    // how many sessions the pet follows, after a divider in the capsule (only when there is more than one)
+    const nSess = raw?.sessions?.length ?? 0, countEl = $('chip-count');
+    const countText = nSess > 1 ? sessionsCount(nSess) : '';
+    if (countEl.textContent !== countText) countEl.textContent = countText;
+    show(countEl, nSess > 1);
     const pp = s?.pendingPermission;
     show($('perm'), !!pp);
     if (pp) {
@@ -800,7 +826,7 @@ async function main() {
   function schedule(t: number) {
     // queued at the END of the tick: the observers' records of this tick's own writes are delivered before it
     queueMicrotask(() => { own = false; });
-    if (fading || dirty) { runSoon(); return; }
+    if (fading || dirty || (anim.smooth() && !reduceMotion)) { runSoon(); return; }
     let ms = Math.min(anim.msToNextFrame(t), 1000 - (Date.now() % 1000) + 5);
     if (movedAt) ms = Math.min(ms, Math.max(0, 180 - (t - movedAt)));
     if (ms < 17) { runSoon(); return; }

@@ -17,6 +17,9 @@ The app displays this pack under the name **cPet** (Anthropic's trademark guidel
 ## GSAP
 - GSAP 3 (GreenSock) — bundled into the renderer for the hover and state animations. It is **not** MIT-licensed: it is used under the GreenSock Standard "no charge" license (https://gsap.com/standard-license), which allows free use, including commercial. Only the core engine is used (no premium plugins).
 
+## Manrope font
+- Manrope (`ui/assets/fonts`, Latin and Cyrillic subsets as served by Google Fonts) — the interface font. Copyright 2018 The Manrope Project Authors (https://github.com/googlefonts/manrope), licensed under the SIL Open Font License 1.1; the licence text is `ui/assets/fonts/Manrope-OFL.txt` and ships next to the font files.
+
 ## Build and test tooling (not shipped inside the application)
 esbuild, TypeScript, tsx, Vitest and their dependencies, each under its own license (see their packages).
 

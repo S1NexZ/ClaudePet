@@ -198,6 +198,22 @@ pub fn hooks_status(current: &Value) -> HooksStatus {
     HooksStatus { events, mailbox, permissions }
 }
 
+/** Where the pet's events hook sends a Notification: the command (WSL / Linux / macOS) or Claude Code's http hook (Windows). */
+#[derive(Debug, PartialEq)]
+pub enum ProbeTarget { Command(String), Url(String) }
+
+/** The installed events hook a connection test goes through, exactly as Claude Code would run it; None = not installed. */
+pub fn probe_target(current: &Value) -> Option<ProbeTarget> {
+    handlers(current, "Notification").into_iter().find_map(|h| {
+        let c = s(h, "command");
+        // the quoted program must be our hook itself: a user's own script that merely mentions it is never run with a test event
+        let ours = c.split('"').nth(1).map_or(false, |p| p.ends_with("ccpet-hook") || p.ends_with("pet-hook.mjs"));
+        if h.get("type").and_then(Value::as_str) == Some("command") && ours && !is_wait(c) && !is_statusline_cmd(c) { Some(ProbeTarget::Command(c.into())) }
+        else if is_our_http(h) { Some(ProbeTarget::Url(s(h, "url").into())) }
+        else { None }
+    })
+}
+
 /** Hook files the settings point at (ours): none = not installed, any missing = stale. */
 pub fn referenced_hook_files(current: &Value) -> Vec<String> {
     let Some(Value::Object(hooks)) = current.get("hooks") else { return vec![] };
@@ -510,5 +526,17 @@ mod tests {
         assert!(!d.is_empty());
         assert_eq!(r["statusLine"]["command"], cmd);
         assert!(plan_windows_status_line(&json!({}), "C:\\Program Files\\pet\\pet-helper.exe").is_err());
+    }
+
+    #[test]
+    fn probe_goes_through_the_installed_events_hook() {
+        assert_eq!(probe_target(&mine()), None);
+        let wsl = plan_host_hooks(&plan_hooks(&mine(), HOOK).0, &HostHooks { origin: WORIGIN, token: "ab12cd", hook_path: HOOK, permissions: true }).0;
+        assert_eq!(probe_target(&wsl), Some(ProbeTarget::Command(format!("\"{HOOK}\" 2>/dev/null || true"))), "the events hook, not the waiter");
+        let win = plan_windows_hooks(&mine(), WORIGIN, "ab12cd", Some(HELPER), true).0;
+        assert_eq!(probe_target(&win), Some(ProbeTarget::Url(format!("{WORIGIN}/hook/ab12cd/Notification"))));
+        assert_eq!(probe_target(&remove_hooks(&wsl).0), None);
+        let mine_too = json!({ "hooks": { "Notification": [{ "hooks": [{ "type": "command", "command": "~/log.sh --after ccpet-hook" }] }] } });
+        assert_eq!(probe_target(&mine_too), None, "a user's script that mentions the hook is not run");
     }
 }

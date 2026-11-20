@@ -1,52 +1,62 @@
+/* Manrope, bundled (SIL OFL 1.1): Latin and Cyrillic, one variable file each (400-800); Chinese falls back to Microsoft YaHei UI */
+@font-face { font-family: Manrope; font-style: normal; font-weight: 400 800; font-display: swap; src: url(fonts/manrope-cyrillic.woff2) format("woff2");
+  unicode-range: U+0301, U+0400-045F, U+0490-0491, U+04B0-04B1, U+2116; }
+@font-face { font-family: Manrope; font-style: normal; font-weight: 400 800; font-display: swap; src: url(fonts/manrope-latin.woff2) format("woff2");
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD; }
 :root {
-  --glass: rgba(30, 30, 34, 0.86);
+  /* "warm glass": dark warm-grey glass, soft deep shadows; --teal is the interface accent (the user's choice, ember by default) */
+  --glass: rgba(30, 29, 35, 0.9);
   --glass-line: rgba(255, 255, 255, 0.08);
-  --text: #f1efea;
-  --muted: #a9a59c;
-  --teal: #39c5bb;
-  --alert: #d97757;
-  --hover: rgba(255, 255, 255, 0.09);
+  --text: #f3efe8;
+  --muted: #a8a296;
+  --teal: #e8794a;
+  --alert: #ff6b6b;
+  --hover: rgba(255, 255, 255, 0.07);
   --hover2: rgba(255, 255, 255, 0.1);
-  --shot-bg: #3b3b40;
-  --accent-ink: #0e2a28;
-  --solid: #26262b;
+  --shot-bg: #3b3a40;
+  --accent-ink: #2a1307;
+  --solid: #252429;
+  --shadow: 0 10px 30px rgba(0, 0, 0, 0.38);
+  --code-bg: rgba(0, 0, 0, 0.32);
 }
 @media (prefers-color-scheme: light) {
   :root {
-    --glass: rgba(252, 250, 246, 0.93); --glass-line: rgba(0, 0, 0, 0.1);
-    --text: #2b2926; --muted: #6f6a60; --hover: rgba(0, 0, 0, 0.06); --hover2: rgba(0, 0, 0, 0.07);
-    --shot-bg: #cfd3d8; --solid: #f6f3ec;
+    --glass: rgba(252, 249, 244, 0.94); --glass-line: rgba(0, 0, 0, 0.09);
+    --text: #2b2926; --muted: #6b665c; --hover: rgba(0, 0, 0, 0.05); --hover2: rgba(0, 0, 0, 0.07);
+    --shot-bg: #cfd3d8; --solid: #f3efe8; --alert: #d23f3f;
+    --shadow: 0 10px 30px rgba(60, 40, 20, 0.16); --code-bg: rgba(0, 0, 0, 0.06);
   }
 }
 * { box-sizing: border-box; margin: 0; }
 html, body { width: 100%; height: 100%; background: transparent; overflow: clip; user-select: none; }
-body { font-family: "Segoe UI", "Microsoft YaHei UI", system-ui, sans-serif; color: var(--text); }
+body { font-family: Manrope, "Segoe UI Variable Text", Manrope, "Segoe UI Variable Text", "Segoe UI", "Microsoft YaHei UI", system-ui, sans-serif; color: var(--text); }
 /* the stage hangs from the window's top edge: the pet stands at the top, the panels open below it (and may reach past the screen: the user moves the pet) */
 #stage { position: fixed; left: 0; right: 0; top: 0; display: flex; flex-direction: column; align-items: center; gap: 6px; padding-top: 16px; }
 #sprite { width: 100%; height: 100%; display: block; -webkit-app-region: drag; transform-origin: 50% 100%; }
 /* the status chip: motion by GSAP (motion.ts); --bgo is the opacity of its glass pill (::before) */
 #chip {
   position: relative; z-index: 2; --bgo: 1;
-  /* the island with the calm word (--ref = its width, measured in app.ts) stands centred under the pet; its left edge, so the ring, never moves: longer words only grow to the right */
-  align-self: flex-start; margin-left: calc(50% - var(--ref, 90px) / 2); max-width: calc(50% + var(--ref, 90px) / 2);
+  /* the island always stands centred under the pet: a longer word, the session count or the name grow it evenly on both sides */
+  align-self: center; max-width: calc(100% - 16px);
   display: flex; align-items: center; gap: 8px; padding: 6px 14px 6px 6px;
-  border: 1px solid transparent; border-radius: 18px;
-  font-family: "Source Serif 4", Georgia, "Microsoft YaHei UI", "Times New Roman", serif; font-size: 13.5px; white-space: nowrap;
+  border: 1px solid transparent; border-radius: 999px;
+  font-family: inherit; font-weight: 600; font-size: 13.5px; white-space: nowrap;
 }
-#chip::before { content: ""; position: absolute; inset: 0; z-index: -1; border-radius: inherit; background: var(--glass); border: 1px solid var(--glass-line); opacity: var(--bgo); }
+#chip::before { content: ""; position: absolute; inset: 0; z-index: -1; border-radius: inherit; background: var(--glass); border: 1px solid var(--glass-line); box-shadow: var(--shadow); opacity: var(--bgo); }
 #chip.attention::before { border-color: color-mix(in srgb, var(--alert) 55%, transparent); }
 /* each state has its own color: green ready, blue thinking, yellow testing, red permission / error, ... */
-#chip { --sc: #34d399; }
-#chip[data-state="thinking"] { --sc: #4f8cff; }
-#chip[data-state="reading"] { --sc: #22d3ee; }
-#chip[data-state="writing"] { --sc: #a78bfa; }
-#chip[data-state="running"] { --sc: #fb923c; }
-#chip[data-state="testing"] { --sc: #facc15; }
-#chip[data-state="waiting"], #chip[data-state="error"] { --sc: #ef4444; }
+#chip { --sc: #4ade80; }
+#chip[data-state="thinking"] { --sc: #6e9bff; }
+#chip[data-state="reading"] { --sc: #4fd1e0; }
+#chip[data-state="writing"] { --sc: #b39bff; }
+#chip[data-state="running"] { --sc: #f59e54; }
+#chip[data-state="testing"] { --sc: #f2c94c; }
+#chip[data-state="waiting"], #chip[data-state="error"] { --sc: #ff6b6b; }
 #chip[data-state="subagent"] { --sc: #f472b6; }
-#chip[data-state="done"] { --sc: #a3e635; }
-#chip[data-state="sleeping"] { --sc: #8b93a7; }
-#dot { position: relative; z-index: 1; width: 10px; height: 10px; border-radius: 50%; pointer-events: none; background: var(--sc); box-shadow: 0 0 6px color-mix(in srgb, var(--sc) 75%, transparent); flex: none; transition: background .25s; }
+#chip[data-state="done"] { --sc: #a3e36a; }
+#chip[data-state="sleeping"] { --sc: #8b90a0; }
+#dot { position: relative; z-index: 1; width: 9px; height: 9px; border-radius: 50%; pointer-events: none; background: var(--sc); box-shadow: 0 0 0 3px color-mix(in srgb, var(--sc) 20%, transparent); flex: none; transition: background .25s, box-shadow .25s; }
+#chip-count { flex: none; padding-left: 10px; border-left: 1px solid color-mix(in srgb, var(--text) 14%, transparent); color: var(--muted); font-weight: 500; font-size: 13px; }
 /* the working glow: a wider shadow painted once, only its opacity pulses (compositor-only; animating the blur radius repainted every frame) */
 #dot::after { content: ''; position: absolute; inset: 0; border-radius: 50%; box-shadow: 0 0 12px color-mix(in srgb, var(--sc) 75%, transparent); opacity: 0; transition: opacity .3s; pointer-events: none; }
 #dot.glowing::after { animation: dot-glow 1.8s ease-in-out infinite; }
@@ -56,7 +66,7 @@ body { font-family: "Segoe UI", "Microsoft YaHei UI", system-ui, sans-serif; col
 #label { display: block; overflow: hidden; text-align: left; }
 #label-t { display: inline-block; }
 #detail { color: var(--muted); font-size: 12.5px; overflow: hidden; text-overflow: ellipsis; }
-#pill, #dock-pill { display: flex; align-items: center; background: var(--glass); border: 1px solid var(--glass-line); border-radius: 22px; padding: 4px 6px; }
+#pill, #dock-pill { display: flex; align-items: center; background: var(--glass); border: 1px solid var(--glass-line); border-radius: 22px; padding: 4px 6px; box-shadow: var(--shadow); }
 #pill button, #dock-pill button { all: unset; display: grid; place-items: center; width: 40px; height: 36px; border-radius: 16px; color: var(--text); cursor: pointer; }
 #pill button:hover, #dock-pill button:hover { background: var(--hover); }
 #pill button:focus-visible, #dock-pill button:focus-visible { outline: 2px solid var(--teal); }
@@ -65,9 +75,13 @@ body { font-family: "Segoe UI", "Microsoft YaHei UI", system-ui, sans-serif; col
 [hidden] { display: none !important; }
 /* ---- hover rail: three round buttons in a column beside the pet (chat, settings, sessions); nothing under the pet moves when they appear ---- */
 #dock { position: relative; align-self: stretch; flex: none; height: 14px; margin-top: -6px; }
-#dock-pill { position: absolute; left: calc(50% + 57.5px * var(--ps, 1) + 8px); top: calc(-125px * var(--ps, 1) - 6px); flex-direction: column; gap: 8px; padding: 0; background: none; border: 0; border-radius: 0; }
-#dock-pill button { width: 38px; height: 38px; border-radius: 50%; background: var(--glass); box-shadow: inset 0 0 0 1px var(--glass-line); backdrop-filter: blur(8px); transition: background-color .15s; }
-#dock-pill button:hover { background: color-mix(in srgb, var(--glass) 78%, var(--text)); }
+#dock-pill { position: absolute; left: calc(50% + 57.5px * var(--ps, 1) + 8px); top: calc(-125px * var(--ps, 1) - 6px); flex-direction: column; gap: 6px; padding: 6px; background: none; border: 0; border-radius: 26px; box-shadow: none; isolation: isolate; --rail: 0; }
+#dock-pill::before { content: ""; position: absolute; inset: 0; z-index: -1; border-radius: inherit; background: var(--glass); border: 1px solid var(--glass-line); box-shadow: var(--shadow); backdrop-filter: blur(8px); opacity: var(--rail); pointer-events: none; }
+#dock-pill button { width: 40px; height: 40px; border-radius: 50%; background: var(--hover); transition: background-color .15s; }
+#dock-pill #btn-new { background: var(--teal); color: var(--accent-ink); }
+#dock-pill #btn-new:hover { background: color-mix(in srgb, var(--teal) 85%, white); }
+#dock-pill #btn-usage[aria-expanded="true"] { background: color-mix(in srgb, var(--glass) 70%, var(--teal)); }
+#dock-pill button:hover { background: var(--hover2); }
 #dock-pill.rest { pointer-events: none; }
 /* soft contact shadow under the pet's feet: dense core, long feathered edge; melts away when the dock opens */
 #dock::before {
@@ -83,7 +97,7 @@ body { font-family: "Segoe UI", "Microsoft YaHei UI", system-ui, sans-serif; col
 ::-webkit-scrollbar-corner { background: transparent; }
 #compose { display: flex; align-items: center; width: 384px; gap: 2px; }
 #input {
-  flex: 1; min-width: 0; padding: 0 8px; height: 36px; color: var(--text); font: 14px "Segoe UI", "Microsoft YaHei UI", system-ui, sans-serif;
+  flex: 1; min-width: 0; padding: 0 8px; height: 36px; color: var(--text); font: 14px Manrope, "Segoe UI Variable Text", "Segoe UI", "Microsoft YaHei UI", system-ui, sans-serif;
   background: transparent; border: 0; outline: 0;
 }
 #input::placeholder { color: var(--muted); opacity: 1; }
@@ -91,17 +105,18 @@ body { font-family: "Segoe UI", "Microsoft YaHei UI", system-ui, sans-serif; col
 #pill #btn-send:hover { background: color-mix(in srgb, var(--teal) 85%, white) !important; }
 #perm {
   display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 6px 8px; width: 400px; padding: 8px 10px 8px 14px;
-  background: var(--glass); border: 1px solid color-mix(in srgb, var(--alert) 55%, transparent); border-radius: 18px; font-size: 12.5px;
+  background: var(--glass); border: 1px solid color-mix(in srgb, var(--alert) 55%, transparent); border-radius: 20px; font-size: 12.5px;
+  box-shadow: var(--shadow), 0 0 0 5px color-mix(in srgb, var(--alert) 10%, transparent);
 }
-#perm-text { flex: 1 0 100%; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: ui-monospace, Consolas, monospace; font-size: 12px; color: var(--muted); }
-#perm button { all: unset; cursor: pointer; padding: 5px 10px; border-radius: 12px; font-size: 12.5px; flex: none; }
+#perm-text { flex: 1 0 100%; min-width: 0; max-height: 4.4em; overflow: hidden; overflow-wrap: anywhere; padding: 7px 10px; border-radius: 10px; background: var(--code-bg); font: 12px/1.45 ui-monospace, Consolas, monospace; color: var(--text); }
+#perm button { all: unset; cursor: pointer; padding: 7px 14px; border-radius: 12px; font-size: 12.5px; font-weight: 600; flex: none; }
 #perm #btn-allow { background: var(--teal); color: var(--accent-ink); }
 #perm #btn-deny { background: var(--hover2); color: var(--text); }
 #perm button:focus-visible { outline: 2px solid var(--text); }
 body.answer-keys #perm button[data-key]::before { content: attr(data-key); margin-right: 5px; font-size: 11px; opacity: .55; font-variant-numeric: tabular-nums; }
 /* Claude's question: the text wraps, the options are buttons */
-#perm.ask { border-color: color-mix(in srgb, var(--teal) 60%, transparent); }
-#perm.ask #perm-text { white-space: normal; font-family: inherit; font-size: 13px; color: var(--text); }
+#perm.ask { border-color: color-mix(in srgb, var(--teal) 60%, transparent); box-shadow: var(--shadow), 0 0 0 5px color-mix(in srgb, var(--teal) 10%, transparent); }
+#perm.ask #perm-text { white-space: normal; max-height: none; padding: 0; background: none; font-family: inherit; font-size: 13px; color: var(--text); }
 #perm-q { display: flex; flex-wrap: wrap; gap: 6px; justify-content: flex-end; flex: 1 0 100%; }
 #perm-q .ask-opt { background: var(--hover2); color: var(--text); }
 #perm-q .ask-opt:hover, #perm-q .ask-opt.on { background: var(--teal); color: var(--accent-ink); }
@@ -125,7 +140,7 @@ body.answer-keys #perm button[data-key]::before { content: attr(data-key); margi
 #queue .q-x:hover { color: var(--text); }
 #notice { max-width: 400px; padding: 5px 12px; border-radius: 14px; background: color-mix(in srgb, var(--alert) 22%, var(--glass)); font-size: 12.5px; }
 
-#sessions { display: flex; flex-direction: column; gap: 2px; width: 400px; max-height: 300px; overflow-y: auto; padding: 6px; background: var(--glass); border: 1px solid var(--glass-line); border-radius: 18px; }
+#sessions { display: flex; flex-direction: column; gap: 2px; width: 400px; max-height: 300px; overflow-y: auto; padding: 6px; background: var(--glass); border: 1px solid var(--glass-line); border-radius: 20px; box-shadow: var(--shadow); }
 #sessions .row { all: unset; display: flex; align-items: center; gap: 8px; padding: 4px 8px; border-radius: 12px; cursor: pointer; font-size: 13px; }
 #sessions .row:hover { background: var(--hover); }
 #sessions .row.current { background: var(--hover2); }
@@ -133,13 +148,17 @@ body.answer-keys #perm button[data-key]::before { content: attr(data-key); margi
 #sessions .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--teal); flex: none; }
 #sessions .dot.alert { background: var(--alert); }
 #sessions .dot.quiet { background: var(--muted); }
-#sessions .name { font-family: "Source Serif 4", Georgia, "Microsoft YaHei UI", serif; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#sessions .name { font-family: inherit; font-weight: 600; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 #sessions .meta { color: var(--muted); font-size: 12px; white-space: nowrap; }
 #sessions .empty { color: var(--muted); font-size: 13px; padding: 6px 8px; }
+#sessions .p-foot { display: flex; justify-content: flex-end; margin-top: 4px; padding: 6px 4px 2px; border-top: 1px solid var(--glass-line); }
+#sessions .p-btn { all: unset; cursor: pointer; padding: 5px 10px; border-radius: 10px; font-size: 12.5px; font-weight: 600; color: var(--teal); }
+#sessions .p-btn:hover { background: var(--hover); }
+#sessions .p-btn:focus-visible { outline: 2px solid var(--teal); }
 
 /* ---- chat ---- */
-#chat { display: flex; flex-direction: column; width: 400px; max-height: 280px; background: var(--glass); border: 1px solid var(--glass-line); border-radius: 18px; overflow: hidden; }
-#chat-head { display: flex; align-items: center; padding: 6px 6px 4px 14px; font-family: "Source Serif 4", Georgia, "Microsoft YaHei UI", serif; font-size: 13px; color: var(--muted); flex: none; }
+#chat { display: flex; flex-direction: column; width: 400px; max-height: 280px; background: var(--glass); border: 1px solid var(--glass-line); border-radius: 20px; box-shadow: var(--shadow); overflow: hidden; }
+#chat-head { display: flex; align-items: center; padding: 6px 6px 4px 14px; font-family: inherit; font-weight: 600; font-size: 13px; color: var(--muted); flex: none; }
 #chat-switch { all: unset; flex: 1; min-width: 0; display: flex; align-items: center; gap: 6px; cursor: pointer; padding: 2px 6px; margin-left: -6px; border-radius: 8px; color: inherit; font: inherit; }
 #chat-switch:hover, #chat-switch[aria-expanded="true"] { background: var(--hover); color: var(--text); }
 #chat-switch:focus-visible { outline: 2px solid var(--teal); }
@@ -153,7 +172,7 @@ body.answer-keys #perm button[data-key]::before { content: attr(data-key); margi
 #chat-menu .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--teal); flex: none; }
 #chat-menu .dot.alert { background: var(--alert); }
 #chat-menu .dot.quiet { background: var(--muted); }
-#chat-menu .name { font-family: "Source Serif 4", Georgia, "Microsoft YaHei UI", serif; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#chat-menu .name { font-family: inherit; font-weight: 600; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 #chat-menu .meta { color: var(--muted); font-size: 12px; white-space: nowrap; }
 #chat-head .head-btn { all: unset; display: grid; place-items: center; width: 26px; height: 22px; border-radius: 8px; cursor: pointer; color: var(--muted); }
 #chat-head .head-btn:hover { background: var(--hover); color: var(--text); }
@@ -161,10 +180,10 @@ body.answer-keys #perm button[data-key]::before { content: attr(data-key); margi
 #chat-head .head-btn:focus-visible { outline: 2px solid var(--teal); }
 #chat-list { display: flex; flex-direction: column; gap: 8px; padding: 4px 14px 12px; overflow-y: auto; user-select: text; }
 .msg { font-size: 13.5px; line-height: 1.45; overflow-wrap: anywhere; }
-.msg.user { align-self: flex-end; max-width: 86%; padding: 6px 11px; border-radius: 14px 14px 4px 14px; background: color-mix(in srgb, var(--teal) 22%, transparent); white-space: pre-wrap; }
+.msg.user { align-self: flex-end; max-width: 86%; padding: 7px 12px; border-radius: 16px 16px 4px 16px; background: color-mix(in srgb, var(--teal) 20%, transparent); white-space: pre-wrap; }
 .msg.assistant p { white-space: pre-wrap; }
 .msg.assistant p + p, .msg.assistant p + pre, .msg.assistant pre + p { margin-top: 6px; }
-.msg.assistant pre { font: 12px/1.4 ui-monospace, Consolas, monospace; background: rgba(0, 0, 0, 0.28); border-radius: 8px; padding: 8px 10px; overflow-x: auto; white-space: pre; }
+.msg.assistant pre { font: 12px/1.4 ui-monospace, Consolas, monospace; background: var(--code-bg); border-radius: 8px; padding: 8px 10px; overflow-x: auto; white-space: pre; }
 .msg.assistant code { font: 12px ui-monospace, Consolas, monospace; background: var(--hover2); border-radius: 4px; padding: 1px 4px; }
 .msg.tool { font: 11.5px ui-monospace, Consolas, monospace; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding-left: 10px; border-left: 2px solid var(--glass-line); }
 .msg.streaming > :last-child::after { content: "▍"; color: var(--teal); animation: blink 1s steps(2) infinite; }
@@ -173,7 +192,6 @@ body.answer-keys #perm button[data-key]::before { content: attr(data-key); margi
 @media (prefers-reduced-motion: reduce) { .msg.streaming > :last-child::after { animation: none; } }
 #pill #btn-stop { background: var(--alert); color: #fff; width: 34px; height: 34px; border-radius: 50%; }
 #input:disabled { opacity: 0.6; }
-@media (prefers-color-scheme: light) { .msg.assistant pre { background: rgba(0, 0, 0, 0.06); } }
 
 /* ---- /model picker, /btw notes ---- */
 #models { display: flex; flex-direction: column; gap: 2px; padding: 2px 8px 8px; max-height: 230px; overflow-y: auto; border-bottom: 1px solid var(--glass-line); flex: none; }
@@ -195,13 +213,11 @@ body.answer-keys #perm button[data-key]::before { content: attr(data-key); margi
 /* ---- subscription limits: ring next to the pet + compact panel ---- */
 #sprite-wrap { position: relative; width: calc(115px * var(--ps, 1)); height: calc(125px * var(--ps, 1)); flex: none; }
 #usage-ring {
-  all: unset; position: relative; flex: none; width: 26px; height: 26px; display: grid; place-items: center;
-  border-radius: 50%; background: var(--solid); box-shadow: inset 0 0 0 1px var(--glass-line); cursor: pointer; transition: background-color .2s; -webkit-app-region: no-drag; --ring: var(--teal);
+  all: unset; position: relative; flex: none; width: 30px; height: 30px; display: grid; place-items: center;
+  border-radius: 50%; background: var(--solid); box-shadow: inset 0 0 0 1px var(--glass-line); --ring: var(--teal);
 }
-#usage-ring:hover { background: color-mix(in srgb, var(--solid) 88%, var(--text)); }
-#usage-ring:focus-visible { outline: 2px solid var(--teal); }
 #usage-ring svg { position: absolute; inset: 0; width: 100%; height: 100%; transform: rotate(-90deg); }
-#usage-ring circle { fill: none; stroke-width: 4; }
+#usage-ring circle { fill: none; stroke-width: 3.2; }
 #usage-ring .track { stroke: color-mix(in srgb, var(--text) 30%, transparent); }
 #usage-ring .arc { stroke: var(--ring); stroke-linecap: round; }
 /* the arc keeps the user's accent colour at any level (Settings → Colours); a used-up limit only breathes */
@@ -211,15 +227,15 @@ body.answer-keys #perm button[data-key]::before { content: attr(data-key); margi
 @media (prefers-reduced-motion: reduce) { #usage-ring[data-level="full"] { animation: none; box-shadow: 0 0 6px color-mix(in srgb, var(--ring) 60%, transparent); } }
 #usage-ring[data-level="none"] .arc { stroke-dasharray: 0 100; }
 #usage-ring.stale svg { opacity: 0.8; }
-#usage-ring-text { position: relative; font: 600 8.5px "Segoe UI", "Microsoft YaHei UI", system-ui, sans-serif; color: var(--text); }
+#usage-ring-text { position: relative; font: 700 9.5px Manrope, "Segoe UI Variable Text", "Segoe UI", "Microsoft YaHei UI", system-ui, sans-serif; color: var(--text); }
 #usage-ring[data-level="none"] #usage-ring-text, #usage-ring.stale #usage-ring-text { color: var(--muted); }
-#usage { display: flex; flex-direction: column; gap: 7px; width: 290px; padding: 9px 12px 8px; background: var(--glass); border: 1px solid var(--glass-line); border-radius: 18px; }
+#usage { display: flex; flex-direction: column; gap: 7px; width: 290px; padding: 9px 12px 8px; background: var(--glass); border: 1px solid var(--glass-line); border-radius: 20px; box-shadow: var(--shadow); }
 #usage .u-head { font-size: 12.5px; color: var(--muted); }
 #usage .u-row { display: flex; flex-direction: column; gap: 4px; }
 #usage .u-label { font-size: 13px; }
 #usage .u-sub { font-size: 12px; color: var(--muted); }
-#usage .u-bar { height: 6px; border-radius: 3px; background: var(--hover2); overflow: hidden; }
-#usage .u-bar i { display: block; height: 100%; border-radius: 3px; background: var(--teal); }
+#usage .u-bar { height: 8px; border-radius: 4px; background: var(--hover2); overflow: hidden; }
+#usage .u-bar i { display: block; height: 100%; border-radius: 4px; background: var(--teal); }
 /* the bars keep the user's accent colour at any level, like the ring */
 #usage .u-val { font-size: 12px; color: var(--muted); }
 #usage .u-msg { font-size: 12.5px; line-height: 1.4; color: var(--muted); }
@@ -228,7 +244,7 @@ body.answer-keys #perm button[data-key]::before { content: attr(data-key); margi
 #usage .u-note { font-size: 11.5px; color: var(--alert); }
 
 /* ---- settings panel ---- */
-#settings { display: flex; flex-direction: column; width: 400px; height: 250px; background: var(--glass); border: 1px solid var(--glass-line); border-radius: 18px; overflow: hidden; }
+#settings { display: flex; flex-direction: column; width: 400px; height: 250px; background: var(--glass); border: 1px solid var(--glass-line); border-radius: 20px; box-shadow: var(--shadow); overflow: hidden; }
 #settings .s-head { display: flex; align-items: center; gap: 4px; padding: 8px 8px 4px 10px; flex: none; }
 #settings .s-tabs { display: flex; gap: 1px; flex: 1; min-width: 0; padding: 3px; border-radius: 999px; background: var(--hover); overflow-x: auto; scrollbar-width: none; }
 #settings .s-tabs::-webkit-scrollbar { display: none; }
@@ -240,7 +256,7 @@ body.answer-keys #perm button[data-key]::before { content: attr(data-key); margi
 #settings .s-close:hover { background: var(--hover); color: var(--text); }
 #settings .s-body { display: flex; flex-direction: column; gap: 12px; padding: 6px 14px 12px; overflow-y: auto; }
 #settings .s-section { display: flex; flex-direction: column; gap: 4px; }
-#settings .s-title { font-family: "Source Serif 4", Georgia, "Microsoft YaHei UI", serif; font-weight: 600; font-size: 13.5px; }
+#settings .s-title { font-family: inherit; font-weight: 600; font-weight: 600; font-size: 13.5px; }
 #settings .s-hint { font-size: 11.5px; line-height: 1.3; color: var(--muted); }
 #settings .s-range { accent-color: var(--teal); width: 150px; }
 #settings .s-swatches { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
@@ -315,7 +331,7 @@ body.answer-keys #perm button[data-key]::before { content: attr(data-key); margi
 #tip {
   position: fixed; z-index: 50; left: 0; top: 0; max-width: 300px; padding: 6px 10px; border-radius: 10px; pointer-events: none;
   background: var(--glass); border: 1px solid var(--glass-line); box-shadow: 0 6px 18px rgba(0,0,0,.28);
-  color: var(--text); font: 12px/1.35 "Segoe UI", "Microsoft YaHei UI", system-ui, sans-serif; overflow-wrap: anywhere;
+  color: var(--text); font: 12px/1.35 Manrope, "Segoe UI Variable Text", "Segoe UI", "Microsoft YaHei UI", system-ui, sans-serif; overflow-wrap: anywhere;
   opacity: 0; transform: translateY(-3px); transition: opacity .16s ease, transform .16s ease; backdrop-filter: blur(8px);
 }
 #tip.on { opacity: 1; transform: none; }
@@ -329,14 +345,14 @@ body.answer-keys #perm button[data-key]::before { content: attr(data-key); margi
 .c-code { display: block; margin: 4px 0 6px; padding: 6px 8px; border-radius: 8px; background: var(--hover); font: 11px/1.4 ui-monospace, Consolas, monospace; overflow-wrap: anywhere; user-select: text; }
 .c-report { white-space: pre-wrap; max-height: 180px; overflow-y: auto; }
 .c-sl { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
-/* the ring is only an arc: the numbers live in its tooltip and in the panel opened by a click */
+/* the ring is only an arc around the status dot: the numbers live in its tooltip and in the panel behind the rail's limits button */
 #usage-ring-text { display: none; }
 
 /* the settings preview of the status control (same look as the chip: dot inside the limit arc) */
-#settings .s-prev { display: flex; align-items: center; gap: 9px; align-self: flex-start; padding: 5px 16px 5px 6px; border-radius: 999px; background: var(--hover); font: 13.5px "Source Serif 4", Georgia, "Microsoft YaHei UI", serif; }
-#settings .s-prev-ring { position: relative; width: 26px; height: 26px; display: grid; place-items: center; border-radius: 50%; background: var(--solid); box-shadow: inset 0 0 0 1px var(--glass-line); }
+#settings .s-prev { display: flex; align-items: center; gap: 9px; align-self: flex-start; padding: 5px 16px 5px 6px; border-radius: 999px; background: var(--hover); font-size: 13.5px; font-weight: 600; }
+#settings .s-prev-ring { position: relative; width: 30px; height: 30px; display: grid; place-items: center; border-radius: 50%; background: var(--solid); box-shadow: inset 0 0 0 1px var(--glass-line); }
 #settings .s-prev-ring svg { position: absolute; inset: 0; width: 100%; height: 100%; transform: rotate(-90deg); }
-#settings .s-prev-ring circle { fill: none; stroke-width: 4; }
+#settings .s-prev-ring circle { fill: none; stroke-width: 3.2; }
 #settings .s-prev-ring .track { stroke: color-mix(in srgb, var(--text) 30%, transparent); }
 #settings .s-prev-ring .arc { stroke: var(--teal); stroke-linecap: round; }
-#settings .s-prev-dot { position: relative; width: 10px; height: 10px; border-radius: 50%; background: #34d399; box-shadow: 0 0 6px rgba(52, 211, 153, .75); }
+#settings .s-prev-dot { position: relative; width: 9px; height: 9px; border-radius: 50%; background: #4ade80; box-shadow: 0 0 0 3px rgba(74, 222, 128, .2); }

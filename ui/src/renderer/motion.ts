@@ -30,6 +30,7 @@ export function createMotion(p: MotionParts, reduce: boolean) {
 
   // ---- the button rail: the three round buttons slide out sideways from behind the pet, one after another ----
   const dock = gsap.timeline({ paused: true, defaults: { ease: EASE } })
+    .fromTo(p.dockPill, { '--rail': 0 }, { '--rail': 1, duration: 0.28, ease: 'power2.out' }, 0) // the glass column behind the buttons fades in with them
     .fromTo(dockButtons, { opacity: 0, x: -18, scale: 0.5 }, { opacity: 1, x: 0, scale: 1, duration: 0.34, stagger: 0.05, ease: 'back.out(1.6)' }, 0);
   dock.timeScale(speed).progress(0);
 

@@ -1,5 +1,5 @@
 import { build } from 'esbuild';
-import { copyFileSync, mkdirSync } from 'node:fs';
+import { copyFileSync, cpSync, mkdirSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { join } from 'node:path';
 
@@ -10,4 +10,5 @@ await build({ entryPoints: [join(root, 'src/renderer/app.ts')], outfile: join(di
   bundle: true, platform: 'browser', format: 'iife', target: 'chrome120' });
 copyFileSync(join(root, 'assets/icon.png'), join(dist, 'icon.png'));
 for (const f of ['index.html', 'styles.css']) copyFileSync(join(root, 'src/renderer', f), join(dist, f));
+cpSync(join(root, 'assets/fonts'), join(dist, 'fonts'), { recursive: true }); // Manrope (SIL OFL 1.1, licence next to the files)
 console.log('ui built ->', dist);

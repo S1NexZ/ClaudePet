@@ -10,7 +10,8 @@ export function localizeHtml(doc: Document = document): void {
     if (o.text !== undefined) e.textContent = o.text;
     if (o.placeholder !== undefined) e.setAttribute('placeholder', o.placeholder);
   };
-  set('usage-ring', { title: L('Лимиты плана: данных нет', 'Plan limits: no data', '套餐额度：无数据') });
+  set('usage-ring', { title: L('Лимиты плана: данных нет', 'Plan limits: no data', '套餐额度：无数据'), aria: L('Лимиты плана: данных нет', 'Plan limits: no data', '套餐额度：无数据') });
+  set('btn-usage', { title: L('Лимиты плана', 'Plan limits', '套餐额度'), aria: L('Лимиты плана', 'Plan limits', '套餐额度') });
   set('btn-allow', { text: L('Разрешить', 'Allow', '允许') });
   set('btn-deny', { text: L('Отклонить', 'Deny', '拒绝') });
   set('settings', { aria: L('Настройки ccPet', 'ccPet settings', 'ccPet 设置') });
@@ -26,5 +27,4 @@ export function localizeHtml(doc: Document = document): void {
   set('btn-new', { title: L('Чат', 'Chat', '聊天'), aria: L('Чат', 'Chat', '聊天') });
   set('btn-settings', { title: L('Настройки', 'Settings', '设置'), aria: L('Настройки', 'Settings', '设置') });
   set('btn-activity', { title: L('Сессии', 'Sessions', '会话'), aria: L('Сессии', 'Sessions', '会话') });
-  set('btn-reload', { title: L('Найти сессии заново', 'Find sessions again', '重新查找会话'), aria: L('Найти сессии заново', 'Find sessions again', '重新查找会话') });
 }
