@@ -61,14 +61,3 @@ describe('sessionLabel', () => {
     expect(sessionLabel({ state: 'thinking', subagents: 2 })).toBe('Thinking');
   });
 });
-
-describe('sessionsCount', () => {
-  it('declines the Russian word', async () => {
-    const { sessionsCount } = await import('./labels.js');
-    const { setLang } = await import('../../../shared/src/i18n.js');
-    setLang('ru');
-    expect([1, 2, 5, 11, 12, 21, 22, 25].map(sessionsCount)).toEqual(['1 сессия', '2 сессии', '5 сессий', '11 сессий', '12 сессий', '21 сессия', '22 сессии', '25 сессий']);
-    setLang('en');
-    expect(sessionsCount(3)).toBe('3 sessions');
-  });
-});

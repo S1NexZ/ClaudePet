@@ -66,10 +66,3 @@ export function statusView(snap: Snapshot | null, connected: boolean, now: numbe
     attention: s.state === 'waiting' || s.state === 'error',
   };
 }
-
-/** "3 сессии" / "5 сессий" / "3 sessions": the count in the status capsule */
-export function sessionsCount(n: number): string {
-  const m10 = n % 10, m100 = n % 100;
-  const ru = m10 === 1 && m100 !== 11 ? 'сессия' : m10 >= 2 && m10 <= 4 && (m100 < 12 || m100 > 14) ? 'сессии' : 'сессий';
-  return L(`${n} ${ru}`, `${n} ${n === 1 ? 'session' : 'sessions'}`, `${n} 个会话`);
-}

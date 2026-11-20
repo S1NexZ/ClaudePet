@@ -36,7 +36,7 @@ body { font-family: Manrope, "Segoe UI Variable Text", Manrope, "Segoe UI Variab
 /* the status chip: motion by GSAP (motion.ts); --bgo is the opacity of its glass pill (::before) */
 #chip {
   position: relative; z-index: 2; --bgo: 1;
-  /* the island always stands centred under the pet: a longer word, the session count or the name grow it evenly on both sides */
+  /* the island always stands centred under the pet: a longer word or the session name grow it evenly on both sides */
   align-self: center; max-width: calc(100% - 16px);
   display: flex; align-items: center; gap: 8px; padding: 6px 14px 6px 6px;
   border: 1px solid transparent; border-radius: 999px;
@@ -56,7 +56,6 @@ body { font-family: Manrope, "Segoe UI Variable Text", Manrope, "Segoe UI Variab
 #chip[data-state="done"] { --sc: #a3e36a; }
 #chip[data-state="sleeping"] { --sc: #8b90a0; }
 #dot { position: relative; z-index: 1; width: 9px; height: 9px; border-radius: 50%; pointer-events: none; background: var(--sc); box-shadow: 0 0 0 3px color-mix(in srgb, var(--sc) 20%, transparent); flex: none; transition: background .25s, box-shadow .25s; }
-#chip-count { flex: none; padding-left: 10px; border-left: 1px solid color-mix(in srgb, var(--text) 14%, transparent); color: var(--muted); font-weight: 500; font-size: 13px; }
 /* the working glow: a wider shadow painted once, only its opacity pulses (compositor-only; animating the blur radius repainted every frame) */
 #dot::after { content: ''; position: absolute; inset: 0; border-radius: 50%; box-shadow: 0 0 12px color-mix(in srgb, var(--sc) 75%, transparent); opacity: 0; transition: opacity .3s; pointer-events: none; }
 #dot.glowing::after { animation: dot-glow 1.8s ease-in-out infinite; }

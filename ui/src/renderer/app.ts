@@ -1,4 +1,4 @@
-import { statusView, sessionLabel, formatElapsed, hostTag, sessionsCount } from './labels.js';
+import { statusView, sessionLabel, formatElapsed, hostTag } from './labels.js';
 import { createConnectionsTab, type ConnectionsHost } from './connectionsTab.js';
 import { pinSnapshot, focusSnapshot } from './view.js';
 import { sessionRows, nextChatId, isQuiet } from './switcher.js';
@@ -785,11 +785,6 @@ async function main() {
     if (!dirty && t - lastHeavy < 1000) { schedule(t); return; }
     dirty = false;
     lastHeavy = t;
-    // how many sessions the pet follows, after a divider in the capsule (only when there is more than one)
-    const nSess = raw?.sessions?.length ?? 0, countEl = $('chip-count');
-    const countText = nSess > 1 ? sessionsCount(nSess) : '';
-    if (countEl.textContent !== countText) countEl.textContent = countText;
-    show(countEl, nSess > 1);
     const pp = s?.pendingPermission;
     show($('perm'), !!pp);
     if (pp) {
