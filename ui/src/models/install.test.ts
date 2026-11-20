@@ -3,6 +3,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, readdirSync, existsSync, readFil
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { validatePack, installModelFromZip, installModelFromDir, removeModel, scanPetFolder, slugFromName, ModelError, type InstallProgress } from './install.js';
+import { parseLayout } from './images.js';
 import { readZip } from './zip.js';
 import { listModels } from './registry.js';
 import { makeZip, goodPack, fakeWebp, fakePng } from './testZip.js';
@@ -12,6 +13,28 @@ const dirs = () => ({ userDir: join(tmp(), 'user'), bundledDir: tmp() });
 const zipFile = (entries: Parameters<typeof makeZip>[0], name = 'pack.codex-pet.zip') => { const f = join(tmp(), name); writeFileSync(f, makeZip(entries)); return f; };
 const code = (f: () => unknown) => { try { f(); } catch (e) { return (e as ModelError).code; } return 'NO ERROR'; };
 const validate = (entries: Parameters<typeof makeZip>[0], name = 'x.zip') => validatePack(readZip(makeZip(entries)), name);
+
+describe('validatePack layout packs', () => {
+  const layout = { cell: { w: 64, h: 64 }, cols: 4, rows: [{ id: 'idle', frames: 4, loopMs: 2400 }, { id: 'done', frames: 2 }] };
+  const pack = (l: unknown, img = fakeWebp(256, 128)) => goodPack({ 'pet.json': JSON.stringify({ id: 'lay', layout: l }), 'spritesheet.webp': img });
+  it('accepts a matching layout pack, rejects wrong size and bad layouts', () => {
+    expect(validate(pack(layout)).id).toBe('lay');
+    expect(code(() => validate(pack(layout, fakeWebp(256, 192))))).toBe('bad-size');
+    expect(code(() => validate(pack({ ...layout, cols: 99 })))).toBe('bad-layout');
+    expect(code(() => validate(pack({ ...layout, rows: [layout.rows[0], layout.rows[0]] })))).toBe('bad-layout');
+    expect(code(() => validate(pack({ ...layout, cell: { w: 512, h: 512 }, cols: 16, rows: [layout.rows[0]] }, fakeWebp(8192, 512))))).toBe('bad-layout');
+  });
+});
+
+describe('parseLayout', () => {
+  const ok = { cell: { w: 64, h: 64 }, cols: 4, rows: [{ id: 'idle', frames: 4 }] };
+  it('null without layout, parsed with, throws on rule violations', () => {
+    expect(parseLayout({})).toBeNull();
+    expect(parseLayout({ layout: ok })).toEqual(ok);
+    for (const l of [{ ...ok, cell: { w: 63, h: 64 } }, { ...ok, cols: 0 }, { ...ok, rows: [] }, { ...ok, rows: [{ id: 'A', frames: 1 }] }, { ...ok, rows: [{ id: 'a', frames: 5 }] }, { ...ok, rows: [{ id: 'a', frames: 1, loopMs: 100 }] }, 5])
+      expect(() => parseLayout({ layout: l })).toThrow();
+  });
+});
 
 describe('validatePack', () => {
   it('accepts a good pack and returns its id and name', () => {

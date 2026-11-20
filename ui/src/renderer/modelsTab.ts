@@ -1,6 +1,6 @@
 import { removeLightFringe } from '../sprite/fringe.js';
 import { L } from '../../../shared/src/i18n.js';
-export interface PetData { id: string; name: string; imageUrl: string; cell: { w: number; h: number }; rows: { frames: number }[]; tweaks?: { trimHalfWidth?: Record<string, number>; lightFringe?: 'remove' | 'dark'; fringeCream?: boolean; stabilize?: boolean } }
+export interface PetData { id: string; name: string; imageUrl: string; cell: { w: number; h: number }; rows: { frames: number; id?: string; loopMs?: number | null }[]; tweaks?: { trimHalfWidth?: Record<string, number>; lightFringe?: 'remove' | 'dark'; fringeCream?: boolean; stabilize?: boolean } }
 export interface ModelRow { id: string; name: string; description: string; source: string; bundled: boolean; active: boolean }
 interface CodexScan { dir: string; exists: boolean; found: Array<{ id: string; name: string; installed: boolean }> }
 interface OpResult { ok: boolean; canceled?: boolean; error?: string; models?: ModelRow[]; model?: { id: string; name: string }; pet?: PetData | null }

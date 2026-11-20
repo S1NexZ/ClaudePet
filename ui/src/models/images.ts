@@ -14,3 +14,35 @@ export function imageSize(b: Buffer): { w: number; h: number; format: 'webp' | '
 export const SHEET = { w: 1536, h: 1872 } as const;
 export const SHEET_V2_H = 2288;
 export const sheetSizeOk = (s: { w: number; h: number }): boolean => s.w === SHEET.w && (s.h === SHEET.h || s.h === SHEET_V2_H);
+
+export interface LayoutRowMeta { id: string; frames: number; loopMs?: number }
+export interface Layout { cell: { w: number; h: number }; cols: number; rows: LayoutRowMeta[] }
+export const LAYOUT_MAX_SIDE = 6144;
+const isInt = (v: unknown, lo: number, hi: number): v is number => typeof v === 'number' && Number.isInteger(v) && v >= lo && v <= hi;
+
+/** pet.json "layout" (optional): null when absent, throws Error on a malformed one. Same rules as the Rust side. */
+export function parseLayout(meta: unknown): Layout | null {
+  const l = (meta as { layout?: any } | null)?.layout;
+  if (l === undefined || l === null) return null;
+  const bad = (m: string): never => { throw new Error(`bad layout: ${m}`); };
+  if (typeof l !== 'object' || Array.isArray(l)) bad('not an object');
+  const { cell, cols, rows } = l;
+  if (!cell || !isInt(cell.w, 64, 512) || !isInt(cell.h, 64, 512)) bad('cell');
+  if (!isInt(cols, 1, 16)) bad('cols');
+  if (!Array.isArray(rows) || rows.length < 1 || rows.length > 32) bad('rows');
+  const seen = new Set<string>();
+  const out = (rows as any[]).map((r): LayoutRowMeta => {
+    if (!r || typeof r.id !== 'string' || !/^[a-z0-9_-]{1,24}$/.test(r.id) || seen.has(r.id)) return bad('row id');
+    seen.add(r.id);
+    if (!isInt(r.frames, 1, cols)) return bad(`frames of ${r.id}`);
+    if (r.loopMs !== undefined && !isInt(r.loopMs, 200, 20000)) return bad(`loopMs of ${r.id}`);
+    return r.loopMs === undefined ? { id: r.id, frames: r.frames } : { id: r.id, frames: r.frames, loopMs: r.loopMs };
+  });
+  return { cell: { w: cell.w, h: cell.h }, cols, rows: out };
+}
+
+/** Pixel size a layout's sheet must have, or null when it exceeds the per-side limit. */
+export const layoutSheetSize = (l: Layout): { w: number; h: number } | null => {
+  const w = l.cols * l.cell.w, h = l.rows.length * l.cell.h;
+  return w > LAYOUT_MAX_SIDE || h > LAYOUT_MAX_SIDE ? null : { w, h };
+};

@@ -38,4 +38,12 @@ describe('loadPet', () => {
     writeFileSync(join(plain, 'tweaks.json'), '{broken');
     expect((await loadPet(plain)).tweaks).toEqual({});
   });
+  it('a layout pack gives its own cell and rows', async () => {
+    const d = mkdtempSync(join(tmpdir(), 'pet-'));
+    writeFileSync(join(d, 'pet.json'), JSON.stringify({ id: 'x', spritesheetPath: 's.webp', layout: { cell: { w: 64, h: 80 }, cols: 4, rows: [{ id: 'idle', frames: 4, loopMs: 2400 }] } }));
+    writeFileSync(join(d, 's.webp'), '');
+    const pet = await loadPet(d);
+    expect(pet.cell).toEqual({ w: 64, h: 80 });
+    expect(pet.rows).toEqual([{ id: 'idle', frames: 4, loopMs: 2400 }]);
+  });
 });

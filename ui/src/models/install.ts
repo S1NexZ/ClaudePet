@@ -3,7 +3,7 @@ import { join, resolve, sep, basename, extname } from 'node:path';
 import { randomBytes } from 'node:crypto';
 import { MODEL_ID, listModels, type ModelInfo } from './registry.js';
 import { readZip, ModelError, type ZipEntry } from './zip.js';
-import { imageSize, SHEET, SHEET_V2_H, sheetSizeOk } from './images.js';
+import { imageSize, SHEET, SHEET_V2_H, sheetSizeOk, parseLayout, layoutSheetSize } from './images.js';
 import { L } from '../../../shared/src/i18n.js';
 
 export { ModelError };
@@ -58,7 +58,12 @@ export function validatePack(raw: ZipEntry[], fallbackId = ''): PackFiles {
   if (sheet.length > MAX_SHEET) fail('too-big', L('Лист спрайтов слишком большой.', 'The sprite sheet is too large.', '雪碧图太大。'));
   const size = imageSize(sheet);
   if (!size) fail('bad-image', L(`«${sheetName}» не является корректным WebP или PNG.`, `“${sheetName}” is not a valid WebP or PNG.`, `“${sheetName}”不是有效的 WebP 或 PNG。`));
-  if (!sheetSizeOk(size!))
+  let layout: ReturnType<typeof parseLayout> = null;
+  try { layout = parseLayout(meta); } catch (e) { fail('bad-layout', L(`Неверный раздел layout в pet.json (${(e as Error).message}).`, `Invalid "layout" in pet.json (${(e as Error).message}).`, `pet.json 中的 layout 无效（${(e as Error).message}）。`)); }
+  const want = layout ? layoutSheetSize(layout) : null;
+  if (layout && !want) fail('bad-layout', L('Лист по layout больше 6144 px по стороне.', 'The layout sheet exceeds 6144 px per side.', '按 layout 计算的图片边长超过 6144 px。'));
+  if (want) { if (size!.w !== want.w || size!.h !== want.h) fail('bad-size', L(`Размер листа ${size!.w}×${size!.h}, а layout требует ${want.w}×${want.h}.`, `The sheet is ${size!.w}×${size!.h}, but the layout requires ${want.w}×${want.h}.`, `图片尺寸为 ${size!.w}×${size!.h}，但 layout 需要 ${want.w}×${want.h}。`)); }
+  else if (!sheetSizeOk(size!))
     fail('bad-size', L(`Размер листа ${size!.w}×${size!.h}, а нужен ${SHEET.w}×${SHEET.h} или ${SHEET.w}×${SHEET_V2_H} (сетка 8 столбцов × 9 или 11 строк ячеек 192×208, как у паков Codex).`, `The sheet is ${size!.w}×${size!.h}, but ${SHEET.w}×${SHEET.h} or ${SHEET.w}×${SHEET_V2_H} is required (8 columns × 9 or 11 rows of 192×208 cells, like Codex packs).`, `图片尺寸为 ${size!.w}×${size!.h}，但需要 ${SHEET.w}×${SHEET.h} 或 ${SHEET.w}×${SHEET_V2_H}（8 列 × 9 或 11 行，每格 192×208，与 Codex 宠物包相同）。`));
 
   const allowed = new Set(['pet.json', sheetName, 'tweaks.json']);

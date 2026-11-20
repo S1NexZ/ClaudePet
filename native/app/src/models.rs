@@ -59,6 +59,33 @@ pub fn image_size(b: &[u8]) -> Option<ImageSize> {
     }
     None
 }
+#[derive(Debug, Clone, PartialEq)]
+pub struct LayoutRow { pub id: String, pub frames: u32, pub loop_ms: Option<u32> }
+#[derive(Debug, Clone, PartialEq)]
+pub struct Layout { pub cell_w: u32, pub cell_h: u32, pub cols: u32, pub rows: Vec<LayoutRow> }
+impl Layout { pub fn sheet(&self) -> (u32, u32) { (self.cols * self.cell_w, self.rows.len() as u32 * self.cell_h) } }
+const MAX_LAYOUT_SIDE: u32 = 6144;
+
+/// Reads the optional `layout` key of pet.json: Ok(None) when absent, Err(reason) when malformed.
+pub fn parse_layout(meta: &serde_json::Value) -> Result<Option<Layout>, String> {
+    let Some(l) = meta.get("layout") else { return Ok(None) };
+    let int = |v: Option<&serde_json::Value>, lo: u64, hi: u64, what: &str| -> Result<u32, String> {
+        match v.and_then(|v| v.as_u64()) { Some(n) if (lo..=hi).contains(&n) => Ok(n as u32), _ => Err(format!("{what} must be an integer {lo}..{hi}")) }
+    };
+    let (cell_w, cell_h) = (int(l.pointer("/cell/w"), 64, 512, "cell.w")?, int(l.pointer("/cell/h"), 64, 512, "cell.h")?);
+    let cols = int(l.get("cols"), 1, 16, "cols")?;
+    let Some(rows) = l.get("rows").and_then(|r| r.as_array()).filter(|r| (1..=32).contains(&r.len())) else { return Err("rows must be an array of 1..32 entries".into()) };
+    let mut out: Vec<LayoutRow> = Vec::new();
+    for r in rows {
+        let id = r.get("id").and_then(|v| v.as_str()).filter(|s| !s.is_empty() && s.len() <= 24 && s.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_' || b == b'-')).ok_or("row id must be 1..24 chars of a-z0-9_-")?;
+        if out.iter().any(|o| o.id == id) { return Err(format!("duplicate row id {id}")); }
+        let frames = int(r.get("frames"), 1, cols as u64, "frames")?;
+        let loop_ms = match r.get("loopMs") { None | Some(serde_json::Value::Null) => None, v => Some(int(v, 200, 20000, "loopMs")?) };
+        out.push(LayoutRow { id: id.to_string(), frames, loop_ms });
+    }
+    Ok(Some(Layout { cell_w, cell_h, cols, rows: out }))
+}
+
 /// The atlas the pet's animator is built for: 8 columns of 192x208 cells and 9 rows (1536x1872) or, for v2 packs, 11 rows (1536x2288).
 pub const SHEET: (u32, u32) = (1536, 1872);
 pub const SHEET_V2_H: u32 = 2288;
@@ -332,6 +359,14 @@ pub fn validate_pack(raw: Vec<ZipEntry>, fallback_id: &str, lang: &str) -> Resul
     let Some(size) = image_size(sheet) else {
         return Err(err!(lang, "bad-image", format!("«{sheet_name}» не является корректным WebP или PNG."), format!("“{sheet_name}” is not a valid WebP or PNG."), format!("“{sheet_name}”不是有效的 WebP 或 PNG。")));
     };
+    let layout = parse_layout(&serde_json::Value::Object(meta.clone())).map_err(|e| err!(lang, "bad-layout", format!("Некорректный layout в pet.json: {e}."), format!("Invalid layout in pet.json: {e}."), format!("pet.json 中的 layout 无效：{e}。")))?;
+    if let Some(l) = &layout {
+        let (ew, eh) = l.sheet();
+        if ew > MAX_LAYOUT_SIDE || eh > MAX_LAYOUT_SIDE || (size.w, size.h) != (ew, eh) {
+            let (w, h) = (size.w, size.h);
+            return Err(err!(lang, "bad-size", format!("Размер листа {w}×{h}, а по layout нужен {ew}×{eh} (не больше {MAX_LAYOUT_SIDE} px по стороне)."), format!("The sheet is {w}×{h}, but the layout requires {ew}×{eh} (at most {MAX_LAYOUT_SIDE} px per side)."), format!("图片尺寸为 {w}×{h}，但 layout 需要 {ew}×{eh}（每边不超过 {MAX_LAYOUT_SIDE} 像素）。")));
+        }
+    } else
     if !sheet_size_ok(&size) {
         let (w, h, v2) = (size.w, size.h, SHEET_V2_H);
         return Err(err!(lang, "bad-size", format!("Размер листа {w}×{h}, а нужен {}×{} или {}×{v2} (сетка 8 столбцов × 9 или 11 строк ячеек 192×208, как у паков Codex).", SHEET.0, SHEET.1, SHEET.0), format!("The sheet is {w}×{h}, but {}×{} or {}×{v2} is required (8 columns × 9 or 11 rows of 192×208 cells, like Codex packs).", SHEET.0, SHEET.1, SHEET.0), format!("图片尺寸为 {w}×{h}，但需要 {}×{} 或 {}×{v2}（8 列 × 9 或 11 行，每格 192×208，与 Codex 宠物包相同）。", SHEET.0, SHEET.1, SHEET.0)));
@@ -681,6 +716,24 @@ mod tests {
         assert_eq!(v("{}", b"not an image at all, just text".to_vec()), "bad-image");
         assert_eq!(v("{}", fake_webp(100, 100)), "bad-size");
         assert_eq!(ecode(validate(&with(good_pack(), ze("tweaks.json", "{broken")), "x.zip")), "bad-tweaks");
+    }
+
+    #[test]
+    fn validate_layout_packs() {
+        let pack = |layout: &str, w: u32, h: u32| ecode(validate(&good_pack_json(&format!(r#"{{"id":"x","layout":{layout}}}"#), fake_webp(w, h)), "x.zip"));
+        let lay = |rows: &str, cols: u32| format!(r#"{{"cell":{{"w":384,"h":416}},"cols":{cols},"rows":{rows}}}"#);
+        let two = r#"[{"id":"idle","frames":4,"loopMs":2400},{"id":"done","frames":6}]"#;
+        assert_eq!(pack(&lay(two, 8), 3072, 832), "NO ERROR");
+        assert_eq!(pack(&lay(two, 8), 3072, 1248), "bad-size");
+        assert_eq!(pack(&lay(r#"[{"id":"a","frames":1},{"id":"a","frames":1}]"#, 8), 3072, 832), "bad-layout");
+        assert_eq!(pack(&lay(r#"[{"id":"a","frames":9}]"#, 8), 3072, 416), "bad-layout");
+        assert_eq!(pack(&lay(r#"[{"id":"A","frames":1}]"#, 8), 3072, 416), "bad-layout");
+        // 16 cols x 512 = 8192 > 6144
+        assert_eq!(pack(r#"{"cell":{"w":512,"h":512},"cols":16,"rows":[{"id":"a","frames":1}]}"#, 8192, 512), "bad-size");
+        let m: serde_json::Value = serde_json::from_str(&format!(r#"{{"layout":{}}}"#, lay(two, 8))).unwrap();
+        let l = parse_layout(&m).unwrap().unwrap();
+        assert_eq!((l.cell_w, l.rows[0].loop_ms, l.rows[1].loop_ms), (384, Some(2400), None));
+        assert_eq!(parse_layout(&serde_json::json!({})).unwrap(), None);
     }
 
     #[test]
